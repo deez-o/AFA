@@ -76,6 +76,9 @@ function coverBookings(blocks,crewId){
   return out;
 }
 
+/* small label for crews marked as subcontractors (Resources → Crews → edit) */
+function SubTag(){return html`<span class="shrink-0 text-[9.5px] font-bold tracking-wide uppercase px-1 py-[1px] rounded border border-line text-muted" title="Subcontractor crew">Sub</span>`}
+
 /* Day jobs take their crew's colour; night works are always red. */
 const CREW_HUES=[205,150,275,40,185,235,95,25,170,300,60,220];
 function blockStyle(b,data){
@@ -498,9 +501,9 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
   const [f,setF]=useState({name:'',sub:'',crewId:''});
   const [confirmId,setConfirmId]=useState(null);
   const [draft,setDraft]=useState({name:'',sub:''});
-  useEffect(()=>{const r=data.resources.find(x=>x.id===renameId);if(r){setDraft({name:r.name,sub:r.sub,hue:r.hue});setQ('');setConfirmId(null)}},[renameId]);
+  useEffect(()=>{const r=data.resources.find(x=>x.id===renameId);if(r){setDraft({name:r.name,sub:r.sub,hue:r.hue,subbie:!!r.subbie});setQ('');setConfirmId(null)}},[renameId]);
   const saveRename=e=>{e.preventDefault();if(!draft.name.trim())return;
-    patch(renameId,{name:draft.name.trim(),sub:draft.sub.trim(),hue:draft.hue});setRenameId(null)};
+    patch(renameId,{name:draft.name.trim(),sub:draft.sub.trim(),hue:draft.hue,...(data.resources.find(x=>x.id===renameId)?.type==='crew'?{subbie:!!draft.subbie}:{})});setRenameId(null)};
   const crews=data.resources.filter(r=>r.type==='crew');
   const list=data.resources.filter(r=>r.type===tab&&(r.name+' '+r.sub).toLowerCase().includes(q.toLowerCase()));
   const crewName=id=>crews.find(c=>c.id===id)?.name;
@@ -597,6 +600,9 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
               <label class="sr-only" for=${'rn-sub-'+r.id}>${r.type==='crew'?'Type of work':r.type==='person'?'Role':'Description'}</label>
               <input id=${'rn-sub-'+r.id} list=${r.type==='crew'?'work-types':undefined} class="field field-sm" style=${{height:30,fontSize:13}} value=${draft.sub}
                 placeholder=${r.type==='crew'?'Type of work':r.type==='person'?'Role':'Description'} onInput=${e=>setDraft({...draft,sub:e.target.value})}/>
+              ${r.type==='crew'&&html`<label class="inline-flex items-center gap-1.5 text-[12.5px] cursor-pointer pt-0.5">
+                <input id=${'rn-subbie-'+r.id} type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!draft.subbie} onChange=${e=>setDraft({...draft,subbie:e.target.checked})}/>
+                Subcontractor crew</label>`}
               ${r.type==='crew'&&html`<div class="flex flex-col gap-1 pt-0.5">
                 <span class="label" id=${'rn-col-'+r.id}>Crew colour</span>
                 <div class="flex flex-wrap gap-1.5" role="radiogroup" aria-labelledby=${'rn-col-'+r.id}>
@@ -615,7 +621,7 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
         return [hdr,html`<li key=${r.id} class=${'group rounded-lg px-2 py-2 flex items-start gap-3 hover:bg-sunken '+(r.visible?'':'opacity-55')}>
           <${Badge} r=${r}/>
           <div class="min-w-0 flex-1">
-            <div class="font-medium truncate">${r.name}</div>
+            <div class="font-medium truncate flex items-center gap-1.5"><span class="truncate">${r.name}</span>${r.type==='crew'&&r.subbie&&html`<${SubTag}/>`}</div>
             ${meta}
           </div>
           ${confirmId===r.id
@@ -797,7 +803,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
         ${Grip('Drag to move '+r.name,e=>startReo(e,'row',r.id,scopeOf(r)),'lg:opacity-0 group-hover/name:opacity-100')}
         <${Badge} r=${r} size=${28}/>
         <div class="min-w-0">
-          <div class="font-medium text-[13px] truncate">${r.name}</div>
+          <div class="font-medium text-[13px] truncate flex items-center gap-1.5"><span class="truncate">${r.name}</span>${r.type==='crew'&&r.subbie&&html`<${SubTag}/>`}</div>
           <div class="text-[11.5px] text-muted truncate">${r.type==='crew'?`${ppl} staff · ${pl} machine${pl===1?'':'s'}`:`${r.sub}${crew?' · '+crew.name:''}`}</div>
         </div>
         <button class="ml-auto p-1 rounded text-muted hover:text-ink shrink-0 lg:opacity-0 group-hover/name:opacity-100 focus:opacity-100" onClick=${()=>onRename(r)} aria-label=${'Edit '+r.name} title="Edit name">${Icon.pencil}</button>
@@ -2014,7 +2020,7 @@ function describeChanges(a,b){
       if(!p){out.push({type:'resource',text:`${w} added: ${r.name}`,sub:r.sub||''});return}
       if(same(strip(p),strip(r)))return;
       const parts=[];if(p.name!==r.name)parts.push(`was ${p.name}`);if((p.sub||'')!==(r.sub||''))parts.push(`now ${r.sub||'—'}`);
-      if((p.crewId||'')!==(r.crewId||''))parts.push(r.crewId?`now in ${rname(b,r.crewId)}`:'no crew');if(p.hue!==r.hue)parts.push('colour');
+      if((p.crewId||'')!==(r.crewId||''))parts.push(r.crewId?`now in ${rname(b,r.crewId)}`:'no crew');if(p.hue!==r.hue)parts.push('colour');if(!!p.subbie!==!!r.subbie)parts.push(r.subbie?'now a subcontractor':'no longer a subcontractor');
       out.push({type:'resource',text:`${w} changed: ${r.name}`,sub:parts.join(', ')})});
     a.resources.forEach(p=>{if(!bm.has(p.id))out.push({type:'resource',text:`${RES_WORD[p.type]||'Resource'} removed: ${p.name}`,sub:''})});
   }
@@ -2482,7 +2488,7 @@ function drawProgram(doc,data,{b,k,crewId}){
   const away=id=>data.blocks.some(x=>x.resourceId===id&&KINDS[x.kind]&&KINDS[x.kind].away&&k>=x.start&&k<=x.end);
   const staff=data.resources.filter(r=>r.type==='person'&&r.crewId===crewId&&!away(r.id));
   const st=fmtTime(q.start);
-  const people=[[{t:crew.name,bold:true},'SITE',crew.sub||'',st],...staff.map(p=>[p.name,'SITE',p.sub||'',st])].slice(0,10);
+  const people=[[{t:crew.name,bold:true},'SITE',crew.subbie?`${crew.sub||''}${crew.sub?' - ':''}Subcontractor`:(crew.sub||''),st],...staff.map(p=>[p.name,'SITE',p.sub||'',st])].slice(0,10);
   while(people.length<5)people.push(['','','','']);
   people.forEach(v=>{ly=row(LX,ly,PC,v)});
 
