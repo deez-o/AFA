@@ -2387,6 +2387,8 @@ function ProgramShifts({f,set,data}){
     const nt={...(copy?{co:copy.co||'',w:copy.w||''}:{}),loc:loc||''};
     if(at<0)list.push(nt);else list.splice(at+1,0,nt);updT(retime(list))};
   const removeTruck=j=>updT(retime(realTrucks.filter((_,x)=>x!==j)));
+  /* (a plain button, not a form: this tab sits inside the booking's form, and a nested form would save and close the booking) */
+  const addNewLoc=()=>{const v=newLoc.trim();if(!v)return;addTruck(v);setNewLoc('')};
   const setLoc=(key,p)=>{const nl={...lt,[key]:{...(lt[key]||{}),...p}};upd({locTimes:nl,trucks:retime(realTrucks,nl)})};
   const setS=(j,p)=>{const s0={...subs[j],...p};if(!('time' in p)&&!s0.time&&subHas(s0)&&q.start)s0.time=q.start;upd({subs:subs.map((s,x)=>x===j?s0:s)})};
   const setStart=v=>{const old=q.start||'';
@@ -2463,11 +2465,12 @@ function ProgramShifts({f,set,data}){
               </div>
             </div>
           </div>`})})()}
-      <form class="flex flex-wrap items-center gap-2" onSubmit=${e=>{e.preventDefault();const v=newLoc.trim();if(!v)return;addTruck(v);setNewLoc('')}}>
+      <div class="flex flex-wrap items-center gap-2">
         <span class="text-[12px] text-muted">${realTrucks.length?'Add trucks at another location':'Add trucks at'}</span>
-        <input id="pg-newloc" class="field field-sm" style=${{...fs,width:200}} list="dl-loc" placeholder="Location, e.g. SCA" value=${newLoc} onInput=${e=>setNewLoc(e.target.value)} aria-label="Location for new trucks"/>
-        <button type="submit" class="btn" style=${{height:30}} disabled=${!newLoc.trim()}>${Icon.plus} Add</button>
-      </form>
+        <input id="pg-newloc" class="field field-sm" style=${{...fs,width:200}} list="dl-loc" placeholder="Location, e.g. SCA" value=${newLoc} onInput=${e=>setNewLoc(e.target.value)} aria-label="Location for new trucks"
+          onKeyDown=${e=>{if(e.key==='Enter'){e.preventDefault();addNewLoc()}}}/>
+        <button type="button" class="btn" style=${{height:30}} disabled=${!newLoc.trim()} onClick=${addNewLoc}>${Icon.plus} Add</button>
+      </div>
     </div>`}
 
     <div class="grid gap-1.5">
