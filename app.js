@@ -2380,7 +2380,7 @@ function ProgramShifts({f,set,data}){
   /* opens on today's shift (or the next one, or the last one if the job is finished) */
   const defShift=()=>{const t=iso(TODAY);return dates.includes(t)?t:(dates.find(k=>k>=t)||dates[dates.length-1]||'')};
   const [sel,setSel]=useState(defShift);
-  const [editPastP,setEditPastP]=useState(false);const [newLoc,setNewLoc]=useState('');   /* before any early return: hooks must always run */
+  const [editPastP,setEditPastP]=useState(false);const [newLoc,setNewLoc]=useState('');const [ldrag,setLdrag]=useState(null);   /* before any early return: hooks must always run */
   const k=dates.includes(sel)?sel:defShift();
   if(!k)return html`<div class="text-[12.5px] text-muted">This booking has no shifts yet. Check the dates and the weekend ticks.</div>`;
   const q=sd[k]||{};const i=dates.indexOf(k);
@@ -2412,6 +2412,15 @@ function ProgramShifts({f,set,data}){
     if(at<0)list.push(nt);else list.splice(at+1,0,nt);updT(retime(list))};
   const removeTruck=j=>updT(retime(realTrucks.filter((_,x)=>x!==j)));
   /* (a plain button, not a form: this tab sits inside the booking's form, and a nested form would save and close the booking) */
+  /* drag a location box to change the order of the locations (the daily program lists them in this order) */
+  const lStart=(e,key)=>{if(e.button!==undefined&&e.button!==0)return;e.preventDefault();try{e.currentTarget.setPointerCapture(e.pointerId)}catch(x){}setLdrag({key,over:null,after:false})};
+  const lMove=e=>{if(!ldrag)return;const el=document.elementFromPoint(e.clientX,e.clientY);const t=el&&el.closest('[data-locbox]');
+    if(!t){if(ldrag.over!==null)setLdrag({...ldrag,over:null});return}const over=t.getAttribute('data-locbox');const bx=t.getBoundingClientRect();const after=e.clientY>bx.top+bx.height/2;
+    if(over!==ldrag.over||after!==ldrag.after)setLdrag({...ldrag,over,after})};
+  const lEnd=()=>{const m=ldrag;setLdrag(null);if(!m||m.over===null||m.over===m.key)return;
+    const order=[];realTrucks.forEach(t=>{const kk=lkey(t);if(!order.includes(kk))order.push(kk)});
+    const o=order.filter(x=>x!==m.key);let i=o.indexOf(m.over);if(i<0)return;if(m.after)i++;o.splice(i,0,m.key);
+    updT(retime(o.flatMap(kk=>realTrucks.filter(t=>lkey(t)===kk))))};
   const addNewLoc=()=>{const v=newLoc.trim();if(!v)return;addTruck(v);setNewLoc('')};
   const setLoc=(key,p)=>{const nl={...lt,[key]:{...(lt[key]||{}),...p}};upd({locTimes:nl,trucks:retime(realTrucks,nl)})};
   const setS=(j,p)=>{const s0={...subs[j],...p};if(!('time' in p)&&!s0.time&&subHas(s0)&&q.start)s0.time=q.start;upd({subs:subs.map((s,x)=>x===j?s0:s)})};
@@ -2455,11 +2464,15 @@ function ProgramShifts({f,set,data}){
     <fieldset disabled=${lockedP} class="grid gap-4 border-0 p-0 m-0 min-w-0" style=${lockedP?{opacity:.5}:null}>
     ${!sealJob&&html`<div class="grid gap-2">
       <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Trucks</span><span class="text-[12px] text-muted tnum">${tl.length} · ${fmtN(totT)}T</span><span class="flex-1 h-px bg-line self-center"></span></div>
-      <div class="text-[12px] text-muted -mt-1">Trucks are grouped by location. Each location has a first truck time and a gap: its trucks follow on in order. Pick a time on a truck to set it by hand.</div>
+      <div class="text-[12px] text-muted -mt-1">Trucks are grouped by location. Each location has a first truck time and a gap: its trucks follow on in order. Pick a time on a truck to set it by hand. Drag a location by its ⋮⋮ handle to change the order they appear on the daily program.</div>
       ${(()=>{const groups=[];realTrucks.forEach((t,j)=>{const kk=lkey(t);let g=groups.find(x=>x.key===kk);if(!g){g={key:kk,label:(t.loc||'').trim(),items:[]};groups.push(g)}g.items.push({t,j})});
         return groups.map(g=>{const tT=g.items.reduce((a,{t})=>a+truckT(t.w),0);const sw=g.label?locColorOf(data,g.key===(f.address||'').trim().toLowerCase()?'SITE':g.label):'var(--line-strong)';
-          return html`<div key=${'g-'+g.key} class="rounded-lg border border-line overflow-hidden">
+          return html`<div key=${'g-'+g.key} data-locbox=${g.key} class="rounded-lg border border-line overflow-hidden"
+            style=${{opacity:ldrag&&ldrag.key===g.key?.5:1,boxShadow:ldrag&&ldrag.over===g.key&&ldrag.key!==g.key?(ldrag.after?'0 3px 0 var(--accent)':'0 -3px 0 var(--accent)'):'none'}}>
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-2.5 py-2 bg-sunken border-b border-line">
+              ${groups.length>1&&html`<span role="button" tabindex="-1" class="w-5 h-6 -ml-1 shrink-0 inline-flex items-center justify-center rounded text-faint hover:text-ink hover:bg-surface select-none"
+                style=${{cursor:ldrag?'grabbing':'grab',touchAction:'none'}} title="Drag to change the order of the locations (the daily program follows this order)" aria-label=${'Drag '+(g.label||'no location')}
+                onPointerDown=${e=>lStart(e,g.key)} onPointerMove=${lMove} onPointerUp=${lEnd} onPointerCancel=${()=>setLdrag(null)}>${Icon.grip}</span>`}
               <span class="w-3 h-3 rounded-sm shrink-0" style=${{background:sw}}></span>
               <span class="text-[13px] font-semibold mr-1">${g.label||'No location'}</span>
               <span class="text-[12px] text-muted tnum">${g.items.length} truck${g.items.length===1?'':'s'} · ${fmtN(tT)}T</span>
