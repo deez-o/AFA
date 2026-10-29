@@ -2426,7 +2426,9 @@ function App({boot,live}){
   const onRename=r=>{setTab(r.type);setRenameId(r.id);
     let wide=true;try{wide=window.matchMedia('(min-width: 1024px)').matches}catch(e){}
     if(!wide)setDrawer(true);else setPanel(true)};
-  const [collapsed,setCollapsed]=useState({});
+  /* collapsed sections and crew groups are remembered in this browser */
+  const [collapsed,setCollapsed]=useState(()=>{try{return JSON.parse(localStorage.getItem(KEY+':collapsed')||'{}')||{}}catch(e){return {}}});
+  useEffect(()=>{try{localStorage.setItem(KEY+':collapsed',JSON.stringify(collapsed))}catch(e){}},[collapsed]);
   const [toast,setToast]=useState('');
   useEffect(()=>{try{localStorage.setItem(KEY+':view',String(view))}catch(e){}},[view]);
   useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(''),2200);return()=>clearTimeout(t)},[toast]);
