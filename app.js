@@ -2163,21 +2163,45 @@ function Centered({children}){
     ${children}</div></div>`;
 }
 function Login({sb}){
-  const [email,setEmail]=useState('');const [state,setState]=useState('idle');const [err,setErr]=useState('');
-  const send=async e=>{e.preventDefault();setState('sending');setErr('');
+  /* Sign in with a code typed from the email. Links can be used up by email security scanners
+     (common with Outlook), so the code is the reliable way; the link still works too. */
+  const linkErr=(()=>{const h=new URLSearchParams((location.hash||'').replace(/^#/,''));const q=new URLSearchParams(location.search);
+    const c=h.get('error_code')||q.get('error_code');const d=h.get('error_description')||q.get('error_description');
+    return c||d?(/expired|invalid/i.test((c||'')+' '+(d||''))?'That sign-in link had expired or was already used. Enter your email to get a new code.':(d||'Sign-in didn’t work. Try again.')):''})();
+  useEffect(()=>{if(linkErr)history.replaceState(null,'',location.pathname)},[]);
+  const [email,setEmail]=useState('');const [code,setCode]=useState('');
+  const [state,setState]=useState('idle');const [err,setErr]=useState(linkErr);
+  const send=async e=>{e&&e.preventDefault();setState('sending');setErr('');
     const {error}=await sb.auth.signInWithOtp({email:email.trim(),options:{shouldCreateUser:false,emailRedirectTo:location.origin}});
-    if(error){setState('idle');setErr(/signup|not allowed|not found/i.test(error.message)?'That email doesn’t have access yet. Ask your administrator to invite you.':error.message)}
-    else setState('sent')};
+    if(error){setState('idle');setErr(/signup|not allowed|not found/i.test(error.message)?'That email doesn’t have access yet. Ask your administrator to invite you.':/rate|seconds|too many/i.test(error.message)?'Too many emails sent. Wait a minute, then try again.':error.message)}
+    else{setState('sent');setCode('')}};
+  const verify=async e=>{e.preventDefault();setState('checking');setErr('');
+    const token=code.replace(/\s/g,'');
+    let {error}=await sb.auth.verifyOtp({email:email.trim(),token,type:'email'});
+    if(error){const r=await sb.auth.verifyOtp({email:email.trim(),token,type:'magiclink'});error=r.error}
+    if(error){setState('sent');setErr(/expired|invalid/i.test(error.message)?'That code is wrong or has expired. Check the newest email, or send a new code.':error.message)}
+    /* on success the app signs you in automatically */};
   return html`<${Centered}>
-    ${state==='sent'
-      ?html`<div><div class="font-semibold">Check your email</div><p class="text-[13px] text-muted mt-1">We sent a sign-in link to <b>${email}</b>. Open it on this device to sign in.</p>
-          <button class="btn mt-3" onClick=${()=>setState('idle')}>Use a different email</button></div>`
+    ${state==='sent'||state==='checking'
+      ?html`<form class="flex flex-col gap-3" onSubmit=${verify}>
+          <div><div class="font-semibold">Check your email</div>
+            <p class="text-[13px] text-muted mt-1">We sent a sign-in code to <b>${email}</b>. Type it below. Only the newest email works.</p></div>
+          <label class="grid gap-1"><span class="label">Code from the email</span>
+            <input id="login-code" inputmode="numeric" autocomplete="one-time-code" class="field mono text-[18px] tracking-[.3em] text-center" style=${{height:44}}
+              maxlength="10" placeholder="••••••" value=${code} autoFocus=${true} onInput=${e=>setCode(e.target.value.replace(/[^0-9]/g,''))}/></label>
+          ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+          <button class="btn btn-primary justify-center" type="submit" disabled=${state==='checking'||code.length<6}>${state==='checking'?'Checking…':'Sign in'}</button>
+          <div class="flex justify-between text-[12.5px]">
+            <button type="button" class="underline underline-offset-2 text-muted hover:text-ink" onClick=${()=>{setState('idle');setErr('')}}>Use a different email</button>
+            <button type="button" class="underline underline-offset-2 text-muted hover:text-ink" onClick=${()=>send()}>Send a new code</button>
+          </div>
+        </form>`
       :html`<form class="flex flex-col gap-3" onSubmit=${send}>
-          <p class="text-[13px] text-muted">Sign in with your work email. We’ll email you a link, so there’s no password to remember.</p>
+          <p class="text-[13px] text-muted">Sign in with your work email. We’ll email you a code, so there’s no password to remember.</p>
           <label class="grid gap-1"><span class="label">Email</span>
             <input id="login-email" type="email" required autocomplete="email" class="field" value=${email} onInput=${e=>setEmail(e.target.value)}/></label>
           ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
-          <button class="btn btn-primary justify-center" type="submit" disabled=${state==='sending'||!email.trim()}>${state==='sending'?'Sending…':'Email me a sign-in link'}</button>
+          <button class="btn btn-primary justify-center" type="submit" disabled=${state==='sending'||!email.trim()}>${state==='sending'?'Sending…':'Email me a sign-in code'}</button>
         </form>`}
   <//>`;
 }

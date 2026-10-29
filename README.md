@@ -39,6 +39,12 @@ update public.profiles set role = 'planner' where email = 'name@yourcompany.com.
 ### Your own web address
 Vercel → Project → **Settings → Domains** → add e.g. `roster.yourcompany.com.au` and follow the DNS instructions. Then add the new address to Supabase's URL Configuration (step 3.1).
 
+### Sign-in codes
+People sign in with a code emailed to them. Add the code to Supabase's email:
+**Authentication → Email Templates → Magic Link** → in the message body, add a line such as
+`Your sign-in code is {{ .Token }}` and **Save**. (The link in the email still works too, but work email
+security scanners often open links first, which uses them up. The code avoids that.)
+
 ### Sign-in emails
 Supabase's built-in email sender only allows a few emails an hour. Before rolling out to the whole team, set up your own email sender under **Project Settings → Authentication → SMTP Settings**.
 
