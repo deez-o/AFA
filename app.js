@@ -2512,8 +2512,8 @@ function ProgramShifts({f,set,data,part}){
         <select id="pg-shift" class="field field-sm" style=${{...fs,width:'auto'}} value=${k} onChange=${e=>setSel(e.target.value)}>
           ${dates.map((d,x)=>html`<option key=${d} value=${d}>Shift ${x+1} · ${WD[parse(d).getDay()]} ${fmtShort(parse(d))}${progHas(sd[d])?' ✓':''}</option>`)}
         </select></label>
-      <fieldset disabled=${lockedP} class="border-0 p-0 m-0 min-w-0" style=${lockedP?{opacity:.5}:null}><label class="grid gap-1"><span class="label">Start time</span>
-        <span style=${{width:176}}><${TimeSelect} id="pg-start" label="Start time" value=${q.start||''} pm=${night} onChange=${setStart}/></span></label></fieldset>
+      <fieldset disabled=${lockedP} class="border-0 p-0 m-0 min-w-0" style=${lockedP?{opacity:.5}:null}><label class="grid gap-1"><span class="label">${part==='trucks'?'Crew start time':'Start time'}</span>
+        <span style=${{width:176}}><${TimeSelect} id="pg-start" label=${part==='trucks'?'Crew start time':'Start time'} value=${q.start||''} pm=${night} onChange=${setStart}/></span></label></fieldset>
     </div>
     <div class="flex flex-wrap items-center gap-2 -mt-2">
       ${dates.some(d=>d<todayP)&&html`<label class="inline-flex items-center gap-1.5 text-[12.5px] cursor-pointer mr-2" title="Shifts before today are locked so they aren't changed by accident">
