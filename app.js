@@ -1055,7 +1055,8 @@ const mixLabel=l=>((l.type||'').trim()||'No type')+(l.binder?' · '+l.binder:'')
 const linesOf=q=>!q?[]:Array.isArray(q.lines)?q.lines:[q];
 const lineHas=l=>l&&((l.type||'').trim()||l.binder||filledNum(l.tonnes)||filledNum(l.area)||filledNum(l.depth)||(l.stone||'').trim()||filledNum(l.spray)||filledNum(l.spread));
 const hasQty=q=>linesOf(q).some(lineHas);
-const cleanLine=l=>({type:(l.type||'').trim(),binder:l.binder||'',...(l.virgin?{virgin:true}:{}),tonnes:filledNum(l.tonnes)?num(l.tonnes):'',area:filledNum(l.area)?num(l.area):'',depth:filledNum(l.depth)?num(l.depth):'',...((l.stone||'').trim()?{stone:l.stone.trim()}:{}),...(filledNum(l.spray)?{spray:num(l.spray)}:{}),...(filledNum(l.spread)?{spread:num(l.spread)}:{})});
+const cleanLine=l=>({type:(l.type||'').trim(),binder:l.binder||'',...(l.virgin?{virgin:true}:{}),tonnes:filledNum(l.tonnes)?num(l.tonnes):'',area:filledNum(l.area)?num(l.area):'',depth:filledNum(l.depth)?num(l.depth):'',...((l.stone||'').trim()?{stone:l.stone.trim()}:{}),...(filledNum(l.spray)?{spray:num(l.spray)}:{}),...(filledNum(l.spread)?{spread:num(l.spread)}:{}),
+  ...(l.twoCoat?{twoCoat:true,binder2:l.binder2||'',stone2:(l.stone2||'').trim(),spray2:filledNum(l.spray2)?num(l.spray2):'',spread2:filledNum(l.spread2)?num(l.spread2):''}:{})});
 const fmtN=n=>n.toLocaleString('en-AU',{maximumFractionDigits:1});
 function qtyTotals(b){
   const dates=shiftDates(b);const sd=b.shiftData||{};
@@ -1208,6 +1209,9 @@ function AsphaltShifts({f,set,data}){
                           <input id=${`sh-${k}-${j}-virgin`} type="checkbox" class="w-3.5 h-3.5" style=${{accentColor:'var(--accent)'}} checked=${!!l.virgin} disabled=${off}
                             onChange=${e=>setLine(k,j,{virgin:e.target.checked})}/>
                           <span class=${l.virgin?'font-semibold text-ink':'text-muted'}>Virgin</span></label>`})()}
+                      ${seal&&html`<label class="inline-flex items-center gap-1 shrink-0 text-[11.5px] cursor-pointer" title="Two coat seal: a second binder, stone, spray rate and spread rate">
+                          <input id=${`sh-${k}-${j}-2c`} type="checkbox" class="w-3.5 h-3.5" style=${{accentColor:'var(--accent)'}} checked=${!!l.twoCoat} onChange=${e=>setLine(k,j,{twoCoat:e.target.checked})}/>
+                          <span class=${l.twoCoat?'font-semibold text-ink':'text-muted'}>2 coats</span></label>`}
                       </div>
                       <label class="col-span-2 sm:col-span-1"><span class="sr-only">Shift ${i+1}${n} binder</span>
                         <select id=${`sh-${k}-${j}-b`} class="field field-sm mono" style=${{...ist,color:l.binder?'var(--ink)':'var(--faint)'}} value=${l.binder||''} onChange=${e=>setLine(k,j,{binder:e.target.value})}>
@@ -1232,7 +1236,23 @@ function AsphaltShifts({f,set,data}){
                       ${ls.length>1
                         ?html`<button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>removeLine(k,j)} aria-label=${`Remove shift ${i+1} line ${j+1}`} title="Remove this line">${Icon.x}</button>`
                         :html`<span></span>`}
-                    </div>`;})}
+                    </div>${seal&&l.twoCoat&&html`<div key=${'c2-'+j} class=${'grid gap-2 items-center -mt-0.5 '+CO}>
+                      <div class="col-span-2 sm:col-span-1 text-[12px] font-semibold text-muted sm:text-right pr-1">2nd coat</div>
+                      <label class="col-span-2 sm:col-span-1"><span class="sr-only">Shift ${i+1}${n} second coat binder</span>
+                        <select id=${`sh-${k}-${j}-b2`} class="field field-sm mono" style=${{...ist,color:(l.binder2||l.binder)?'var(--ink)':'var(--faint)'}} value=${l.binder2||''} onChange=${e=>setLine(k,j,{binder2:e.target.value})}>
+                          <option value="">${l.binder?`Same (${l.binder})`:'Binder'}</option>
+                          ${BINDS.map(b=>html`<option key=${b} value=${b} style=${{color:'var(--ink)'}}>${b}</option>`)}
+                          ${l.binder2&&!BINDS.includes(l.binder2)&&html`<option value=${l.binder2}>${l.binder2}</option>`}
+                        </select></label>
+                      <label><span class="sr-only">Shift ${i+1}${n} second coat stone</span>
+                        <input id=${`sh-${k}-${j}-st2`} class="field field-sm" style=${ist} placeholder="Stone" value=${l.stone2||''} onInput=${e=>setLine(k,j,{stone2:e.target.value})}/></label>
+                      <span class="hidden sm:block text-[11px] text-faint text-center">same area</span>
+                      <label><span class="sr-only">Shift ${i+1}${n} second coat spray rate</span>
+                        <input id=${`sh-${k}-${j}-sp2`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist} placeholder="L/m²" title="2nd coat spray rate (L/m²)" value=${l.spray2??''} onInput=${e=>setLine(k,j,{spray2:e.target.value})}/></label>
+                      <label><span class="sr-only">Shift ${i+1}${n} second coat spread rate</span>
+                        <input id=${`sh-${k}-${j}-sr2`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist} placeholder="m²/m³" title="2nd coat spread rate (m²/m³)" value=${l.spread2??''} onInput=${e=>setLine(k,j,{spread2:e.target.value})}/></label>
+                      <span></span>
+                    </div>`}`;})}
                   <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>addLine(k)}>${Icon.plus} Add another ${seal?'seal':'mix'}</button></div>
                 </div>
               </div>`;})}
@@ -1931,7 +1951,7 @@ function bookingDiff(a,b,p,x,rname,jname,when){
   oa.filter(k=>!ob.includes(k)).forEach(k=>L.push(`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: now a shift`));
   /* quantities, shift by shift */
   const sa=p.shiftData||{},sb=x.shiftData||{};
-  const lineTxt=l=>[(l.type||'').trim(),l.binder,l.virgin?'virgin':'',num(l.tonnes)?`${fmtN(num(l.tonnes))} t`:'',num(l.area)?`${fmtN(num(l.area))} m²`:'',num(l.depth)?`${fmtN(num(l.depth))} mm`:'',(l.stone||'').trim()?`stone ${l.stone.trim()}`:'',num(l.spray)?`spray ${fmtN(num(l.spray))} L/m²`:'',num(l.spread)?`spread ${fmtN(num(l.spread))} m²/m³`:''].filter(Boolean).join(' ');
+  const lineTxt=l=>[(l.type||'').trim(),l.binder,l.virgin?'virgin':'',num(l.tonnes)?`${fmtN(num(l.tonnes))} t`:'',num(l.area)?`${fmtN(num(l.area))} m²`:'',num(l.depth)?`${fmtN(num(l.depth))} mm`:'',(l.stone||'').trim()?`stone ${l.stone.trim()}`:'',num(l.spray)?`spray ${fmtN(num(l.spray))} L/m²`:'',num(l.spread)?`spread ${fmtN(num(l.spread))} m²/m³`:'',l.twoCoat?`2nd coat ${[l.binder2,l.stone2,num(l.spray2)?fmtN(num(l.spray2))+' L/m²':'',num(l.spread2)?fmtN(num(l.spread2))+' m²/m³':''].filter(Boolean).join(' ')}`:''].filter(Boolean).join(' ');
   const qTxt=q=>linesOf(q).filter(lineHas).map(lineTxt).join(' + ');
   [...new Set([...Object.keys(sa),...Object.keys(sb)])].sort().forEach(k=>{const qa=sa[k],qb=sb[k];if(same(qa,qb))return;
     const day=`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`;
@@ -2468,7 +2488,7 @@ function drawProgram(doc,data,{b,k,crewId}){
   const rapOf=t=>num(((data.mixRap)||{})[(t||'').trim()]);
   const supplier=q.exbin?(q.exbin.supplier||'EXBIN'):'AFA';
   const matRows=seal
-    ?[['Job location:',null],['SUPPLIER :',()=>supplier],['SEAL TYPE :',l=>l.type],['BINDER :',l=>l.binder],['STONE :',l=>l.stone||''],['APPROX AREA (M2) :',l=>num(l.area)?fmtN(num(l.area)):'']]
+    ?[['Job location:',null],['SUPPLIER :',()=>supplier],['SEAL TYPE :',l=>l.type+(l.twoCoat?' x2':'')],['BINDER :',l=>l.twoCoat&&l.binder2&&l.binder2!==l.binder?`${l.binder||'-'} / ${l.binder2}`:l.binder],['STONE :',l=>l.twoCoat?`${l.stone||'-'}/${l.stone2||'-'}`:(l.stone||'')],['APPROX AREA (M2) :',l=>num(l.area)?fmtN(num(l.area)):'']]
     :[['Job location:',null],['SUPPLIER :',()=>supplier],['MIX :',l=>{const r=rapOf(l.type);return (l.type||'')+(r&&!l.virgin?` ${fmtN(r)}% RAP`:'')}],['BINDER :',l=>l.binder],
       ['APPROX TONNAGE :',l=>num(l.tonnes)?fmtN(num(l.tonnes)):''],['APPROX AREA (M2) :',l=>num(l.area)?fmtN(num(l.area)):''],['DEPTH (mm) :',l=>num(l.depth)?fmtN(num(l.depth)):'']];
   matRows.forEach(([l,fn])=>{
@@ -2477,8 +2497,9 @@ function drawProgram(doc,data,{b,k,crewId}){
   if(lines.length>3){cell(RX,ry2,RW,5,`+ ${lines.length-3} more line${lines.length-3===1?'':'s'} - see the booking`,{border:false,size:6.4,color:[110,110,110]});ry2+=5}
 
   /* right (seal): spray & spread rates per product, instead of trucks */
-  if(seal){ry2+=3;const RC=[['PRODUCT',20],['BITUMEN',15],['SPRAY L/M2',18],['STONE',18],['SPREAD M2/M3',23]];ry2=head(RX,ry2,RW,RC);
-    const rv=lines.map(l=>[{t:l.type,bold:true},l.binder||'',{t:num(l.spray)?fmtN(num(l.spray)):'',bold:true,color:AFA_RED},l.stone||'',{t:num(l.spread)?fmtN(num(l.spread)):'',bold:true,color:AFA_RED}]);
+  if(seal){ry2+=3;const RC=[['PRODUCT',26],['BITUMEN',14],['SPRAY L/M2',17],['STONE',14],['SPREAD M2/M3',23]];ry2=head(RX,ry2,RW,RC);
+    const rr=(t,bd,sp,st,sr)=>[{t,bold:true},bd||'',{t:num(sp)?fmtN(num(sp)):'',bold:true,color:AFA_RED},st||'',{t:num(sr)?fmtN(num(sr)):'',bold:true,color:AFA_RED}];
+    const rv=lines.flatMap(l=>l.twoCoat?[rr(`${l.type||''} 1st`,l.binder,l.spray,l.stone,l.spread),rr(`${l.type||''} 2nd`,l.binder2||l.binder,l.spray2,l.stone2,l.spread2)]:[rr(l.type,l.binder,l.spray,l.stone,l.spread)]);
     while(rv.length<6)rv.push(['','','','','']);rv.slice(0,12).forEach(v=>{ry2=row(RX,ry2,RC,v)})}
   /* right: trucks */
   if(!seal){ry2+=3;const TCo=[['TRUCKS',27],['DRIVER',16],['WEIGHT',12],['TIME',14],['LOCATION',25]];ry2=head(RX,ry2,RW,TCo);
