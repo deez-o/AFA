@@ -62,6 +62,17 @@ function plantBookings(blocks,machineId){
     weekendShifts:b.weekendShifts,satShift:b.satShift,sunShift:b.sunShift}));
 }
 
+/* a shift handed to another crew (shiftData[date].crewId) shows as a one-shift bar on that crew's row */
+const coverOf=(b,k)=>{const c=b&&b.shiftData&&b.shiftData[k]&&b.shiftData[k].crewId;return c&&c!==b.resourceId?c:null};
+function coverBookings(blocks,crewId){
+  const out=[];
+  blocks.forEach(b=>{if(b.kind!=='job'||!b.shiftData)return;
+    Object.keys(b.shiftData).forEach(k=>{if(coverOf(b,k)!==crewId||k<b.start||k>b.end||!worksOn(b,parse(k)))return;
+      out.push({id:'x-'+b.id+'-'+k,virtual:true,cover:true,parent:b,kind:'job',resourceId:crewId,crewId:b.resourceId,jobId:b.jobId,
+        start:k,end:k,shift:b.shift,address:b.address,quoteNo:b.quoteNo,projectNo:b.projectNo,shiftData:{[k]:b.shiftData[k]},satShift:true,sunShift:true})})});
+  return out;
+}
+
 /* Day jobs take their crew's colour; night works are always red. */
 const CREW_HUES=[205,150,275,40,185,235,95,25,170,300,60,220];
 function blockStyle(b,data){
@@ -698,7 +709,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
 
   const Row=r=>{
     const items=[];
-    [...effBlocks.filter(b=>b.resourceId===r.id),...(r.type==='machine'?plantBookings(effBlocks,r.id):[])].forEach(b=>{
+    [...effBlocks.filter(b=>b.resourceId===r.id),...(r.type==='machine'?plantBookings(effBlocks,r.id):[]),...(r.type==='crew'?coverBookings(effBlocks,r.id):[])].forEach(b=>{
       const s0=diffDays(rangeStart,parse(b.start)),e0=diffDays(rangeStart,parse(b.end));
       if(e0<0||s0>N-1)return;
       items.push({b,s:Math.max(0,s0),e:Math.min(N-1,e0),cutL:s0<0,cutR:e0>N-1});
@@ -746,23 +757,24 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
           const compact=(view===30&&span<3)||(view===60&&span<5)||(view===14&&span<2);
           const night=(it.b.kind==='job'||it.b.kind==='onjob')&&it.b.shift==='night';
           const v=it.b.virtual;
-          const vTip=v?`${data.jobs.find(j=>j.id===it.b.jobId)?.name||'Job'} · ${data.resources.find(c=>c.id===it.b.crewId)?.name||''}\n`:'';
+          const vTip=v?(it.b.cover?`Covering a shift for ${data.resources.find(c=>c.id===it.b.crewId)?.name||'another crew'}\n`:`${data.jobs.find(j=>j.id===it.b.jobId)?.name||'Job'} · ${data.resources.find(c=>c.id===it.b.crewId)?.name||''}\n`):'';
           const dragging=preview&&preview.id===it.b.id;
           return html`<div key=${it.b.id} class=${'blk'+(dragging?' dragging':'')} role="button" tabindex="0" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
             style=${{...blockStyle(it.b,data),top:10+it.lane*32,left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
               borderTopLeftRadius:it.cutL?0:6,borderBottomLeftRadius:it.cutL?0:6,borderTopRightRadius:it.cutR?0:6,borderBottomRightRadius:it.cutR?0:6,
               justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined}}
-            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?'\nClick to edit the crew job':''}`}
+            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
             onPointerDown=${e=>v?e.stopPropagation():startDrag(e,it.b)}
             onClick=${v?()=>onEdit(it.b.parent):undefined}
             onKeyDown=${e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onEdit(v?it.b.parent:it.b)}
               else if(!v&&e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){e.preventDefault();nudge(it.b,e.key==='ArrowLeft'?-1:1)}}}>
-            ${(it.b.kind==='job'||it.b.kind==='onjob')&&days.slice(it.s,it.e+1).map((d,i)=>worksOn(it.b,d)?null:html`<span key=${'w'+i} class="wkoff" aria-hidden="true"
-                style=${{left:`${i/span*100}%`,width:`${100/span}%`}} title=${`${WD[d.getDay()]}: no shift`}></span>`)}
+            ${(it.b.kind==='job'||it.b.kind==='onjob')&&days.slice(it.s,it.e+1).map((d,i)=>{const src=it.b.kind==='onjob'?it.b.parent:it.b;
+                const off=!worksOn(it.b,d),cov=!off&&!it.b.cover&&coverOf(src,iso(d));if(!off&&!cov)return null;
+                return html`<span key=${'w'+i} class=${'wkoff'+(cov?' cov':'')} aria-hidden="true" style=${{left:`${i/span*100}%`,width:`${100/span}%`}}></span>`})}
             ${it.cutL&&html`<span aria-hidden="true">‹</span>`}
             ${night&&html`<span class="shrink-0 inline-flex" title="Night works">${Icon.moon}</span>`}
             ${!v&&quoteFresh.has(it.b.id)&&html`<span class="shrink-0 w-2 h-2 rounded-full" style=${{background:'var(--accent)',boxShadow:'0 0 0 2px var(--surface)'}} title="Quote number changed in the last 48 hours"></span>`}
-            ${v&&!compact&&html`<span class="shrink-0 inline-flex opacity-80">${Icon.pin}</span>`}
+            ${v&&!compact&&!it.b.cover&&html`<span class="shrink-0 inline-flex opacity-80">${Icon.pin}</span>`}
             ${compact
               ?(sl=>html`<span class="flex flex-col min-w-0 max-w-full leading-[1.15] text-center"><span class="t text-[10px] font-semibold">${sl[0]}</span>${sl[1]&&html`<span class="t text-[9.5px] opacity-80">${sl[1]}</span>`}</span>`)(shortLabel(it.b))
               :html`<span class="t">${title}</span>`}
@@ -1013,6 +1025,8 @@ function AsphaltShifts({f,set,data}){
   const night=f.shift==='night';
   const shown=k=>{const ls=linesOf(sd[k]);return ls.length?ls:[BLANK_LINE]};
   const put=(k,lines)=>set({shiftData:{...sd,[k]:{...shiftBase(sd[k]),lines}}});
+  const setCrew=(k,id)=>{const q={...shiftBase(sd[k]),lines:linesOf(sd[k])};if(id)q.crewId=id;else delete q.crewId;set({shiftData:{...sd,[k]:q}})};
+  const otherCrews=data.resources.filter(r=>r.type==='crew'&&r.id!==f.resourceId);
   const setExbin=(k,v)=>{const q={...shiftBase(sd[k]),lines:linesOf(sd[k])};if(v)q.exbin=v;else delete q.exbin;set({shiftData:{...sd,[k]:q}})};
   const crewRes=(data?.resources||[]).find(r=>r.id===f.resourceId);
   const plantDown=k=>usesPlant(crewRes)?plantMaintOn(data,data.blocks,k,f.shift||'day'):[];
@@ -1090,6 +1104,14 @@ function AsphaltShifts({f,set,data}){
                         ${EXBIN_SUPPLIERS.map(o=>html`<option key=${o} value=${o}>${o}</option>`)}
                         ${ex.supplier&&!EXBIN_SUPPLIERS.includes(ex.supplier)&&html`<option value=${ex.supplier}>${ex.supplier}</option>`}
                       </select></label>`}`})()}
+                  ${otherCrews.length>0&&(()=>{const c=(sd[k]&&sd[k].crewId)||'';return html`<label class="w-full sm:w-auto grid gap-0.5 mt-0.5">
+                    <span class=${'text-[11px] '+(c?'font-semibold text-ink':'text-muted')}>Done by</span>
+                    <select id=${`sh-${k}-crew`} class="field field-sm w-[112px]" style=${{height:26,fontSize:12}} value=${c} onChange=${e=>setCrew(k,e.target.value)}
+                      aria-label=${`Crew for shift ${i+1}`}>
+                      <option value="">${data.resources.find(r=>r.id===f.resourceId)?.name||'This crew'}</option>
+                      ${otherCrews.map(r=>html`<option key=${r.id} value=${r.id}>${r.name}</option>`)}
+                      ${c&&!otherCrews.some(r=>r.id===c)&&html`<option value=${c}>Removed crew</option>`}
+                    </select></label>`})()}
                   ${multi&&html`<div class="text-[11px] text-muted tnum">${fmtN(sub.t)} t · ${fmtN(sub.a)} m²</div>`}
                   ${i>0&&!hasQty(sd[k])&&hasQty(sd[tot.dates[i-1]])&&html`<button type="button" class="ml-auto sm:ml-0 text-[11px] text-muted underline underline-offset-2 hover:text-ink" onClick=${()=>copyPrev(i)} title="Copy the previous shift's figures">Same as above</button>`}
                 </div>
@@ -1283,8 +1305,8 @@ function Editor({initial,data,onSave,onDelete,onClose}){
     /* only mixes typed under "Other…" join the company list; removed mixes stay removed */
     const newMixes=[...new Set(Object.values(out.shiftData||{}).flatMap(q=>linesOf(q)).filter(l=>l._custom&&(l.type||'').trim()).map(l=>l.type.trim()))];
     if(out.shiftData){
-      const clean=Object.fromEntries(Object.entries(out.shiftData).filter(([,q])=>hasQty(q)||(q&&q.exbin))
-        .map(([k,q])=>[k,{lines:linesOf(q).filter(lineHas).map(cleanLine),...(q&&q.exbin?{exbin:{supplier:q.exbin.supplier||''}}:{})}]));
+      const clean=Object.fromEntries(Object.entries(out.shiftData).filter(([,q])=>hasQty(q)||(q&&(q.exbin||(q.crewId&&q.crewId!==out.resourceId))))
+        .map(([k,q])=>[k,{lines:linesOf(q).filter(lineHas).map(cleanLine),...(q&&q.exbin?{exbin:{supplier:q.exbin.supplier||''}}:{}),...(q&&q.crewId&&q.crewId!==out.resourceId?{crewId:q.crewId}:{})}]));
       if(Object.keys(clean).length)out.shiftData=clean;else delete out.shiftData;
     }
     let newJob=null;
