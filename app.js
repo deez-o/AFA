@@ -193,7 +193,7 @@ function rowStats(r,data,days){
 
 /* ---------- mixes & binders manager (Resources panel → Mixes tab) ---------- */
 /* One editable list: reorder, rename (also updates booking lines that use it), remove, add. */
-function ListManager({title,hint,items,setItems,field,placeholder,data,setData,onRenamed,onRemoved,rapOf,binderOf,binderOptions,servicesOf,colorOf,onColor,truckOf}){
+function ListManager({title,hint,items,setItems,field,placeholder,data,setData,onRenamed,onRemoved,rapOf,binderOf,binderOptions,servicesOf,colorOf,onColor,truckOf,twoCoatOf}){
   const [name,setName]=useState('');
   const [editing,setEditingItem]=useState(null); /* {from,to} */
   const [confirm,setConfirm]=useState(null);
@@ -245,6 +245,9 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
                 ${editing.binder&&!binderOptions.includes(editing.binder)&&html`<option value=${editing.binder}>${editing.binder}</option>`}
               </select></label>
               <span class="text-[11px] text-faint -mt-1">Filled in automatically when this mix is picked on a shift.</span>`}
+            ${twoCoatOf&&html`<label class="inline-flex items-center gap-1.5 text-[12.5px] cursor-pointer">
+              <input id=${idp+'2c-'+i} type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!editing.twoCoat} onChange=${e=>setEditingItem({...editing,twoCoat:e.target.checked})}/>
+              Two coat seal <span class="text-muted">(second binder, stone, spray and spread rate)</span></label>`}
             ${truckOf&&html`<div class="grid grid-cols-[1fr_96px] gap-2">
               <label class="grid gap-1 text-[12.5px]"><span class="text-muted">Default driver</span>
                 <input id=${idp+'drv-'+i} class="field field-sm" style=${{height:30,fontSize:13}} placeholder="Driver" value=${editing.driver||''} onInput=${e=>setEditingItem({...editing,driver:e.target.value})}/></label>
@@ -269,6 +272,7 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
           <div class="min-w-0 flex-1">
             <div class="mono font-semibold text-[13.5px] truncate">${t}</div>
             ${rapOf&&rapOf(t)>0&&html`<div class="text-[11.5px] font-medium" style=${{color:'var(--ok)'}}>${fmtN(rapOf(t))}% RAP</div>`}
+            ${twoCoatOf&&twoCoatOf(t)&&html`<div class="text-[11.5px] font-medium" style=${{color:'var(--accent)'}}>Two coat</div>`}
             ${truckOf&&(truckOf(t).driver||truckOf(t).w)&&html`<div class="text-[11.5px] text-muted truncate">${[truckOf(t).driver,truckOf(t).w].filter(Boolean).join(' · ')}</div>`}
             ${servicesOf&&servicesOf(t).length>0&&html`<div class="text-[11.5px] text-muted truncate" title=${servicesOf(t).join(', ')}>${servicesOf(t).join(' · ')}</div>`}
           </div>
@@ -281,7 +285,7 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
                   <button class="text-[11px] font-semibold px-2 py-0.5 rounded" style=${{background:'hsl(352 70% var(--blk-l))',color:'hsl(352 60% var(--blk-fg-l))'}} onClick=${()=>remove(t)}>Remove</button>
                   <button class="text-[11px] text-muted px-1.5" onClick=${()=>setConfirm(null)}>Keep</button></div></div>`
             :html`<div class="flex items-center gap-0.5 lg:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                <button class=${iconBtn} onClick=${()=>{const rp=rapOf?rapOf(t):0;setEditingItem({from:t,to:t,hasRap:rp>0,rap:rp>0?String(rp):'',binder:binderOf?binderOf(t):'',services:servicesOf?servicesOf(t).join('\n'):'',driver:truckOf?truckOf(t).driver||'':'',w:truckOf?truckOf(t).w||'':''});setConfirm(null);setMsg('')}} aria-label=${'Edit '+t} title="Edit">${Icon.pencil}</button>
+                <button class=${iconBtn} onClick=${()=>{const rp=rapOf?rapOf(t):0;setEditingItem({from:t,to:t,hasRap:rp>0,rap:rp>0?String(rp):'',binder:binderOf?binderOf(t):'',services:servicesOf?servicesOf(t).join('\n'):'',driver:truckOf?truckOf(t).driver||'':'',w:truckOf?truckOf(t).w||'':'',twoCoat:twoCoatOf?!!twoCoatOf(t):false});setConfirm(null);setMsg('')}} aria-label=${'Edit '+t} title="Edit">${Icon.pencil}</button>
                 <button class=${iconBtn} onClick=${()=>{setConfirm(t);setEditingItem(null)}} aria-label=${'Remove '+t} title="Remove from the list">${Icon.x}</button></div>`}
         </li>`;})}
       ${items.length===0&&html`<li class="px-3 py-4 text-center text-muted text-[13px]">Nothing in the list yet. Add one below.</li>`}
@@ -300,11 +304,12 @@ function SealManager({data,setData}){
   const setter=key=>(list,extra)=>setData(d=>{const n={...d,[key]:list};return extra?extra(n):n});
   return html`<div class="flex-1 min-h-0 overflow-y-auto">
     <${ListManager} title="Seal types" field="type" placeholder="e.g. 10mm Seal" data=${data} setData=${setData}
-      hint="Seal types offered on Seal crew bookings, in this order. Paving jobs can't pick these. Click the pencil to rename one or set its default binder."
+      hint="Seal types offered on Seal crew bookings, in this order. Paving jobs can't pick these. Click the pencil to rename one, set its default binder or mark it as a two coat seal."
       items=${sealTypesOf(data)} setItems=${setter('sealTypes')}
-      binderOf=${t=>sealBinderOf(data)[t]||''} binderOptions=${sealBindersOf(data)}
-      onRenamed=${(d,from,to,ed)=>{const mb={...sealBinderOf(d)};delete mb[from];if(ed&&ed.binder)mb[to]=ed.binder;return {...d,sealBinder:mb}}}
-      onRemoved=${(d,t)=>{const mb={...sealBinderOf(d)};delete mb[t];return {...d,sealBinder:mb}}}/>
+      binderOf=${t=>sealBinderOf(data)[t]||''} binderOptions=${sealBindersOf(data)} twoCoatOf=${t=>sealIsTwoCoat(data,t)}
+      onRenamed=${(d,from,to,ed)=>{const mb={...sealBinderOf(d)};delete mb[from];if(ed&&ed.binder)mb[to]=ed.binder;
+        const tc={...sealTwoCoatOf(d)};delete tc[from];if(ed&&ed.twoCoat)tc[to]=true;return {...d,sealBinder:mb,sealTwoCoat:tc}}}
+      onRemoved=${(d,t)=>{const mb={...sealBinderOf(d)};delete mb[t];const tc={...sealTwoCoatOf(d)};delete tc[t];return {...d,sealBinder:mb,sealTwoCoat:tc}}}/>
     <div class="border-t border-line mx-4"></div>
     <${ListManager} title="Seal binders" field="binder" placeholder="e.g. C170" data=${data} setData=${setData}
       hint="Binders offered on Seal crew bookings, in this order. Separate from the asphalt binders under Mixes."
@@ -1046,6 +1051,8 @@ const SEAL_TYPES=['Prime','Primerseal','7mm Seal','10mm Seal','14mm Seal'];
 const sealTypesOf=d=>d&&Array.isArray(d.sealTypes)?d.sealTypes:SEAL_TYPES;
 const SEAL_BINDERS=['C170','AMC0','AMC00','S35E','S45R'];
 const sealBindersOf=d=>d&&Array.isArray(d.sealBinders)?d.sealBinders:SEAL_BINDERS;
+const sealTwoCoatOf=d=>d&&d.sealTwoCoat&&typeof d.sealTwoCoat==='object'?d.sealTwoCoat:{};
+const sealIsTwoCoat=(d,type)=>{const m=sealTwoCoatOf(d);const t=String(type||'').trim().toLowerCase();return Object.keys(m).some(k=>m[k]&&k.toLowerCase()===t)};
 const sealBinderOf=d=>d&&d.sealBinder&&typeof d.sealBinder==='object'?d.sealBinder:{};
 const isSealCrew=r=>!!r&&r.type==='crew'&&workKey(r.sub).includes('seal');
 const binderForProduct=(d,crew,type)=>{if(!isSealCrew(crew))return binderForMix(d,type);
@@ -1209,9 +1216,7 @@ function AsphaltShifts({f,set,data}){
                           <input id=${`sh-${k}-${j}-virgin`} type="checkbox" class="w-3.5 h-3.5" style=${{accentColor:'var(--accent)'}} checked=${!!l.virgin} disabled=${off}
                             onChange=${e=>setLine(k,j,{virgin:e.target.checked})}/>
                           <span class=${l.virgin?'font-semibold text-ink':'text-muted'}>Virgin</span></label>`})()}
-                      ${seal&&html`<label class="inline-flex items-center gap-1 shrink-0 text-[11.5px] cursor-pointer" title="Two coat seal: a second binder, stone, spray rate and spread rate">
-                          <input id=${`sh-${k}-${j}-2c`} type="checkbox" class="w-3.5 h-3.5" style=${{accentColor:'var(--accent)'}} checked=${!!l.twoCoat} onChange=${e=>setLine(k,j,{twoCoat:e.target.checked})}/>
-                          <span class=${l.twoCoat?'font-semibold text-ink':'text-muted'}>2 coats</span></label>`}
+                      ${seal&&sealIsTwoCoat(data,l.type)&&html`<span class="shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded bg-sunken" title="Two coat seal (set in Resources → Seal)">2 coat</span>`}
                       </div>
                       <label class="col-span-2 sm:col-span-1"><span class="sr-only">Shift ${i+1}${n} binder</span>
                         <select id=${`sh-${k}-${j}-b`} class="field field-sm mono" style=${{...ist,color:l.binder?'var(--ink)':'var(--faint)'}} value=${l.binder||''} onChange=${e=>setLine(k,j,{binder:e.target.value})}>
@@ -1236,7 +1241,7 @@ function AsphaltShifts({f,set,data}){
                       ${ls.length>1
                         ?html`<button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>removeLine(k,j)} aria-label=${`Remove shift ${i+1} line ${j+1}`} title="Remove this line">${Icon.x}</button>`
                         :html`<span></span>`}
-                    </div>${seal&&l.twoCoat&&html`<div key=${'c2-'+j} class=${'grid gap-2 items-center -mt-0.5 '+CO}>
+                    </div>${seal&&sealIsTwoCoat(data,l.type)&&html`<div key=${'c2-'+j} class=${'grid gap-2 items-center -mt-0.5 '+CO}>
                       <div class="col-span-2 sm:col-span-1 text-[12px] font-semibold text-muted sm:text-right pr-1">2nd coat</div>
                       <label class="col-span-2 sm:col-span-1"><span class="sr-only">Shift ${i+1}${n} second coat binder</span>
                         <select id=${`sh-${k}-${j}-b2`} class="field field-sm mono" style=${{...ist,color:(l.binder2||l.binder)?'var(--ink)':'var(--faint)'}} value=${l.binder2||''} onChange=${e=>setLine(k,j,{binder2:e.target.value})}>
@@ -1413,10 +1418,11 @@ function Editor({initial,data,onSave,onDelete,onClose}){
       ['supervisor','siteContact','sitePhone'].forEach(k=>{out[k]=(out[k]||'').trim();if(!out[k])delete out[k]})}
     /* keep every shift's figures (including dates now outside the range); drop only fully empty rows */
     /* only mixes typed under "Other…" join the company list; removed mixes stay removed */
+    const sealSave=out.kind==='job'&&isSealCrew(data.resources.find(r=>r.id===out.resourceId));
     const newMixes=[...new Set(Object.values(out.shiftData||{}).flatMap(q=>linesOf(q)).filter(l=>l._custom&&(l.type||'').trim()).map(l=>l.type.trim()))];
     if(out.shiftData){
       const clean=Object.fromEntries(Object.entries(out.shiftData).filter(([,q])=>hasQty(q)||progHas(q)||(q&&(q.exbin||(q.crewId&&q.crewId!==out.resourceId))))
-        .map(([k,q])=>[k,{lines:linesOf(q).filter(lineHas).map(cleanLine),...(q&&q.exbin?{exbin:{supplier:q.exbin.supplier||''}}:{}),...(q&&q.crewId&&q.crewId!==out.resourceId?{crewId:q.crewId}:{}),...progClean(q)}]));
+        .map(([k,q])=>[k,{lines:linesOf(q).filter(lineHas).map(l=>cleanLine(sealSave?{...l,twoCoat:sealIsTwoCoat(data,l.type)}:l)),...(q&&q.exbin?{exbin:{supplier:q.exbin.supplier||''}}:{}),...(q&&q.crewId&&q.crewId!==out.resourceId?{crewId:q.crewId}:{}),...progClean(q)}]));
       if(Object.keys(clean).length)out.shiftData=clean;else delete out.shiftData;
     }
     let newJob=null;
@@ -1929,7 +1935,7 @@ const recentQuoteChanges=data=>(data.quoteChanges||[]).filter(c=>Date.now()-c.at
 const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.round(m/60);return `${h} hr${h===1?'':'s'} ago`};
 /* ---------- change log: every change to the shared roster becomes a notification ---------- */
 const CHANGE_KEEP=7*DAY_MS;
-const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['programLocs','Locations'],['locColors','Location colours'],['truckDefs','Truck defaults'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
+const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['programLocs','Locations'],['locColors','Location colours'],['truckDefs','Truck defaults'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders'],['sealTwoCoat','Two coat seals']];
 const RES_WORD={crew:'Crew',person:'Staff member',machine:'Machine',aplant:'Plant'};
 /* exactly what changed on one booking, as "Field: before → after" lines */
 function bookingDiff(a,b,p,x,rname,jname,when){
@@ -2428,7 +2434,7 @@ function drawProgram(doc,data,{b,k,crewId}){
   const crew=data.resources.find(r=>r.id===crewId)||{name:'Crew'};
   const job=data.jobs.find(j=>j.id===b.jobId)||{name:'Job'};
   const seal=isSealCrew(crew)||isSealCrew(data.resources.find(r=>r.id===b.resourceId));
-  const q=(b.shiftData||{})[k]||{};const lines=linesOf(q).filter(lineHas);
+  const q=(b.shiftData||{})[k]||{};const lines=linesOf(q).filter(lineHas).map(l=>seal&&!l.twoCoat&&sealIsTwoCoat(data,l.type)?{...l,twoCoat:true}:l);
   const dates=shiftDates(b);const idx=dates.indexOf(k);const d=parse(k);
   /* contact details: this booking, or the latest booking of the same job that has them */
   const sib=data.blocks.filter(x=>x.kind==='job'&&x.jobId===b.jobId).sort((x,y)=>x.start<y.start?1:-1);
@@ -3168,7 +3174,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','truckCos','subCos','subServices','programLocs','locColors','truckDefs'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
