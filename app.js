@@ -200,6 +200,7 @@ const Icon={
   sun:svg(html`<circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,16),
   moonLg:svg(html`<path d="M13.2 10.4A5.8 5.8 0 015.6 2.8a5.8 5.8 0 107.6 7.6z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>`,16),
   logout:svg(html`<path d="M6 2.5H3.5v11H6M10.5 5l3 3-3 3M13.5 8H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`,16),
+  key:svg(html`<circle cx="5.5" cy="10.5" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M7.7 8.3L14 2M11.5 4.5l1.8 1.8M10 6l1.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,16),
   moon:svg(html`<path d="M12.5 10.2A5.5 5.5 0 015.8 3.5a5.5 5.5 0 106.7 6.7z" fill="currentColor"/>`,12),
   wrench:svg(html`<path d="M10.5 2a3.5 3.5 0 00-3.2 4.9L2.5 11.7a1.3 1.3 0 001.8 1.8l4.8-4.8A3.5 3.5 0 0014 5.5l-2 2-1.8-.3-.3-1.8 2-2c-.4-.3-.9-.4-1.4-.4z" fill="currentColor"/>`,11),
   person:svg(html`<circle cx="8" cy="5" r="2.6" fill="currentColor"/><path d="M3 14c.4-3 2.4-4.6 5-4.6s4.6 1.6 5 4.6z" fill="currentColor"/>`,11),
@@ -1907,6 +1908,7 @@ function App({boot,live}){
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
   const [forecast,setForecast]=useState(false);
+  const [changePw,setChangePw]=useState(false);
   const [notifPrefs,setNotifPrefs]=useState(loadNotifPrefs);
   /* dark mode: remembered per person; until chosen, follows the device setting */
   const [theme,setTheme]=useState(()=>{try{const t=localStorage.getItem(KEY+':theme');if(t==='dark'||t==='light')return t}catch(e){}
@@ -2025,6 +2027,7 @@ function App({boot,live}){
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>
         <button class="btn px-2" onClick=${toggleTheme} role="switch" aria-checked=${theme==='dark'} aria-label="Dark mode" title=${theme==='dark'?'Switch to light mode':'Switch to dark mode'}>${theme==='dark'?Icon.sun:Icon.moonLg}</button>
+        <button class="btn px-2" onClick=${()=>setChangePw(true)} aria-label="Change password" title="Change password">${Icon.key}</button>
         <button class="btn px-2" onClick=${()=>live.sb.auth.signOut()} aria-label="Sign out" title=${`Signed in as ${live.user.email}. Sign out`}>${Icon.logout}</button>
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
         <button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis('crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>
@@ -2054,6 +2057,7 @@ function App({boot,live}){
       </section>
     </main>
 
+    ${changePw&&html`<${SetPassword} sb=${live.sb} onDone=${()=>{setChangePw(false);setToast('Password changed')}} onCancel=${()=>setChangePw(false)}/>`}
     ${forecast&&html`<${ForecastDialog} data=${data} onClose=${()=>setForecast(false)} notify=${setToast}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)}/>`}
@@ -2163,47 +2167,58 @@ function Centered({children}){
     ${children}</div></div>`;
 }
 function Login({sb}){
-  /* Sign in with a code typed from the email. Links can be used up by email security scanners
-     (common with Outlook), so the code is the reliable way; the link still works too. */
-  const linkErr=(()=>{const h=new URLSearchParams((location.hash||'').replace(/^#/,''));const q=new URLSearchParams(location.search);
-    const c=h.get('error_code')||q.get('error_code');const d=h.get('error_description')||q.get('error_description');
-    return c||d?(/expired|invalid/i.test((c||'')+' '+(d||''))?'That sign-in link had expired or was already used. Enter your email to get a new code.':(d||'Sign-in didn’t work. Try again.')):''})();
-  useEffect(()=>{if(linkErr)history.replaceState(null,'',location.pathname)},[]);
-  const [email,setEmail]=useState('');const [code,setCode]=useState('');
-  const [state,setState]=useState('idle');const [err,setErr]=useState(linkErr);
-  const send=async e=>{e&&e.preventDefault();setState('sending');setErr('');
-    const {error}=await sb.auth.signInWithOtp({email:email.trim(),options:{shouldCreateUser:false,emailRedirectTo:location.origin}});
-    if(error){setState('idle');setErr(/signup|not allowed|not found/i.test(error.message)?'That email doesn’t have access yet. Ask your administrator to invite you.':/rate|seconds|too many/i.test(error.message)?'Too many emails sent. Wait a minute, then try again.':error.message)}
-    else{setState('sent');setCode('')}};
-  const verify=async e=>{e.preventDefault();setState('checking');setErr('');
-    const token=code.replace(/\s/g,'');
-    let {error}=await sb.auth.verifyOtp({email:email.trim(),token,type:'email'});
-    if(error){const r=await sb.auth.verifyOtp({email:email.trim(),token,type:'magiclink'});error=r.error}
-    if(error){setState('sent');setErr(/expired|invalid/i.test(error.message)?'That code is wrong or has expired. Check the newest email, or send a new code.':error.message)}
-    /* on success the app signs you in automatically */};
+  /* Email + password. Accounts are created by an administrator in Supabase with a temporary
+     password; on first sign-in the person is asked to choose their own (see SetPassword). */
+  const [email,setEmail]=useState('');const [pw,setPw]=useState('');const [show,setShow]=useState(false);
+  const [busy,setBusy]=useState(false);const [err,setErr]=useState('');const [forgot,setForgot]=useState(false);
+  const signIn=async e=>{e.preventDefault();setBusy(true);setErr('');
+    const {error}=await sb.auth.signInWithPassword({email:email.trim(),password:pw});
+    setBusy(false);
+    if(error)setErr(/invalid login|credentials/i.test(error.message)?'That email or password is wrong.':/not confirmed/i.test(error.message)?'This account isn’t active yet. Ask your administrator to confirm it.':error.message)};
   return html`<${Centered}>
-    ${state==='sent'||state==='checking'
-      ?html`<form class="flex flex-col gap-3" onSubmit=${verify}>
-          <div><div class="font-semibold">Check your email</div>
-            <p class="text-[13px] text-muted mt-1">We sent a sign-in code to <b>${email}</b>. Type it below. Only the newest email works.</p></div>
-          <label class="grid gap-1"><span class="label">Code from the email</span>
-            <input id="login-code" inputmode="numeric" autocomplete="one-time-code" class="field mono text-[18px] tracking-[.3em] text-center" style=${{height:44}}
-              maxlength="10" placeholder="••••••" value=${code} autoFocus=${true} onInput=${e=>setCode(e.target.value.replace(/[^0-9]/g,''))}/></label>
-          ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
-          <button class="btn btn-primary justify-center" type="submit" disabled=${state==='checking'||code.length<6}>${state==='checking'?'Checking…':'Sign in'}</button>
-          <div class="flex justify-between text-[12.5px]">
-            <button type="button" class="underline underline-offset-2 text-muted hover:text-ink" onClick=${()=>{setState('idle');setErr('')}}>Use a different email</button>
-            <button type="button" class="underline underline-offset-2 text-muted hover:text-ink" onClick=${()=>send()}>Send a new code</button>
-          </div>
-        </form>`
-      :html`<form class="flex flex-col gap-3" onSubmit=${send}>
-          <p class="text-[13px] text-muted">Sign in with your work email. We’ll email you a code, so there’s no password to remember.</p>
-          <label class="grid gap-1"><span class="label">Email</span>
-            <input id="login-email" type="email" required autocomplete="email" class="field" value=${email} onInput=${e=>setEmail(e.target.value)}/></label>
-          ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
-          <button class="btn btn-primary justify-center" type="submit" disabled=${state==='sending'||!email.trim()}>${state==='sending'?'Sending…':'Email me a sign-in code'}</button>
-        </form>`}
+    <form class="flex flex-col gap-3" onSubmit=${signIn}>
+      <label class="grid gap-1"><span class="label">Email</span>
+        <input id="login-email" type="email" required autocomplete="username" class="field" value=${email} onInput=${e=>setEmail(e.target.value)}/></label>
+      <label class="grid gap-1"><span class="label">Password</span>
+        <div class="flex gap-2">
+          <input id="login-password" type=${show?'text':'password'} required autocomplete="current-password" class="field" value=${pw} onInput=${e=>setPw(e.target.value)}/>
+          <button type="button" class="btn shrink-0" onClick=${()=>setShow(x=>!x)} aria-pressed=${show}>${show?'Hide':'Show'}</button>
+        </div></label>
+      ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+      <button class="btn btn-primary justify-center" type="submit" disabled=${busy||!email.trim()||!pw}>${busy?'Signing in…':'Sign in'}</button>
+      <button type="button" class="text-[12.5px] underline underline-offset-2 text-muted hover:text-ink self-start" onClick=${()=>setForgot(x=>!x)}>Forgot your password?</button>
+      ${forgot&&html`<p class="text-[12.5px] text-muted -mt-1">Ask your administrator to reset it. You’ll get a temporary password and choose a new one when you sign in.</p>`}
+    </form>
   <//>`;
+}
+
+/* choose your own password: on first sign-in (after a temporary one), or any time from the header */
+function SetPassword({sb,first,onDone,onCancel}){
+  const [pw,setPw]=useState('');const [pw2,setPw2]=useState('');const [show,setShow]=useState(false);
+  const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const problem=pw.length>0&&pw.length<8?'Use at least 8 characters.':pw2&&pw!==pw2?'The two passwords don’t match.':'';
+  const save=async e=>{e.preventDefault();if(problem||!pw||pw!==pw2)return;setBusy(true);setErr('');
+    const {error}=await sb.auth.updateUser({password:pw,data:{password_set:true}});
+    setBusy(false);
+    if(error){setErr(/different/i.test(error.message)?'Choose a password different from your temporary one.':/weak|short|characters/i.test(error.message)?'That password is too weak. Make it longer, or mix in numbers and symbols.':error.message);return}
+    onDone()};
+  const body=html`<form class="flex flex-col gap-3" onSubmit=${save}>
+      <div><div class="font-semibold">${first?'Choose your password':'Change your password'}</div>
+        <p class="text-[13px] text-muted mt-1">${first?'You signed in with a temporary password. Choose your own to use from now on.':'Your new password works from your next sign-in.'}</p></div>
+      <label class="grid gap-1"><span class="label">New password</span>
+        <input id="new-password" type=${show?'text':'password'} autocomplete="new-password" class="field" value=${pw} autoFocus=${true} onInput=${e=>setPw(e.target.value)}/></label>
+      <label class="grid gap-1"><span class="label">Type it again</span>
+        <input id="new-password-2" type=${show?'text':'password'} autocomplete="new-password" class="field" value=${pw2} onInput=${e=>setPw2(e.target.value)}/></label>
+      <label class="inline-flex items-center gap-2 text-[12.5px] text-muted"><input id="show-pw" type="checkbox" checked=${show} onChange=${e=>setShow(e.target.checked)}/> Show passwords</label>
+      ${(problem||err)&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${problem||err}</div>`}
+      <div class="flex gap-2 justify-end">
+        ${onCancel&&html`<button type="button" class="btn" onClick=${onCancel}>Cancel</button>`}
+        <button class="btn btn-primary" type="submit" disabled=${busy||!!problem||!pw||pw!==pw2}>${busy?'Saving…':'Save password'}</button>
+      </div>
+    </form>`;
+  if(first)return html`<${Centered}>${body}<//>`;
+  return html`<div class="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onCancel()}}>
+    <div class="panel pop w-full max-w-[400px] p-5" role="dialog" aria-modal="true">${body}</div></div>`;
 }
 function FirstRun({canEdit,onStart}){
   const [busy,setBusy]=useState(false);
@@ -2218,6 +2233,8 @@ function FirstRun({canEdit,onStart}){
       :html`<p class="text-[13px] text-muted">The roster hasn’t been set up yet. A planner needs to sign in first.</p>`}
   <//>`;
 }
+/* people created with a temporary password haven't chosen their own yet */
+const needsPw=s=>!(s&&s.user&&s.user.user_metadata&&s.user.user_metadata.password_set);
 function Root(){
   const [phase,setPhase]=useState('boot');            /* boot | error | login | loading | empty | ready */
   const [msg,setMsg]=useState('');
@@ -2228,8 +2245,8 @@ function Root(){
       const r=await fetch('/api/config',{cache:'no-store'});const cfg=await r.json();
       if(!cfg.url||!cfg.anonKey){setMsg('The app isn’t connected to its database yet. Add SUPABASE_URL and SUPABASE_ANON_KEY in Vercel, then redeploy.');setPhase('error');return}
       const client=window.supabase.createClient(cfg.url,cfg.anonKey);setSb(client);
-      const {data:{session:s}}=await client.auth.getSession();setSession(s);setPhase(s?'loading':'login');
-      client.auth.onAuthStateChange((_e,s2)=>{setSession(s2);setPhase(p=>s2?(p==='login'?'loading':p):'login')});
+      const {data:{session:s}}=await client.auth.getSession();setSession(s);setPhase(s?(needsPw(s)?'setpw':'loading'):'login');
+      client.auth.onAuthStateChange((_e,s2)=>{setSession(s2);setPhase(p=>s2?(p==='login'?(needsPw(s2)?'setpw':'loading'):p):'login')});
     }catch(e){setMsg('Couldn’t reach the server. Check your connection and reload.');setPhase('error')}
   })()},[]);
   useEffect(()=>{if(phase!=='loading'||!sb||!session)return;(async()=>{
@@ -2245,6 +2262,7 @@ function Root(){
   if(phase==='boot'||phase==='loading')return html`<${Centered}><p class="text-[13px] text-muted">Loading…</p><//>`;
   if(phase==='error')return html`<${Centered}><p class="text-[13px]">${msg}</p><button class="btn" onClick=${()=>location.reload()}>Reload</button><//>`;
   if(phase==='login')return html`<${Login} sb=${sb}/>`;
+  if(phase==='setpw')return html`<${SetPassword} sb=${sb} first=${true} onDone=${()=>setPhase('loading')}/>`;
   if(phase==='empty')return html`<${FirstRun} canEdit=${role!=='viewer'} onStart=${start}/>`;
   return html`<${App} boot=${boot} live=${{sb,user:session.user,role,canEdit:role==='admin'||role==='planner'}}/>`;
 }

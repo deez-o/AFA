@@ -10,7 +10,7 @@ Scheduling board for crews, staff, machines and the asphalt plant, with jobs, sh
 
 ### 1. Database (Supabase)
 1. Supabase → your project → **SQL Editor** → **New query**. Paste all of `supabase/schema.sql` and click **Run**.
-2. **Authentication → Sign In / Providers**: make sure **Email** is on, and turn **off** "Allow new users to sign up" so only people you invite can get in.
+2. **Authentication → Sign In / Providers**: make sure **Email** is on, and turn **off** "Allow new users to sign up" so only people you add can get in.
 3. Note two values from **Project Settings → API**: the **Project URL** and the **anon public** key. Never use the `service_role` key in the app.
 
 ### 2. Website (Vercel)
@@ -22,31 +22,35 @@ Scheduling board for crews, staff, machines and the asphalt plant, with jobs, sh
 4. **Deploy**. Note the address Vercel gives you (e.g. `https://afa.vercel.app`).
 
 ### 3. Connect the two
-1. Supabase → **Authentication → URL Configuration**: set **Site URL** to the Vercel address, and add it under **Redirect URLs** too. Do the same later for your own domain.
-2. Supabase → **Authentication → Users → Invite user**: invite yourself, then open the roster and sign in with that email.
+1. Supabase → **Authentication → URL Configuration**: set **Site URL** to the Vercel address. Do the same later for your own domain.
+2. Create your own account: **Authentication → Users → Add user → Create new user**. Enter your email and a temporary password, tick **Auto Confirm User**, and click **Create user**.
 3. Make yourself the administrator: **SQL Editor** →
    ```sql
    update public.profiles set role = 'admin' where email = 'you@yourcompany.com.au';
    ```
-4. Reload the roster. The first time, it asks whether to start empty or with sample data.
+4. Open the roster and sign in with your email and the temporary password. It asks you to choose your own password, then whether to start empty or with sample data.
 
 ### Adding people
-Invite each person from **Authentication → Users → Invite user**. They start as **viewers** (can look, not change). To let someone edit, set their role to `planner` in **Table Editor → profiles**, or:
+1. **Authentication → Users → Add user → Create new user**: their email, a temporary password, tick **Auto Confirm User**.
+2. Give them the temporary password. When they first sign in, they choose their own.
+3. They start as **viewers** (can look, not change). To let someone edit, set their role to `planner` in **Table Editor → profiles**, or:
+   ```sql
+   update public.profiles set role = 'planner' where email = 'name@yourcompany.com.au';
+   ```
+
+### Resetting a forgotten password
+In **SQL Editor**, give them a new temporary password. They choose their own again when they next sign in:
 ```sql
-update public.profiles set role = 'planner' where email = 'name@yourcompany.com.au';
+update auth.users
+set encrypted_password = extensions.crypt('Temporary-Pass-123', extensions.gen_salt('bf')),
+    raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) - 'password_set',
+    email_confirmed_at = coalesce(email_confirmed_at, now())
+where email = 'name@yourcompany.com.au';
 ```
+Anyone signed in can change their own password with the key button at the top of the roster.
 
 ### Your own web address
 Vercel → Project → **Settings → Domains** → add e.g. `roster.yourcompany.com.au` and follow the DNS instructions. Then add the new address to Supabase's URL Configuration (step 3.1).
-
-### Sign-in codes
-People sign in with a code emailed to them. Add the code to Supabase's email:
-**Authentication → Email Templates → Magic Link** → in the message body, add a line such as
-`Your sign-in code is {{ .Token }}` and **Save**. (The link in the email still works too, but work email
-security scanners often open links first, which uses them up. The code avoids that.)
-
-### Sign-in emails
-Supabase's built-in email sender only allows a few emails an hour. Before rolling out to the whole team, set up your own email sender under **Project Settings → Authentication → SMTP Settings**.
 
 ## What is shared and what is personal
 Shared by everyone: crews, staff, machines, asphalt plants, jobs, bookings, quantities, mixes, binders and quote-change history.
