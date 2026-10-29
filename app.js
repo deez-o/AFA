@@ -282,6 +282,17 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
   </section>`;
 }
 
+function SealManager({data,setData}){
+  const setter=key=>(list,extra)=>setData(d=>{const n={...d,[key]:list};return extra?extra(n):n});
+  return html`<div class="flex-1 min-h-0 overflow-y-auto">
+    <${ListManager} title="Seal types" field="type" placeholder="e.g. 10mm Seal" data=${data} setData=${setData}
+      hint="Seal types offered on Seal crew bookings, in this order. Paving jobs can't pick these. Click the pencil to rename one or set its default binder (binders are listed under Mixes)."
+      items=${sealTypesOf(data)} setItems=${setter('sealTypes')}
+      binderOf=${t=>sealBinderOf(data)[t]||''} binderOptions=${bindersOf(data)}
+      onRenamed=${(d,from,to,ed)=>{const mb={...sealBinderOf(d)};delete mb[from];if(ed&&ed.binder)mb[to]=ed.binder;return {...d,sealBinder:mb}}}
+      onRemoved=${(d,t)=>{const mb={...sealBinderOf(d)};delete mb[t];return {...d,sealBinder:mb}}}/>
+  </div>`;
+}
 function MixesManager({data,setData}){
   /* setItems(list, extra) saves the list and optionally applies another change (e.g. renaming inside bookings) */
   const setter=key=>(list,extra)=>setData(d=>{const n={...d,[key]:list};return extra?extra(n):n});
@@ -474,7 +485,7 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
   const placeholders={crew:['Crew name, e.g. Crew 5','Type of work, e.g. Paving, Seal'],person:['Full name','Role, e.g. Roller operator'],machine:['Fleet no., e.g. R-09','Description, e.g. Tandem roller'],aplant:['Plant name, e.g. Asphalt plant 2','Location, e.g. Narangba']};
 
   const tabsBar=html`<div class="seg w-full !grid grid-cols-4 gap-0.5" role="tablist" aria-label="Resource type">
-        ${[...orderOf(data).filter(t=>TYPES[t]).map(t=>[t,TYPES[t].tab||TYPES[t].label,data.resources.filter(r=>r.type===t).length]),['jobs','Jobs',data.jobs.length],['mixes','Mixes',mixTypesOf(data).length]]
+        ${[...orderOf(data).filter(t=>TYPES[t]).map(t=>[t,TYPES[t].tab||TYPES[t].label,data.resources.filter(r=>r.type===t).length]),['jobs','Jobs',data.jobs.length],['mixes','Mixes',mixTypesOf(data).length],['seal','Seal',sealTypesOf(data).length]]
           .map(([t,label,n])=>html`<button key=${t} role="tab" class="flex-1 !px-1 !text-[12.5px]" aria-pressed=${tab===t} aria-selected=${tab===t} title=${`${label} (${n})`} onClick=${()=>{setTab(t);setConfirmId(null)}}>${label}</button>`)}
       </div>`;
   const headTop=html`<div class="flex items-center justify-between gap-2">
@@ -484,6 +495,10 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
   if(tab==='jobs')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
     <${JobsManager} data=${data} setData=${setData} onImport=${onImport} onMerge=${onMerge}/>
+  </aside>`;
+  if(tab==='seal')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
+    <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
+    <${SealManager} data=${data} setData=${setData}/>
   </aside>`;
   if(tab==='mixes')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
@@ -999,6 +1014,13 @@ const DEFAULT_MIX_BINDER={EME2:'EME2',SMA:'A15E'};
 const mixBinderOf=d=>d&&d.mixBinder&&typeof d.mixBinder==='object'?d.mixBinder:DEFAULT_MIX_BINDER;
 const binderForMix=(d,type)=>{const m=mixBinderOf(d);const t=(type||'').trim();
   const k=Object.keys(m).find(x=>x.toLowerCase()===t.toLowerCase());return k?m[k]:''};
+/* seal products (Resources → Seal): offered on Seal crew bookings instead of asphalt mixes; paving can't pick them */
+const SEAL_TYPES=['Prime','Primerseal','7mm Seal','10mm Seal','14mm Seal'];
+const sealTypesOf=d=>d&&Array.isArray(d.sealTypes)?d.sealTypes:SEAL_TYPES;
+const sealBinderOf=d=>d&&d.sealBinder&&typeof d.sealBinder==='object'?d.sealBinder:{};
+const isSealCrew=r=>!!r&&r.type==='crew'&&workKey(r.sub).includes('seal');
+const binderForProduct=(d,crew,type)=>{if(!isSealCrew(crew))return binderForMix(d,type);
+  const m=sealBinderOf(d);const t=(type||'').trim();const k=Object.keys(m).find(x=>x.toLowerCase()===t.toLowerCase());return k?m[k]:''};
 /* a mix is its asphalt type plus binder, e.g. "AC14 · C320" */
 const mixLabel=l=>((l.type||'').trim()||'No type')+(l.binder?' · '+l.binder:'');
 const linesOf=q=>!q?[]:Array.isArray(q.lines)?q.lines:[q];
@@ -1022,7 +1044,11 @@ const rekeyShifts=(sd,dx)=>sd&&dx?Object.fromEntries(Object.entries(sd).map(([k,
 const COLS='grid-cols-[1fr_1fr_1fr_28px] sm:grid-cols-[1fr_92px_80px_88px_76px_28px]';
 function AsphaltShifts({f,set,data}){
   /* list = company mixes + any new ones typed in this booking (so other lines can pick them straight away) */
-  const MIXES=[...new Set([...mixTypesOf(data),...linesTypes(f.shiftData)])];
+  const myCrew=data.resources.find(r=>r.id===f.resourceId);const seal=isSealCrew(myCrew);
+  const sealSet=new Set(sealTypesOf(data).map(x=>x.toLowerCase()));
+  const MIXES=seal?[...new Set([...sealTypesOf(data),...linesTypes(f.shiftData)])]
+    :[...new Set([...mixTypesOf(data),...linesTypes(f.shiftData)])].filter(t=>!sealSet.has(t.toLowerCase())||mixTypesOf(data).includes(t));  /* paving can't pick seal products */
+  const BF=v=>binderForProduct(data,myCrew,v);
   const tot=qtyTotals(f);
   const sd=f.shiftData||{};
   const night=f.shift==='night';
@@ -1052,7 +1078,7 @@ function AsphaltShifts({f,set,data}){
 
   return html`<section class="grid gap-3" aria-labelledby="sec-asphalt">
     <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h3 id="sec-asphalt" class="font-display text-[15px] font-semibold">Asphalt & job quantities</h3>
+      <h3 id="sec-asphalt" class="font-display text-[15px] font-semibold">${seal?'Seal':'Asphalt'} & job quantities</h3>
       <span class="text-[12px] text-muted">${tot.dates.length} shift${tot.dates.length===1?'':'s'} · ${tot.filled} filled in</span>
       <span class="flex-1"></span>
       <span class="inline-flex items-center gap-3 text-[12.5px] text-muted" role="group" aria-label="Weekend shifts" title="Unticked weekend days are greyed out on the booking and get no shift">
@@ -1093,7 +1119,7 @@ function AsphaltShifts({f,set,data}){
           <div class="max-h-[340px] overflow-y-auto">
             <div class="hidden sm:grid grid-cols-[118px_1fr] gap-2 px-2.5 py-1.5 bg-sunken border-b border-line sticky top-0 z-[1]">
               <span class="label">Shift</span>
-              <div class=${'grid gap-2 '+COLS}><span class="label">Asphalt type</span><span class="label">Binder</span><span class="label">Tonnes</span><span class="label">Area m²</span><span class="label">Depth mm</span><span></span></div>
+              <div class=${'grid gap-2 '+COLS}><span class="label">${seal?'Seal type':'Asphalt type'}</span><span class="label">Binder</span><span class="label">Tonnes</span><span class="label">Area m²</span><span class="label">Depth mm</span><span></span></div>
             </div>
             ${tot.dates.map((k,i)=>{
               const ls=shown(k);const d=parse(k);
@@ -1131,15 +1157,15 @@ function AsphaltShifts({f,set,data}){
                   ${ls.map((l,j)=>{const h=depthHint(l);const n=ls.length>1?` line ${j+1}`:'';
                     return html`<div key=${j} class=${'grid gap-2 items-center '+COLS}>
                       <div class="col-span-2 sm:col-span-1 flex items-center gap-1.5 min-w-0">
-                      <label class="flex-1 min-w-0"><span class="sr-only">Shift ${i+1}${n} asphalt type</span>
+                      <label class="flex-1 min-w-0"><span class="sr-only">Shift ${i+1}${n} ${seal?'seal':'asphalt'} type</span>
                         ${l._custom
                           ?html`<div class="flex gap-1">
-                              <input id=${`sh-${k}-${j}-type`} class="field field-sm" style=${ist} placeholder="Type the mix" value=${l.type||''} autoFocus=${true} onInput=${e=>{const v=e.target.value,b=binderForMix(data,v);setLine(k,j,b?{type:v,binder:b}:{type:v})}}/>
+                              <input id=${`sh-${k}-${j}-type`} class="field field-sm" style=${ist} placeholder=${seal?'Type the seal':'Type the mix'} value=${l.type||''} autoFocus=${true} onInput=${e=>{const v=e.target.value,b=BF(v);setLine(k,j,b?{type:v,binder:b}:{type:v})}}/>
                               <button type="button" class="shrink-0 w-7 h-[30px] inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" title="Pick from the list" aria-label="Pick from the mix list"
                                 onClick=${()=>setLine(k,j,{_custom:false,type:MIXES.includes(l.type)?l.type:''})}>${Icon.chevD}</button></div>`
                           :html`<select id=${`sh-${k}-${j}-type`} class="field field-sm mono" style=${{...ist,color:l.type?'var(--ink)':'var(--faint)'}} value=${l.type||''}
-                              onChange=${e=>{const v=e.target.value;if(v==='__other'){setLine(k,j,{_custom:true,type:''});return}const b=binderForMix(data,v);setLine(k,j,b?{type:v,binder:b}:{type:v})}}>
-                              <option value="">Mix</option>
+                              onChange=${e=>{const v=e.target.value;if(v==='__other'){setLine(k,j,{_custom:true,type:''});return}const b=BF(v);setLine(k,j,b?{type:v,binder:b}:{type:v})}}>
+                              <option value="">${seal?'Seal':'Mix'}</option>
                               ${MIXES.map(t=>html`<option key=${t} value=${t} style=${{color:'var(--ink)'}}>${t}</option>`)}
                               ${l.type&&!MIXES.includes(l.type)&&html`<option value=${l.type} style=${{color:'var(--ink)'}}>${l.type}</option>`}
                               <option value="__other" style=${{color:'var(--ink)'}}>Other…</option>
@@ -2346,8 +2372,10 @@ function App({boot,live}){
       if('customer' in jobPatch)n.customer=jobPatch.customer;
       if('completed' in jobPatch){if(jobPatch.completed){if(!j.completed){n.completed=true;n.completedAt=iso(TODAY)}}else{delete n.completed;delete n.completedAt}}
       return n})};
-    const known=mixTypesOf(d);const added=newMixes.filter(t=>!known.some(k=>k.toLowerCase()===t.toLowerCase()));
-    if(added.length)d={...d,mixTypes:[...known,...added]};
+    const sealJob=isSealCrew(d.resources.find(r=>r.id===b.resourceId));
+    const known=sealJob?sealTypesOf(d):mixTypesOf(d);const sealNames=sealJob?[]:sealTypesOf(d).map(x=>x.toLowerCase());
+    const added=newMixes.filter(t=>!known.some(k=>k.toLowerCase()===t.toLowerCase())&&!sealNames.includes(t.toLowerCase()));
+    if(added.length)d={...d,[sealJob?'sealTypes':'mixTypes']:[...known,...added]};
     /* log quote number changes for the notifications bell (kept a week) */
     const prev=d.blocks.find(x=>x.id===b.id);
     if(b.kind==='job'&&(prev?.quoteNo||'')!==(b.quoteNo||'')){
@@ -2467,7 +2495,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
@@ -2540,7 +2568,7 @@ async function pushRows(sb,{upserts,deletes}){
 /* data for a brand-new, empty roster */
 function emptyRoster(){
   return {resources:[{id:'a'+uid(),type:'aplant',name:'Asphalt plant',sub:'Main plant',hue:8,visible:true}],
-    jobs:[],blocks:[],quoteChanges:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},
+    jobs:[],blocks:[],quoteChanges:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},
     sectionOrder:[...DEFAULT_ORDER],orderV:2};
 }
 
