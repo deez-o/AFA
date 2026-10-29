@@ -706,7 +706,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
   useEffect(()=>{document.body.classList.toggle('is-dragging',!!(drag&&drag.moved))},[drag&&drag.moved]);
   const preview=drag&&drag.moved?{...drag.b,resourceId:drag.rid,start:iso(addDays(parse(drag.b.start),drag.dx)),end:iso(addDays(parse(drag.b.end),drag.dx))}:null;
   const effBlocks=preview?data.blocks.map(b=>b.id===preview.id?preview:b):data.blocks;
-  const quoteFresh=new Set(notifPrefs&&notifPrefs.quote===false?[]:recentQuoteChanges(data).map(c=>c.bookingId));
+  const quoteFresh=new Set(!(notifPrefs&&notifPrefs.quote)?[]:recentQuoteChanges(data).map(c=>c.bookingId));
   const nudge=(b,n)=>onMove({...b,start:iso(addDays(parse(b.start),n)),end:iso(addDays(parse(b.end),n))});
   const grid={gridTemplateColumns:`repeat(${N},minmax(${colMin}px,1fr))`};
   const colBg=d=>diffDays(d,TODAY)===0?'var(--accent-soft)':isWeekend(d)?'var(--weekend)':'transparent';
@@ -1861,7 +1861,7 @@ const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking
   {id:'resource',label:'Crews, staff, machines & plants',desc:'Added, renamed or removed.'},
   {id:'lists',label:'Mixes & seal lists',desc:'Mix, seal and binder lists edited.'}];
 const NOTIF_KEY=KEY+':notif-prefs';
-const NOTIF_DEFAULT={quote:true,booking:true,job:true,resource:true,lists:true};
+const NOTIF_DEFAULT={quote:false,booking:false,job:false,resource:false,lists:false}; /* all off until a person turns them on */
 const loadNotifPrefs=()=>{try{return {...NOTIF_DEFAULT,...JSON.parse(localStorage.getItem(NOTIF_KEY)||'{}')}}catch(e){return {...NOTIF_DEFAULT}}};
 const recentQuoteChanges=data=>(data.quoteChanges||[]).filter(c=>Date.now()-c.at<NOTIF_MS).sort((a,b)=>b.at-a.at);
 const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.round(m/60);return `${h} hr${h===1?'':'s'} ago`};
@@ -1929,7 +1929,7 @@ function withChangeLog(cur,next,by){
   const now=Date.now();const log=(next.changeLog||[]).filter(c=>now-c.at<CHANGE_KEEP);
   return {...next,changeLog:[...log,...ch.map(c=>({id:uid(),at:now,...c,...(by?{by}:{})}))]};
 }
-const recentChanges=(data,prefs)=>(data.changeLog||[]).filter(c=>Date.now()-c.at<NOTIF_MS&&prefs[c.type]!==false);
+const recentChanges=(data,prefs)=>(data.changeLog||[]).filter(c=>Date.now()-c.at<NOTIF_MS&&!!prefs[c.type]);
 /* ---------- settings menu: dark mode, notifications and (live) account ---------- */
 function SwitchRow({id,label,desc,on,onChange}){
   return html`<label class="flex items-start gap-3 px-2 py-2 rounded-lg hover:bg-sunken cursor-pointer">
