@@ -2202,7 +2202,7 @@ function Notifications({data,onOpen,prefs,setPrefs}){
    Daily program: trucks, subcontractors, start time and comments per shift,
    and a branded PDF for each job working on a given day.
    ===================================================================== */
-const TRUCK_WEIGHTS=['3T','5T','10T','12T','15T','18T','25T'];
+const TRUCK_WEIGHTS=['12T','15T','18T','25T'];
 const DEFAULT_TRUCKS=['AFA WF','AFA 10 W','AFA 8 W','AFA FLOCON','BIG DAVES','YDD','RCA','SWARLY','CD CARTAGE','HT','PAVETECH','RAP RESOURCES','NEWY GROUP','ACE TIPPERS','KELLY','ALL ASPECTS','BITUMILL'];
 const DEFAULT_SUBS=['BCM','SITE SERVICES','AL BAY','BEAU STRIKE','GPC CONTRACTORS','SOUTH EAST PROFILING','MR ROADS CREW MEMBERS','MASTERHIRE LIGHTING TOWER','BELLS DIESEL LIGHTING TOWER','HT','AUSTCORP','SWARLY','PAVETECH','RIVERCITY','ALL ASPECTS','BITUMILL','SHERRIN RENTALS'];
 const PROGRAM_LOCATIONS=['SITE','SCA','BALD HILLS YARD'];
