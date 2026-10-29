@@ -3098,6 +3098,7 @@ function App({boot,live}){
         <button class="btn" onClick=${toggleResources} aria-pressed=${panel} aria-controls="resources-panel"
           title=${panel?'Hide the Resources panel':'Show the Resources panel'}
           style=${panel?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.list} Resources</button>
+        <button class="btn" onClick=${()=>setProgram(true)} title="Daily program PDFs for each job on a day">${Icon.download} Daily program</button>
         <div class="flex items-center gap-2 min-w-0">
           <span class="inline-flex w-7 h-7 rounded-md items-center justify-center font-display font-bold text-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}}>R</span>
           <h1 class="font-display text-[20px] font-semibold tracking-tight truncate">Crew & Plant Roster</h1>
@@ -3117,7 +3118,6 @@ function App({boot,live}){
         </div>
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
         <button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis('crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>
-        <button class="btn" onClick=${()=>setProgram(true)} title="Daily program PDFs for each job on a day">${Icon.list} Daily program</button>
         <button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>
         <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${live.role==='admin'?()=>setLogOpen(true):null}/>
       </header>
