@@ -1909,8 +1909,8 @@ function describeChanges(a,b){
     b.blocks.forEach(x=>{const p=am.get(x.id);
       if(!p){out.push({type:'booking',text:`Booking added: ${what(b,x)}`,sub:`${rname(b,x.resourceId)} · ${when(x)}`,blockId:x.id});return}
       if(p===x||same(p,x))return;
-      if((p.quoteNo||'')!==(x.quoteNo||'')&&same({...p,quoteNo:''},{...x,quoteNo:''}))return;  /* quote-only changes have their own notification */
-      out.push({type:'booking',text:`Booking changed: ${what(b,x)}`,sub:`${rname(b,x.resourceId)} · ${when(x)}`,details:bookingDiff(a,b,p,x,rname,jname,when),blockId:x.id})});
+      const quoteOnly=(p.quoteNo||'')!==(x.quoteNo||'')&&same({...p,quoteNo:''},{...x,quoteNo:''});  /* quote-only: own notification, still in the full log */
+      out.push({type:'booking',text:`Booking changed: ${what(b,x)}`,sub:`${rname(b,x.resourceId)} · ${when(x)}`,details:bookingDiff(a,b,p,x,rname,jname,when),blockId:x.id,...(quoteOnly?{quoteOnly:true}:{})})});
     a.blocks.forEach(p=>{if(!bm.has(p.id))out.push({type:'booking',text:`Booking deleted: ${what(a,p)}`,sub:`${rname(a,p.resourceId)} · ${when(p)}`})});
   }
   if(a.jobs!==b.jobs){
@@ -1945,10 +1945,64 @@ function withChangeLog(cur,next,by){
   if(!next||next===cur)return next;
   let ch;try{ch=describeChanges(cur,next)}catch(e){ch=[]}
   if(!ch.length)return next;
-  const now=Date.now();const log=(next.changeLog||[]).filter(c=>now-c.at<CHANGE_KEEP);
+  const now=Date.now();let log=next.changeLog||[];
+  if(log.length>4990)log=[...log].sort((x,y)=>x.at-y.at).slice(-4990);   /* full history: newest 5,000 changes */
   return {...next,changeLog:[...log,...ch.map(c=>({id:uid(),at:now,...c,...(by?{by}:{})}))]};
 }
-const recentChanges=(data,prefs)=>(data.changeLog||[]).filter(c=>Date.now()-c.at<NOTIF_MS&&!!prefs[c.type]);
+const recentChanges=(data,prefs)=>(data.changeLog||[]).filter(c=>!c.quoteOnly&&Date.now()-c.at<NOTIF_MS&&!!prefs[c.type]);
+/* ---------- full change log (administrators) ---------- */
+const LOG_TYPES=[['all','Everything'],['booking','Bookings'],['quote','Quote numbers'],['job','Jobs'],['resource','Crews, staff & machines'],['lists','Mixes & seal lists']];
+function ChangeLogDialog({data,onClose,onOpen}){
+  const [q,setQ]=useState('');const [type,setType]=useState('all');const [who,setWho]=useState('');const [limit,setLimit]=useState(300);
+  useEffect(()=>{const h=e=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
+  /* quote-number-only edits are logged as booking changes flagged quoteOnly; list them under "Quote numbers" */
+  const all=useMemo(()=>(data.changeLog||[]).map(c=>c.quoteOnly?{...c,type:'quote'}:c).sort((a,b)=>b.at-a.at),[data.changeLog]);
+  const people=[...new Set(all.map(c=>c.by).filter(Boolean))].sort();
+  const t=q.trim().toLowerCase();
+  const shown=all.filter(c=>(type==='all'||c.type===type)&&(!who||c.by===who)&&(!t||[c.text,c.sub,c.by,...(c.details||[])].join(' ').toLowerCase().includes(t)));
+  const dayOf=at=>{const d=new Date(at);return `${WD[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`};
+  const timeOf=at=>new Date(at).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'});
+  let last='';
+  return html`<div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div class="panel pop w-full max-w-[760px] flex flex-col max-h-full overflow-hidden" style=${{height:'min(820px,100%)'}} role="dialog" aria-modal="true" aria-labelledby="log-title">
+      <div class="px-5 pt-5 pb-3 border-b border-line grid gap-3">
+        <div class="flex items-start gap-3">
+          <div class="min-w-0 flex-1">
+            <div id="log-title" class="font-display text-[18px] font-semibold">Change log</div>
+            <div class="text-[12.5px] text-muted">Every change made to the roster, newest first. Only administrators see this.</div>
+          </div>
+          <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <input id="log-q" class="field field-sm flex-1 min-w-[160px]" style=${{height:32}} placeholder="Search: job, crew, quote, person…" value=${q} onInput=${e=>{setQ(e.target.value);setLimit(300)}} aria-label="Search the change log"/>
+          <select id="log-type" class="field field-sm w-auto" style=${{height:32}} value=${type} onChange=${e=>{setType(e.target.value);setLimit(300)}} aria-label="Type of change">
+            ${LOG_TYPES.map(([v,l])=>html`<option key=${v} value=${v}>${l}</option>`)}</select>
+          ${people.length>0&&html`<select id="log-who" class="field field-sm w-auto" style=${{height:32}} value=${who} onChange=${e=>{setWho(e.target.value);setLimit(300)}} aria-label="Changed by">
+            <option value="">Anyone</option>${people.map(p=>html`<option key=${p} value=${p}>${p}</option>`)}</select>`}
+        </div>
+        <div class="text-[12px] text-muted">${shown.length} change${shown.length===1?'':'s'}${shown.length!==all.length?` (of ${all.length})`:''}</div>
+      </div>
+      <div class="flex-1 min-h-0 overflow-y-auto">
+        ${shown.length===0&&html`<div class="px-5 py-10 text-center text-[13px] text-muted">${all.length?'No changes match.':'No changes recorded yet. Changes are logged from now on.'}</div>`}
+        ${shown.slice(0,limit).map(c=>{const day=dayOf(c.at);const head=day!==last;last=day;const b=c.blockId&&data.blocks.find(x=>x.id===c.blockId);
+          return html`<div key=${c.id}>
+            ${head&&html`<div class="sticky top-0 z-[1] px-5 py-1.5 bg-sunken border-b border-line label">${day}</div>`}
+            <div class="px-5 py-2.5 border-b border-line flex items-start gap-3">
+              <span class="mono text-[11.5px] text-muted w-[58px] shrink-0 pt-0.5">${timeOf(c.at)}</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-[13px] font-medium">${c.text}</div>
+                ${c.sub&&html`<div class="text-[12px] text-muted">${c.sub}</div>`}
+                ${c.details&&c.details.length>0&&html`<ul class="mt-1 grid gap-0.5 text-[12px] leading-snug">${c.details.map((d,i)=>html`<li key=${i} class="flex gap-1.5"><span class="text-faint shrink-0">•</span><span class="min-w-0 break-words">${d}</span></li>`)}</ul>`}
+                ${c.by&&html`<div class="text-[11.5px] text-faint mt-0.5">by ${c.by}</div>`}
+              </div>
+              ${b&&html`<button class="btn shrink-0" style=${{height:28}} onClick=${()=>{onClose();onOpen(b)}}>Open</button>`}
+            </div></div>`})}
+        ${shown.length>limit&&html`<div class="p-4 text-center"><button class="btn" onClick=${()=>setLimit(l=>l+300)}>Show more (${shown.length-limit} left)</button></div>`}
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ---------- settings menu: dark mode, notifications and (live) account ---------- */
 function SwitchRow({id,label,desc,on,onChange}){
   return html`<label class="flex items-start gap-3 px-2 py-2 rounded-lg hover:bg-sunken cursor-pointer">
@@ -1960,7 +2014,7 @@ function SwitchRow({id,label,desc,on,onChange}){
     </span>
   </label>`;
 }
-function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account}){
+function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog}){
   const [open,setOpen]=useState(false);
   const ref=React.useRef(null);
   useEffect(()=>{if(!open)return;
@@ -1984,6 +2038,8 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account}){
         <${SwitchRow} id="set-dark" label="Dark mode" on=${theme==='dark'} onChange=${()=>toggleTheme()}/>
         ${sectionLabel('Notifications')}
         ${NOTIF_TYPES.map(t=>html`<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
+        ${onLog&&html`${sectionLabel('Administration')}
+          <button class="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);onLog()}}>${Icon.list} Change log</button>`}
       </div>
       ${account&&html`<div class="border-t border-line p-2 grid">
         <button class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);account.onChangePw()}}>${Icon.key} Change password</button>
@@ -2443,7 +2499,7 @@ function App({boot,live}){
   const [tab,setTab]=useState('crew');
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
-  const [importing,setImporting]=useState(false);const [merging,setMerging]=useState(false);
+  const [importing,setImporting]=useState(false);const [merging,setMerging]=useState(false);const [logOpen,setLogOpen]=useState(false);
   const [forecast,setForecast]=useState(false);
   const [changePw,setChangePw]=useState(false);
   const [notifPrefs,setNotifPrefs]=useState(loadNotifPrefs);
@@ -2504,7 +2560,7 @@ function App({boot,live}){
     if(b.kind==='job'&&(prev?.quoteNo||'')!==(b.quoteNo||'')){
       const j=d.jobs.find(x=>x.id===b.jobId);
       const log=(d.quoteChanges||[]).filter(c=>Date.now()-c.at<7*DAY_MS);
-      d={...d,quoteChanges:[...log,{id:uid(),bookingId:b.id,from:prev?.quoteNo||'',to:b.quoteNo||'',at:Date.now(),jobName:j?jobLabel(j):''}]};
+      d={...d,quoteChanges:[...log,{id:uid(),bookingId:b.id,from:prev?.quoteNo||'',to:b.quoteNo||'',at:Date.now(),jobName:j?jobLabel(j):'',...(window.__rosterMe?{by:window.__rosterMe}:{})}]};
     }
     return {...d,blocks:exists?d.blocks.map(x=>x.id===b.id?b:x):[...d.blocks,b]}});
     setToast(editing?.id?'Booking saved':'Booking added');setEditing(null)};
@@ -2571,7 +2627,7 @@ function App({boot,live}){
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
         <button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis('crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>
         <button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>
-        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}}/>
+        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${live.role==='admin'?()=>setLogOpen(true):null}/>
       </header>
 
       <section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
@@ -2601,6 +2657,7 @@ function App({boot,live}){
     ${forecast&&html`<${ForecastDialog} data=${data} onClose=${()=>setForecast(false)} notify=${setToast}/>`}
     ${importing&&html`<${TeamCalImport} data=${data} setData=${setData} onClose=${()=>setImporting(false)} notify=${setToast}/>`}
     ${merging&&html`<${MergeSplits} data=${data} setData=${setData} onClose=${()=>setMerging(false)} notify=${setToast}/>`}
+    ${logOpen&&html`<${ChangeLogDialog} data=${data} onClose=${()=>setLogOpen(false)} onOpen=${b=>setEditing(b)}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)}/>`}
     ${toast&&html`<div class="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-[13px] font-medium pop" role="status"
