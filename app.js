@@ -11,9 +11,12 @@ const mondayOf=d=>addDays(d,-((d.getDay()+6)%7));
 const isWeekend=d=>d.getDay()===0||d.getDay()===6;
 /* is this date a working shift for the booking? weekdays always; Saturday and Sunday only when ticked
    (older bookings only have the single weekendShifts switch, which covers both days) */
-const satOn=b=>b.satShift!==undefined?!!b.satShift:!!b.weekendShifts;
-const sunOn=b=>b.sunShift!==undefined?!!b.sunShift:!!b.weekendShifts;
-const worksOn=(b,d)=>b.offDays&&b.offDays.includes(iso(d))?false:d.getDay()===6?satOn(b):d.getDay()===0?sunOn(b):true;
+/* night works default to Friday and Saturday off, Sunday on (Sunday night to Thursday night) */
+const satOn=b=>b.satShift!==undefined?!!b.satShift:b.shift==='night'?false:!!b.weekendShifts;
+const sunOn=b=>b.sunShift!==undefined?!!b.sunShift:b.shift==='night'?true:!!b.weekendShifts;
+/* night works also have a Friday switch (Friday night is part of the weekend); day works always work Fridays */
+const friOn=b=>b.shift!=='night'||!!b.friShift;
+const worksOn=(b,d)=>b.offDays&&b.offDays.includes(iso(d))?false:d.getDay()===6?satOn(b):d.getDay()===0?sunOn(b):d.getDay()===5?friOn(b):true;
 const TODAY=(()=>{const t=new Date();t.setHours(12,0,0,0);return t})();
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const WD=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -1053,6 +1056,9 @@ function AsphaltShifts({f,set,data}){
       <span class="text-[12px] text-muted">${tot.dates.length} shift${tot.dates.length===1?'':'s'} · ${tot.filled} filled in</span>
       <span class="flex-1"></span>
       <span class="inline-flex items-center gap-3 text-[12.5px] text-muted" role="group" aria-label="Weekend shifts" title="Unticked weekend days are greyed out on the booking and get no shift">
+        ${night&&html`<label class="inline-flex items-center gap-1.5 cursor-pointer">
+          <input id="ed-fri" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${friOn(f)} onChange=${e=>set({friShift:e.target.checked,satShift:satOn(f),sunShift:sunOn(f)})}/>
+          Friday</label>`}
         <label class="inline-flex items-center gap-1.5 cursor-pointer">
           <input id="ed-sat" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${satOn(f)} onChange=${e=>set({satShift:e.target.checked,sunShift:sunOn(f)})}/>
           Saturday</label>
@@ -2064,7 +2070,7 @@ function applyTeamCalImport(d,{bookings,crewMap,customers}){
 /* ---------- merging bookings that were split over a weekend ---------- */
 /* Before Saturday/Sunday could be switched per booking, one job was often entered as several bookings
    (e.g. Wed–Fri, then Mon–Tue). Bookings for the same job, crew and shift whose gap is only weekend days
-   (or no gap at all; a gap may be Fri–Sun) are joined into one — paving crews only; gap weekdays become days off; a weekend day stays a shift only if one of the old bookings worked it. */
+   (or no gap at all; for night works a gap may include Friday) are joined into one — paving crews only; a weekend day stays a shift only if one of the old bookings worked it. */
 function mergePlan(data){
   const groups=new Map();
   const pav=new Set(data.resources.filter(isPavingCrew).map(r=>r.id));   /* paving crews only */
@@ -2076,7 +2082,7 @@ function mergePlan(data){
     let run=[list[0]],endMax=list[0].end;
     const flush=()=>{if(run.length>1)plans.push(run)};
     for(let i=1;i<list.length;i++){const b=list[i];let ok=true;
-      for(let d=addDays(parse(endMax),1);iso(d)<b.start;d=addDays(d,1))if(!isWeekend(d)&&d.getDay()!==5){ok=false;break}
+      for(let d=addDays(parse(endMax),1);iso(d)<b.start;d=addDays(d,1))if(!isWeekend(d)&&!(d.getDay()===5&&b.shift==='night')){ok=false;break}
       if(ok){run.push(b);if(b.end>endMax)endMax=b.end}else{flush();run=[b];endMax=b.end}}
     flush()});
   return plans.sort((a,b)=>a[0].start<b[0].start?-1:1);
@@ -2089,14 +2095,11 @@ function mergeRun(run){
   const notes=[...new Set(run.map(b=>(b.notes||'').trim()).filter(Boolean))].join('\n');
   const keys=[...new Set(run.flatMap(b=>[b.importKey,...(b.importKeys||[])]).filter(Boolean))];
   const out={...run[0],start,end,satShift:run.some(b=>works(b,6)),sunShift:run.some(b=>works(b,0)),
+    ...(run[0].shift==='night'?{friShift:run.some(b=>works(b,5))}:{}),
     plantIds:[...new Set(run.flatMap(b=>b.plantIds||[]))],address:pick('address'),quoteNo:pick('quoteNo'),projectNo:pick('projectNo'),notes};
   if(Object.keys(sd).length)out.shiftData=sd;else delete out.shiftData;
   if(keys.length)out.importKeys=keys;
-  /* weekdays in a gap that no booking covered become days off; earlier days off stay */
-  const covered=k=>run.some(b=>k>=b.start&&k<=b.end&&worksOn(b,parse(k)));
-  const off=new Set(run.flatMap(b=>b.offDays||[]));
-  for(let d=parse(start);iso(d)<=end;d=addDays(d,1)){const k=iso(d);if(!isWeekend(d)&&!covered(k))off.add(k)}
-  if(off.size)out.offDays=[...off].sort();else delete out.offDays;
+  const off=[...new Set(run.flatMap(b=>b.offDays||[]))].sort();if(off.length)out.offDays=off;else delete out.offDays;
   return out;
 }
 function MergeSplits({data,setData,onClose,notify}){
@@ -2115,14 +2118,14 @@ function MergeSplits({data,setData,onClose,notify}){
       <div class="px-5 pt-5 pb-3 border-b border-line flex items-start gap-3">
         <div class="min-w-0 flex-1">
           <div id="mg-title" class="font-display text-[18px] font-semibold">Merge split bookings</div>
-          <div class="text-[12.5px] text-muted">Paving crew bookings for the same job, crew and shift with only Friday–Sunday (or nothing) between them. Gap days nobody booked are greyed out.</div>
+          <div class="text-[12.5px] text-muted">Paving crew bookings for the same job, crew and shift with only a weekend (or nothing) between them; for night works Friday counts as weekend. Weekend days nobody booked are greyed out.</div>
         </div>
         <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button>
       </div>
       <div class="overflow-y-auto p-3 grid gap-2">
         ${plans.length===0&&html`<div class="text-[13px] text-muted p-3">Nothing to merge. No paving job has bookings split over a weekend.</div>`}
         ${plans.map((r,i)=>{const m=mergeRun(r);const j=data.jobs.find(x=>x.id=== r[0].jobId);const crew=data.resources.find(x=>x.id===r[0].resourceId);
-          const wk=[!m.satShift&&'Sat',!m.sunShift&&'Sun'].filter(Boolean);const offs=(m.offDays||[]).map(k=>`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`);
+          const wk=[m.shift==='night'&&!m.friShift&&'Fri',!m.satShift&&'Sat',!m.sunShift&&'Sun'].filter(Boolean);const offs=(m.offDays||[]).map(k=>`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`);
           return html`<label key=${r[0].id} class="flex items-start gap-3 rounded-lg border border-line px-3 py-2.5 cursor-pointer hover:bg-sunken">
             <input type="checkbox" class="w-4 h-4 mt-0.5" style=${{accentColor:'var(--accent)'}} checked=${on[i]} onChange=${e=>setOn(o=>o.map((v,k)=>k===i?e.target.checked:v))}/>
             <span class="min-w-0 grid gap-0.5">
