@@ -193,7 +193,7 @@ function rowStats(r,data,days){
 
 /* ---------- mixes & binders manager (Resources panel → Mixes tab) ---------- */
 /* One editable list: reorder, rename (also updates booking lines that use it), remove, add. */
-function ListManager({title,hint,items,setItems,field,placeholder,data,setData,onRenamed,onRemoved,rapOf,binderOf,binderOptions}){
+function ListManager({title,hint,items,setItems,field,placeholder,data,setData,onRenamed,onRemoved,rapOf,binderOf,binderOptions,servicesOf}){
   const [name,setName]=useState('');
   const [editing,setEditingItem]=useState(null); /* {from,to} */
   const [confirm,setConfirm]=useState(null);
@@ -245,6 +245,9 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
                 ${editing.binder&&!binderOptions.includes(editing.binder)&&html`<option value=${editing.binder}>${editing.binder}</option>`}
               </select></label>
               <span class="text-[11px] text-faint -mt-1">Filled in automatically when this mix is picked on a shift.</span>`}
+            ${servicesOf&&html`<label class="grid gap-1 text-[12.5px]"><span class="text-muted">Services they provide (one per line)</span>
+              <textarea id=${idp+'svc-'+i} class="field field-sm" style=${{height:'auto',minHeight:72,padding:'6px 8px',fontSize:13,resize:'vertical'}} rows="3"
+                placeholder=${'e.g. Shuttle buggy\nx 3 labourers\nBobcat hire'} value=${editing.services||''} onInput=${e=>setEditingItem({...editing,services:e.target.value})}></textarea></label>`}
             ${msg&&html`<span class="text-[12px]" style=${{color:'var(--bad)'}}>${msg}</span>`}
             <div class="flex gap-1.5 justify-end">
               <button type="button" class="btn btn-ghost" style=${{height:28}} onClick=${()=>{setEditingItem(null);setMsg('')}}>Cancel</button>
@@ -259,6 +262,7 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
           <div class="min-w-0 flex-1">
             <div class="mono font-semibold text-[13.5px] truncate">${t}</div>
             ${rapOf&&rapOf(t)>0&&html`<div class="text-[11.5px] font-medium" style=${{color:'var(--ok)'}}>${fmtN(rapOf(t))}% RAP</div>`}
+            ${servicesOf&&servicesOf(t).length>0&&html`<div class="text-[11.5px] text-muted truncate" title=${servicesOf(t).join(', ')}>${servicesOf(t).join(' · ')}</div>`}
           </div>
           ${confirm===t
             ?html`<div class="flex flex-col items-end gap-1 max-w-[150px]">
@@ -267,7 +271,7 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
                   <button class="text-[11px] font-semibold px-2 py-0.5 rounded" style=${{background:'hsl(352 70% var(--blk-l))',color:'hsl(352 60% var(--blk-fg-l))'}} onClick=${()=>remove(t)}>Remove</button>
                   <button class="text-[11px] text-muted px-1.5" onClick=${()=>setConfirm(null)}>Keep</button></div></div>`
             :html`<div class="flex items-center gap-0.5 lg:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                <button class=${iconBtn} onClick=${()=>{const rp=rapOf?rapOf(t):0;setEditingItem({from:t,to:t,hasRap:rp>0,rap:rp>0?String(rp):'',binder:binderOf?binderOf(t):''});setConfirm(null);setMsg('')}} aria-label=${'Edit '+t} title="Edit">${Icon.pencil}</button>
+                <button class=${iconBtn} onClick=${()=>{const rp=rapOf?rapOf(t):0;setEditingItem({from:t,to:t,hasRap:rp>0,rap:rp>0?String(rp):'',binder:binderOf?binderOf(t):'',services:servicesOf?servicesOf(t).join('\n'):''});setConfirm(null);setMsg('')}} aria-label=${'Edit '+t} title="Edit">${Icon.pencil}</button>
                 <button class=${iconBtn} onClick=${()=>{setConfirm(t);setEditingItem(null)}} aria-label=${'Remove '+t} title="Remove from the list">${Icon.x}</button></div>`}
         </li>`;})}
       ${items.length===0&&html`<li class="px-3 py-4 text-center text-muted text-[13px]">Nothing in the list yet. Add one below.</li>`}
@@ -1884,7 +1888,7 @@ const recentQuoteChanges=data=>(data.quoteChanges||[]).filter(c=>Date.now()-c.at
 const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.round(m/60);return `${h} hr${h===1?'':'s'} ago`};
 /* ---------- change log: every change to the shared roster becomes a notification ---------- */
 const CHANGE_KEEP=7*DAY_MS;
-const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
+const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
 const RES_WORD={crew:'Crew',person:'Staff member',machine:'Machine',aplant:'Plant'};
 /* exactly what changed on one booking, as "Field: before → after" lines */
 function bookingDiff(a,b,p,x,rname,jname,when){
@@ -2145,6 +2149,23 @@ const DEFAULT_TRUCKS=['AFA WF','AFA 10 W','AFA 8 W','AFA FLOCON','BIG DAVES','YD
 const DEFAULT_SUBS=['BCM','SITE SERVICES','AL BAY','BEAU STRIKE','GPC CONTRACTORS','SOUTH EAST PROFILING','MR ROADS CREW MEMBERS','MASTERHIRE LIGHTING TOWER','BELLS DIESEL LIGHTING TOWER','HT','AUSTCORP','SWARLY','PAVETECH','RIVERCITY','ALL ASPECTS','BITUMILL','SHERRIN RENTALS'];
 const PROGRAM_LOCATIONS=['SITE','SCA','BALD HILLS YARD'];
 const PROGRAM_FOOTER=['SPOTTER TO WEAR PINK AT ALL TIMES','PRESTART ALL MACHINERY - PRESTARTS TO BE COMPLETED ON MEX.'];
+const DEFAULT_SUB_SERVICES={'PAVETECH':['x 3 Labourers','Bobcat Hire'],'BCM':['Shuttle Buggy','2m Hourly'],'RIVERCITY':['10ft Paver Hire']};
+const subServicesOf=d=>d&&d.subServices&&typeof d.subServices==='object'?d.subServices:DEFAULT_SUB_SERVICES;
+const servicesFor=(d,name)=>{const m=subServicesOf(d);const k=Object.keys(m).find(x=>x.toLowerCase()===String(name||'').trim().toLowerCase());return k?m[k]:[]};
+const addMin=(t,n)=>{const m=/^(\d{1,2}):(\d{2})/.exec(t||'');if(!m)return '';let v=(+m[1]*60+ +m[2]+n)%1440;if(v<0)v+=1440;return `${pad(Math.floor(v/60))}:${pad(v%60)}`};
+/* after a booking is saved: subcontractors, services and trucks typed in by hand join the lists */
+function learnProgramLists(d,b){
+  const subs=[],trucks=[];Object.values(b.shiftData||{}).forEach(q=>{(q&&q.subs||[]).forEach(x=>subs.push(x));(q&&q.trucks||[]).forEach(x=>trucks.push(x))});
+  if(!subs.length&&!trucks.length)return d;
+  const has=(l,v)=>l.some(x=>x.toLowerCase()===v.toLowerCase());
+  let subCos=[...subCosOf(d)],truckCos=[...truckCosOf(d)],svc={...subServicesOf(d)},ch=false;
+  subs.forEach(x=>{const n=(x.name||'').trim();if(!n)return;
+    if(!has(subCos,n)){subCos.push(n);ch=true}
+    const i=(x.info||'').trim();if(!i)return;const key=Object.keys(svc).find(k=>k.toLowerCase()===n.toLowerCase())||n;
+    const cur=svc[key]||[];if(!has(cur,i)){svc[key]=[...cur,i];ch=true}});
+  trucks.forEach(x=>{const n=(x.co||'').trim();if(n&&!has(truckCos,n)){truckCos.push(n);ch=true}});
+  return ch?{...d,subCos,truckCos,subServices:svc}:d;
+}
 const truckCosOf=d=>d&&Array.isArray(d.truckCos)?d.truckCos:DEFAULT_TRUCKS;
 const subCosOf=d=>d&&Array.isArray(d.subCos)?d.subCos:DEFAULT_SUBS;
 const truckHas=t=>!!t&&!!(t.co||t.driver||t.w||t.time||t.loc);
@@ -2167,8 +2188,11 @@ function TrucksManager({data,setData}){
       items=${truckCosOf(data)} setItems=${setter('truckCos')}/>
     <div class="border-t border-line mx-4"></div>
     <${ListManager} title="Subcontractors" field="subco" placeholder="e.g. BCM" data=${data} setData=${setData}
-      hint="Subcontractors offered in a booking's Trucks & Subcontractors tab, in this order."
-      items=${subCosOf(data)} setItems=${setter('subCos')}/>
+      hint="Subcontractors offered in a booking's Trucks & Subcontractors tab, in this order. Click the pencil to rename one or list the services they provide."
+      items=${subCosOf(data)} setItems=${setter('subCos')} servicesOf=${t=>subServicesOf(data)[t]||[]}
+      onRenamed=${(d,from,to,ed)=>{const m={...subServicesOf(d)};const list=ed&&typeof ed.services==='string'?[...new Set(ed.services.split('\n').map(x=>x.trim()).filter(Boolean))]:(m[from]||[]);
+        delete m[from];if(list.length)m[to]=list;return {...d,subServices:m}}}
+      onRemoved=${(d,t)=>{const m={...subServicesOf(d)};delete m[t];return {...d,subServices:m}}}/>
   </div>`;
 }
 
@@ -2182,8 +2206,16 @@ function ProgramShifts({f,set,data}){
   const upd=p=>set({shiftData:{...sd,[k]:{...shiftBase(q),lines:linesOnly(q),...p}}});
   const trucks=q.trucks&&q.trucks.length?q.trucks:[{}];
   const subs=q.subs&&q.subs.length?q.subs:[{}];
-  const setT=(j,p)=>upd({trucks:trucks.map((t,x)=>x===j?{...t,...p}:t)});
-  const setS=(j,p)=>upd({subs:subs.map((s,x)=>x===j?{...s,...p}:s)});
+  /* default times: subcontractors start with the shift; the first truck at the start time, each one after 15 minutes later */
+  const truckDefault=(list,j)=>j===0?(q.start||''):(list[j-1]&&list[j-1].time?addMin(list[j-1].time,15):'');
+  const setT=(j,p)=>{const list=trucks.map(t=>({...t}));const t={...list[j],...p};
+    if(!('time' in p)&&!t.time&&truckHas(t))t.time=truckDefault(list,j);list[j]=t;upd({trucks:list})};
+  const setS=(j,p)=>{const s0={...subs[j],...p};if(!('time' in p)&&!s0.time&&subHas(s0)&&q.start)s0.time=q.start;upd({subs:subs.map((s,x)=>x===j?s0:s)})};
+  const setStart=v=>{const old=q.start||'';
+    const subs2=(q.subs||[]).map(s=>subHas(s)&&(!s.time||s.time===old)?{...s,time:v}:s);
+    let po='',pn='';const tr2=(q.trucks||[]).map((t,j)=>{const od=j===0?old:(po?addMin(po,15):''),nd=j===0?v:(pn?addMin(pn,15):'');
+      const time=truckHas(t)&&(!t.time||t.time===od)?nd:t.time;po=t.time||'';pn=time||'';return {...t,time}});
+    upd({start:v,subs:subs2,trucks:tr2})};
   const prog=o=>({trucks:(o.trucks||[]).map(t=>({...t})),subs:(o.subs||[]).map(s=>({...s})),start:o.start||'',comments:o.comments||''});
   const copyPrev=()=>upd(prog(sd[dates[i-1]]||{}));
   const copyAll=()=>{const next={...sd};dates.forEach(d=>{if(d===k)return;const o=sd[d]||{};next[d]={...shiftBase(o),lines:linesOnly(o),...prog(q)}});set({shiftData:next})};
@@ -2199,13 +2231,13 @@ function ProgramShifts({f,set,data}){
     <datalist id="dl-loc">${locs.map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
     <div class="flex flex-wrap items-end gap-3">
       <div class="mr-auto"><h3 id="sec-program" class="font-display text-[15px] font-semibold">Trucks & subcontractors</h3>
-        <div class="text-[12px] text-muted">Goes on the daily program for each shift. Plant onsite comes from the mobile plant on this booking.</div></div>
+        <div class="text-[12px] text-muted">Goes on the daily program for each shift. Plant onsite comes from the mobile plant on this booking. Trucks, subcontractors and services typed in by hand are added to the lists when you save.</div></div>
       <label class="grid gap-1"><span class="label">Shift</span>
         <select id="pg-shift" class="field field-sm" style=${{...fs,width:'auto'}} value=${k} onChange=${e=>setSel(e.target.value)}>
           ${dates.map((d,x)=>html`<option key=${d} value=${d}>Shift ${x+1} · ${WD[parse(d).getDay()]} ${fmtShort(parse(d))}${progHas(sd[d])?' ✓':''}</option>`)}
         </select></label>
       <label class="grid gap-1"><span class="label">Start time</span>
-        <input id="pg-start" type="time" class="field field-sm mono" style=${{...fs,width:120}} value=${q.start||''} onInput=${e=>upd({start:e.target.value})}/></label>
+        <input id="pg-start" type="time" class="field field-sm mono" style=${{...fs,width:120}} value=${q.start||''} onInput=${e=>setStart(e.target.value)}/></label>
     </div>
     <div class="flex flex-wrap gap-2 -mt-2">
       ${i>0&&html`<button type="button" class="btn btn-ghost text-muted" style=${{height:28}} onClick=${copyPrev}>Copy from shift ${i}</button>`}
@@ -2226,21 +2258,22 @@ function ProgramShifts({f,set,data}){
         <button type="button" class=${iconX} onClick=${()=>upd({trucks:trucks.filter((_,x)=>x!==j)})} aria-label=${`Remove truck ${j+1}`} title="Remove">${Icon.x}</button>
       </div>`)}
       <div class="flex flex-wrap gap-3">
-        <button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>upd({trucks:[...trucks,{}]})}>${Icon.plus} Add truck</button>
-        ${truckHas(trucks[trucks.length-1])&&html`<button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>upd({trucks:[...trucks,{...trucks[trucks.length-1],driver:''}]})}>${Icon.plus} Same truck again</button>`}
+        <button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>{const l=trucks.filter(truckHas);upd({trucks:[...l,{time:truckDefault(l,l.length)}]})}}>${Icon.plus} Add truck</button>
+        ${truckHas(trucks[trucks.length-1])&&html`<button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>{const last=trucks[trucks.length-1];upd({trucks:[...trucks,{...last,driver:'',time:last.time?addMin(last.time,15):truckDefault(trucks,trucks.length)}]})}}>${Icon.plus} Same truck again</button>`}
       </div>
     </div>
 
     <div class="grid gap-1.5">
       <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Subcontractors</span><span class="flex-1 h-px bg-line self-center"></span></div>
-      <div class=${'hidden sm:grid '+SC2}><span class="label">Subcontractor</span><span class="label">Info</span><span class="label">Start time</span><span></span></div>
+      <div class=${'hidden sm:grid '+SC2}><span class="label">Subcontractor</span><span class="label">Service</span><span class="label">Start time</span><span></span></div>
       ${subs.map((s,j)=>html`<div key=${j} class=${SC2}>
         <input id=${`pg-s${j}-n`} class="field field-sm" style=${fs} list="dl-subco" placeholder="Subcontractor" value=${s.name||''} onInput=${e=>setS(j,{name:e.target.value})} aria-label=${`Subcontractor ${j+1}`}/>
-        <input id=${`pg-s${j}-i`} class="field field-sm" style=${fs} placeholder="e.g. x 3 labourers, shuttle buggy" value=${s.info||''} onInput=${e=>setS(j,{info:e.target.value})} aria-label=${`Subcontractor ${j+1} info`}/>
+        <input id=${`pg-s${j}-i`} class="field field-sm" style=${fs} list=${`dl-svc-${j}`} placeholder=${servicesFor(data,s.name).length?'Pick or type a service':'Type the service'} value=${s.info||''} onInput=${e=>setS(j,{info:e.target.value})} aria-label=${`Subcontractor ${j+1} service`}/>
+        <datalist id=${`dl-svc-${j}`}>${servicesFor(data,s.name).map(v=>html`<option key=${v} value=${v}/>`)}</datalist>
         <input id=${`pg-s${j}-t`} type="time" class="field field-sm mono" style=${fs} value=${s.time||''} onInput=${e=>setS(j,{time:e.target.value})} aria-label=${`Subcontractor ${j+1} start time`}/>
         <button type="button" class=${iconX} onClick=${()=>upd({subs:subs.filter((_,x)=>x!==j)})} aria-label=${`Remove subcontractor ${j+1}`} title="Remove">${Icon.x}</button>
       </div>`)}
-      <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>upd({subs:[...subs,{}]})}>${Icon.plus} Add subcontractor</button></div>
+      <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>upd({subs:[...subs.filter(subHas),{time:q.start||''}]})}>${Icon.plus} Add subcontractor</button></div>
     </div>
 
     <label class="grid gap-1"><span class="label">Comments for this shift</span>
@@ -2872,6 +2905,7 @@ function App({boot,live}){
     const known=sealJob?sealTypesOf(d):mixTypesOf(d);const sealNames=sealJob?[]:sealTypesOf(d).map(x=>x.toLowerCase());
     const added=newMixes.filter(t=>!known.some(k=>k.toLowerCase()===t.toLowerCase())&&!sealNames.includes(t.toLowerCase()));
     if(added.length)d={...d,[sealJob?'sealTypes':'mixTypes']:[...known,...added]};
+    d=learnProgramLists(d,b);
     /* log quote number changes for the notifications bell (kept a week) */
     const prev=d.blocks.find(x=>x.id===b.id);
     if(b.kind==='job'&&(prev?.quoteNo||'')!==(b.quoteNo||'')){
@@ -2994,7 +3028,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','truckCos','subCos'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','truckCos','subCos','subServices'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
@@ -3067,7 +3101,7 @@ async function pushRows(sb,{upserts,deletes}){
 /* data for a brand-new, empty roster */
 function emptyRoster(){
   return {resources:[{id:'a'+uid(),type:'aplant',name:'Asphalt plant',sub:'Main plant',hue:8,visible:true}],
-    jobs:[],blocks:[],quoteChanges:[],changeLog:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],
+    jobs:[],blocks:[],quoteChanges:[],changeLog:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},
     sectionOrder:[...DEFAULT_ORDER],orderV:2};
 }
 
