@@ -74,63 +74,8 @@ const jobLabel=j=>j?((j.customer||'').trim()?`${j.customer.trim()} · ${j.name}`
 const MAINT_LABEL={day:'Day shift',night:'Night shift'};
 const blockTitle=(b,jobs)=>b.kind==='plantmaint'&&MAINT_LABEL[b.maintShift]?`${b.title||KINDS[b.kind].label} · ${MAINT_LABEL[b.maintShift]}`:b.kind==='onjob'?(b.address||jobs.find(j=>j.id===b.jobId)?.name||'On job'):b.kind==='job'?jobLabel(jobs.find(j=>j.id===b.jobId)):(b.title||KINDS[b.kind].label);
 
-/* ---------- sample data (relative to this week, so it always looks live) ---------- */
 const HUES=[12,205,150,280,40,330,185,100,240,60,0,120];
 const uid=()=>Math.random().toString(36).slice(2,9);
-function seed(){
-  const ws=mondayOf(TODAY);
-  const jobs=[
-    {id:'j1',name:'Bruce Hwy resheet – Caboolture',hue:205},
-    {id:'j2',name:'Gympie Rd intersection – Chermside',hue:152},
-    {id:'j3',name:'Shopping centre carpark – Carindale',hue:268},
-    {id:'j4',name:'Logan reseal program',hue:330},
-    {id:'j5',name:'Port of Brisbane hardstand',hue:185},
-    {id:'j6',name:'Ipswich Mwy patching',hue:48},
-    {id:'j7',name:'Brisbane Valley Hwy spray seal',hue:100},
-    {id:'j8',name:'Council driveway & kerb repairs',hue:20},
-  ].map(j=>({...j,address:SEED_ADDR[j.id]||'',customer:SEED_CUST[j.id]||''}));
-  const crews=[
-    {id:'c1',type:'crew',name:'Crew 1',sub:'Paving',hue:205},
-    {id:'c2',type:'crew',name:'Crew 2',sub:'Paving',hue:150},
-    {id:'c3',type:'crew',name:'Crew 3',sub:'Seal',hue:275},
-    {id:'c4',type:'crew',name:'Crew 4',sub:'Small works',hue:40},
-  ];
-  const ppl=[
-    ['Mick Daly','Supervisor','c1'],['Josh Pearce','Paver operator','c1'],['Liam Fraser','Screed operator','c1'],['Ana Tupou','Roller operator','c1'],
-    ['Tane Walker','Supervisor','c2'],['Brooke Hayes','Roller operator','c2'],['Dylan Moss','Labourer / raker','c2'],
-    ['Rob Hensley','Supervisor','c3'],['Kai Nguyen','Sprayer operator','c3'],
-    ['Kerry Lawson','Supervisor','c4'],['Sione Fifita','Truck driver','c4'],['Emma Ward','Traffic controller','c4'],
-    ['Ben Carter','Chip spreader operator','c3'],
-  ].map(([name,sub,crewId],i)=>({id:'s'+i,type:'person',name,sub,crewId,hue:HUES[i%HUES.length]}));
-  const mach=[
-    ['P-01','Asphalt paver','c1'],['R-04','Tandem roller','c1'],['R-07','Pneumatic roller','c2'],
-    ['SP-02','Bitumen sprayer','c3'],['TK-03','Tack coat sprayer','c2'],['T-12','Tipper truck','c4'],
-    ['CS-05','Chip spreader','c3'],
-  ].map(([name,sub,crewId],i)=>({id:'m'+i,type:'machine',name,sub,crewId,hue:HUES[(i+4)%HUES.length]}));
-  const aplants=[{id:'a0',type:'aplant',name:'Asphalt plant',sub:'Narangba',hue:8}];
-  const resources=[...crews,...ppl,...mach,...aplants].map(r=>({...r,visible:true}));
-  const B=(rid,kind,s,e,extra={})=>({id:uid(),resourceId:rid,kind,title:'',start:iso(addDays(ws,s)),end:iso(addDays(ws,e)),
-    ...(extra.jobId?{address:SEED_ADDR[extra.jobId],plantIds:[]}:{}),...extra});
-  const blocks=[
-    B('c1','job',-6,4,{jobId:'j1',shift:'night',plantIds:['m0']}),B('c1','standby',7,7),B('c1','job',8,19,{jobId:'j3',plantIds:['m0','m1']}),B('c1','job',22,33,{jobId:'j1',shift:'night',plantIds:['m0','m1']}),
-    B('c2','job',-3,2,{jobId:'j2',plantIds:['m2','m4']}),B('c2','job',3,10,{jobId:'j4',plantIds:['m2','m4']}),B('c2','job',14,24,{jobId:'j5',plantIds:['m2','m4']}),B('c2','job',28,36,{jobId:'j2',shift:'night',plantIds:['m2']}),
-    B('c3','job',-5,4,{jobId:'j4',plantIds:['m3','m6']}),B('c3','job',7,11,{jobId:'j7',plantIds:['m3','m6']}),B('c3','job',14,20,{jobId:'j4',plantIds:['m3','m6']}),B('c3','job',21,30,{jobId:'j7',shift:'night',plantIds:['m3','m6']}),
-    B('c4','job',-1,4,{jobId:'j6',shift:'night',plantIds:['m5']}),B('c4','job',5,9,{jobId:'j8',plantIds:['m5']}),B('c4','standby',10,11),B('c4','job',14,32,{jobId:'j8',plantIds:['m5']}),
-    B('s1','leave',7,11),B('s3','sick',2,3),B('s4','rdo',4,4),B('s5','leave',14,25,{title:'Annual leave – NZ trip'}),
-    B('s6','training',9,9,{title:'Traffic control ticket'}),B('s8','leave',21,22),B('s9','leave',28,34),B('s11','rdo',18,18),
-    B('m0','service',7,8,{title:'1000 hr service'}),B('m1','repair',2,4,{title:'Vibration pump fault'}),
-    B('m3','service',12,13,{title:'Spray bar & nozzle service'}),B('m4','inspection',16,16,{title:'Rego inspection'}),
-    B('m5','service',23,23,{title:'Annual service'}),
-    B('a0','plantmaint',9,9,{title:'Burner service'}),B('a0','plantmaint',24,25,{title:'Drum flight repairs',maintShift:'day'}),B('a0','plantreduced',16,16,{title:'One silo only'}),
-  ];
-  const fill=(rid,jobId,rows)=>{const b=blocks.find(x=>x.resourceId===rid&&x.jobId===jobId);if(!b)return;
-    b.shiftData={};shiftDates(b).forEach((k,i)=>{b.shiftData[k]={lines:rows[i%rows.length].map(([type,tonnes,area,depth,binder])=>({type,binder:binder||'',tonnes,area,depth}))}})};
-  fill('c1','j3',[[['AC10',50,500,40,'C320']],[['AC14',45,400,50,'C320'],['AC10',30,250,40,'C320']],[['AC10',40,400,40,'C320']]]);
-  fill('c2','j5',[[['AC20',120,900,55,'C600']],[['EME2',95,820,50,'EME2']]]);
-  fill('c1','j1',[[['SMA',180,1500,50,'A15E']]]);
-  fill('c4','j8',[[['AC7',8,90,35,'C320'],['Type2',3,25,50,'C320']]]);
-  return {resources,jobs,blocks,sectionOrder:[...DEFAULT_ORDER],orderV:2,mixRap:{AC10:15,AC14:15,AC20:20,EME2:15,Type2:20,Type3:20}};
-}
 
 /* ---------- storage (per-viewer convenience only) ---------- */
 const KEY='crew-plant-roster-v2';
@@ -163,7 +108,7 @@ function load(){try{const s=localStorage.getItem(KEY);if(s){const d=JSON.parse(s
   if(d.orderV!==2){d.sectionOrder=[...DEFAULT_ORDER];d.orderV=2} /* one-time move to the new default order */
   if(!d.resources.some(r=>r.type==='aplant'))d.resources=[...d.resources,{id:'a'+uid(),type:'aplant',name:'Asphalt plant',sub:'Main plant',hue:8,visible:true}];
   d.blocks=d.blocks.map(b=>b.kind==='job'&&b.address==null?{...b,address:d.jobs.find(j=>j.id===b.jobId)?.address||'',plantIds:b.plantIds||[]}:b);
-  return d}}}catch(e){}return seed()}
+  return d}}}catch(e){}return null}
 function save(d){try{localStorage.setItem(KEY,JSON.stringify(d))}catch(e){}}
 
 /* ---------- small pieces ---------- */
@@ -1836,7 +1781,7 @@ function SwitchRow({id,label,desc,on,onChange}){
     </span>
   </label>`;
 }
-function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onRemoveSample}){
+function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account}){
   const [open,setOpen]=useState(false);
   const ref=React.useRef(null);
   useEffect(()=>{if(!open)return;
@@ -1861,10 +1806,6 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onRemoveSample})
         ${sectionLabel('Notifications')}
         ${NOTIF_TYPES.map(t=>html`<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
       </div>
-      ${onRemoveSample&&html`<div class="border-t border-line p-2 grid">
-        <div class="label px-2 pt-1 pb-1">Data</div>
-        <button class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);onRemoveSample()}}>${Icon.x} Remove sample data</button>
-      </div>`}
       ${account&&html`<div class="border-t border-line p-2 grid">
         <button class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);account.onChangePw()}}>${Icon.key} Change password</button>
         <button class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);account.onSignOut()}}>${Icon.logout} Sign out</button>
@@ -2189,30 +2130,6 @@ function removeSampleData(d){
   const left=new Set(blocks.map(b=>b.id));
   return {...d,resources,blocks,jobs:d.jobs.filter(j=>!jid.has(j.id)),quoteChanges:(d.quoteChanges||[]).filter(c=>left.has(c.bookingId))};
 }
-function RemoveSample({data,setData,onClose,notify}){
-  const p=sampleParts(data);const n=p.res.length+p.blocks.length+p.jobs.length;
-  useEffect(()=>{const h=e=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
-  return html`<div class="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
-    <div class="panel pop w-full max-w-[420px] p-5 flex flex-col gap-3" role="alertdialog" aria-modal="true" aria-labelledby="rs-title">
-      <div id="rs-title" class="font-display text-[17px] font-semibold">Remove sample data</div>
-      ${n===0
-        ?html`<p class="text-[13px] text-muted">There’s no sample data in the roster.</p>
-            <div class="flex justify-end"><button class="btn" onClick=${onClose}>Close</button></div>`
-        :html`<p class="text-[13px] text-muted">This removes the practice crews, staff, machines, jobs and bookings for everyone. Anything you imported from TeamCal or added yourself stays, and so do your mixes and binders.</p>
-            <ul class="text-[13px] rounded-lg bg-sunken border border-line px-3 py-2 grid gap-0.5 tnum">
-              <li><b>${p.res.length}</b> sample crews, staff and machines</li>
-              <li><b>${p.jobs.length}</b> sample jobs</li>
-              <li><b>${p.blocks.length}</b> sample bookings</li>
-            </ul>
-            <p class="text-[12px]" style=${{color:'var(--bad)'}}>This can’t be undone.</p>
-            <div class="flex gap-2 justify-end">
-              <button class="btn" onClick=${onClose} autoFocus=${true}>Cancel</button>
-              <button class="btn" style=${{background:'var(--bad)',borderColor:'var(--bad)',color:'#fff'}} onClick=${()=>{setData(d=>removeSampleData(d));notify('Sample data removed');onClose()}}>Remove sample data</button>
-            </div>`}
-    </div>
-  </div>`;
-}
-
 /* ---------- app ---------- */
 function App({boot,live}){
   /* ---- live data: local state, saved to Supabase, kept current with everyone else's changes ---- */
@@ -2251,7 +2168,6 @@ function App({boot,live}){
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
   const [importing,setImporting]=useState(false);
-  const [removingSample,setRemovingSample]=useState(false);
   const [forecast,setForecast]=useState(false);
   const [changePw,setChangePw]=useState(false);
   const [notifPrefs,setNotifPrefs]=useState(loadNotifPrefs);
@@ -2374,7 +2290,7 @@ function App({boot,live}){
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
         <button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis('crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>
         <button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>
-        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} onRemoveSample=${live.canEdit?()=>setRemovingSample(true):null} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}}/>
+        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}}/>
       </header>
 
       <section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
@@ -2402,7 +2318,6 @@ function App({boot,live}){
 
     ${changePw&&html`<${SetPassword} sb=${live.sb} onDone=${()=>{setChangePw(false);setToast('Password changed')}} onCancel=${()=>setChangePw(false)}/>`}
     ${forecast&&html`<${ForecastDialog} data=${data} onClose=${()=>setForecast(false)} notify=${setToast}/>`}
-    ${removingSample&&html`<${RemoveSample} data=${data} setData=${setData} onClose=${()=>setRemovingSample(false)} notify=${setToast}/>`}
     ${importing&&html`<${TeamCalImport} data=${data} setData=${setData} onClose=${()=>setImporting(false)} notify=${setToast}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)}/>`}
