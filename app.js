@@ -1383,10 +1383,12 @@ const BOOKING_TABS=[
     render:p=>html`<${AsphaltShifts} f=${p.f} set=${p.set} data=${p.data}/>`},
   {id:'machines',label:'Machines',applies:f=>f.kind==='job',badge:f=>(f.plantIds||[]).length?`${(f.plantIds||[]).length}`:null,
     render:p=>html`<${PlantPicker} f=${p.f} set=${p.set} data=${p.data}/>`},
-  {id:'program',label:(f,d)=>isSealCrew(d.resources.find(r=>r.id===f.resourceId))?'Subcontractors':'Trucks & Subcontractors',applies:f=>f.kind==='job',
-    badge:(f,d)=>{const seal=isSealCrew(d.resources.find(r=>r.id===f.resourceId));
-      const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&(seal?q.subs:q.trucks))||[]).filter(seal?subHas:truckHas).length,0);return n?`${n}`:null},
-    render:p=>html`<${ProgramShifts} f=${p.f} set=${p.set} data=${p.data}/>`},
+  {id:'trucks',label:'Trucks',applies:(f,d)=>f.kind==='job'&&!isSealCrew(d.resources.find(r=>r.id===f.resourceId)),
+    badge:f=>{const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&q.trucks)||[]).filter(truckHas).length,0);return n?`${n}`:null},
+    render:p=>html`<${ProgramShifts} key="trucks" part="trucks" f=${p.f} set=${p.set} data=${p.data}/>`},
+  {id:'program',label:'Subcontractors',applies:f=>f.kind==='job',
+    badge:f=>{const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&q.subs)||[]).filter(subHas).length,0);return n?`${n}`:null},
+    render:p=>html`<${ProgramShifts} key="subs" part="subs" f=${p.f} set=${p.set} data=${p.data}/>`},
 ];
 
 function Section({title,id,children,aside}){
@@ -1510,7 +1512,7 @@ function Editor({initial,data,onSave,onDelete,onClose}){
   useEffect(()=>{const h=e=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
   const days=f.start&&f.end&&!err?diffDays(parse(f.start),parse(f.end))+1:0;
   const changeRes=id=>{const t=data.resources.find(r=>r.id===id)?.type;set({resourceId:id,kind:KINDS[f.kind].for===t?f.kind:TYPES[t].def})};
-  const tabs=BOOKING_TABS.filter(t=>t.applies(f));
+  const tabs=BOOKING_TABS.filter(t=>t.applies(f,data));
   const [tab,setTab]=useState(tabs[0].id);
   const active=tabs.find(t=>t.id===tab)||tabs[0];
   const submit=e=>{e.preventDefault();if(err)return;
@@ -2408,7 +2410,7 @@ function TimeSelect({id,value,onChange,label,pm}){
   </span>`;
 }
 /* booking editor tab: one shift at a time */
-function ProgramShifts({f,set,data}){
+function ProgramShifts({f,set,data,part}){
   const dates=shiftDates(f);const sd=f.shiftData||{};
   /* opens on today's shift (or the next one, or the last one if the job is finished) */
   const defShift=()=>{const t=iso(TODAY);return dates.includes(t)?t:(dates.find(k=>k>=t)||dates[dates.length-1]||'')};
@@ -2461,9 +2463,11 @@ function ProgramShifts({f,set,data}){
     const subs2=(q.subs||[]).map(s=>subHas(s)&&(!s.time||s.time===old)?{...s,time:v}:s);
     upd({start:v,subs:subs2,trucks:retime(realTrucks,lt,v),locTimes:lt})};
   const prog=o=>({trucks:(o.trucks||[]).map(t=>({...t})),subs:(o.subs||[]).map(s=>({...s})),start:o.start||'',comments:o.comments||'',locTimes:{...(o.locTimes||{})}});
-  const copyPrev=()=>upd(prog(sd[dates[i-1]]||{}));
+  /* each tab copies only its own part: trucks (with their location timing) or subcontractors and comments */
+  const pick=o=>{const p=prog(o);return part==='trucks'?{trucks:p.trucks,locTimes:p.locTimes,start:p.start}:{subs:p.subs,comments:p.comments,start:p.start}};
+  const copyPrev=()=>upd(pick(sd[dates[i-1]]||{}));
   const todayP=iso(TODAY);const lockedP=k<todayP&&!editPastP;
-  const copyAll=()=>{const next={...sd};dates.forEach(d=>{if(d===k||(d<todayP&&!editPastP))return;const o=sd[d]||{};next[d]={...shiftBase(o),lines:linesOnly(o),...prog(q)}});set({shiftData:next})};
+  const copyAll=()=>{const next={...sd};dates.forEach(d=>{if(d===k||(d<todayP&&!editPastP))return;const o=sd[d]||{};next[d]={...o,...shiftBase(o),lines:linesOnly(o),...pick(q)}});set({shiftData:next})};
   const tl=(q.trucks||[]).filter(truckHas);const totT=tl.reduce((a,t)=>a+truckT(t.w),0);
   const night=f.shift==='night';
   const sealJob=isSealCrew(data.resources.find(r=>r.id===f.resourceId));   /* seal jobs: subcontractors only, no trucks */
@@ -2476,8 +2480,8 @@ function ProgramShifts({f,set,data}){
     <datalist id="dl-subco">${subCosOf(data).map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
     <datalist id="dl-loc">${locs.map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
     <div class="flex flex-wrap items-end gap-3">
-      <div class="mr-auto"><h3 id="sec-program" class="font-display text-[15px] font-semibold">${sealJob?'Subcontractors':'Trucks & subcontractors'}</h3>
-        <div class="text-[12px] text-muted">Goes on the daily program for each shift. Plant onsite comes from the mobile plant on this booking. Trucks, subcontractors and services typed in by hand are added to the lists when you save.</div></div>
+      <div class="mr-auto"><h3 id="sec-program" class="font-display text-[15px] font-semibold">${part==='trucks'?'Trucks':'Subcontractors'}</h3>
+        <div class="text-[12px] text-muted">${part==='trucks'?'Goes on the daily program for each shift. Trucks and locations typed in by hand are added to the lists when you save.':'Goes on the daily program for each shift, with the shift comments. Subcontractors and services typed in by hand are added to the lists when you save.'}</div></div>
       <label class="grid gap-1"><span class="label">Shift</span>
         <select id="pg-shift" class="field field-sm" style=${{...fs,width:'auto'}} value=${k} onChange=${e=>setSel(e.target.value)}>
           ${dates.map((d,x)=>html`<option key=${d} value=${d}>Shift ${x+1} · ${WD[parse(d).getDay()]} ${fmtShort(parse(d))}${progHas(sd[d])?' ✓':''}</option>`)}
@@ -2491,11 +2495,11 @@ function ProgramShifts({f,set,data}){
         <span class=${editPastP?'font-semibold text-ink':'text-muted'}>Edit past shifts</span></label>`}
       ${lockedP&&html`<span class="text-[12px] font-semibold text-muted">Past shift: locked</span>`}
       ${i>0&&!lockedP&&html`<button type="button" class="btn btn-ghost text-muted" style=${{height:28}} onClick=${copyPrev}>Copy from shift ${i}</button>`}
-      ${dates.length>1&&html`<button type="button" class="btn btn-ghost text-muted" style=${{height:28}} onClick=${copyAll} title="Replace the trucks, subcontractors, start time and comments on every other shift with this shift's">Copy this shift to all shifts</button>`}
+      ${dates.length>1&&html`<button type="button" class="btn btn-ghost text-muted" style=${{height:28}} onClick=${copyAll} title=${part==='trucks'?'Replace the trucks on every other shift with this shift\'s':'Replace the subcontractors and comments on every other shift with this shift\'s'}>Copy this shift to all shifts</button>`}
     </div>
 
     <fieldset disabled=${lockedP} class="grid gap-4 border-0 p-0 m-0 min-w-0" style=${lockedP?{opacity:.5}:null}>
-    ${!sealJob&&html`<div class="grid gap-2">
+    ${part==='trucks'&&!sealJob&&html`<div class="grid gap-2">
       <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Trucks</span><span class="text-[12px] text-muted tnum">${tl.length} · ${fmtN(totT)}T</span><span class="flex-1 h-px bg-line self-center"></span></div>
       <div class="text-[12px] text-muted -mt-1">Trucks are grouped by location. Each location has a first truck time and a gap: its trucks follow on in order. Pick a time on a truck to set it by hand. Drag a location by its ⋮⋮ handle to change the order they appear on the daily program.</div>
       ${(()=>{const groups=[];realTrucks.forEach((t,j)=>{const kk=lkey(t);let g=groups.find(x=>x.key===kk);if(!g){g={key:kk,label:(t.loc||'').trim(),items:[]};groups.push(g)}g.items.push({t,j})});
@@ -2543,7 +2547,7 @@ function ProgramShifts({f,set,data}){
       </div>
     </div>`}
 
-    <div class="grid gap-1.5">
+    ${part!=='trucks'&&html`    <div class="grid gap-1.5">
       <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Subcontractors</span><span class="flex-1 h-px bg-line self-center"></span></div>
       <div class=${'hidden sm:grid '+SC2}><span class="label">Subcontractor</span><span class="label">Service</span><span class="label">Start time</span><span></span></div>
       ${subs.map((s,j)=>html`<div key=${j} class=${SC2}>
@@ -2557,7 +2561,7 @@ function ProgramShifts({f,set,data}){
     </div>
 
     <label class="grid gap-1"><span class="label">Comments for this shift</span>
-      <textarea id="pg-comments" class="field" style=${{height:'auto',minHeight:56,padding:'8px 10px',resize:'vertical'}} rows="2" placeholder=${night?'e.g. Standard PPE + UHF: 12, lighting towers on site':'e.g. Standard PPE + UHF: 12'} value=${q.comments||''} onInput=${e=>upd({comments:e.target.value})}></textarea></label>
+      <textarea id="pg-comments" class="field" style=${{height:'auto',minHeight:56,padding:'8px 10px',resize:'vertical'}} rows="2" placeholder=${night?'e.g. Standard PPE + UHF: 12, lighting towers on site':'e.g. Standard PPE + UHF: 12'} value=${q.comments||''} onInput=${e=>upd({comments:e.target.value})}></textarea></label>`}
     </fieldset>
   </section>`;
 }
