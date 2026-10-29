@@ -23,7 +23,7 @@ const TYPES={
   crew:{label:'Crews',one:'crew',def:'job'},
   machine:{label:'Machines',one:'machine',def:'service'},
   person:{label:'Staff',one:'staff member',def:'leave'},
-  aplant:{label:'Asphalt plant',tab:'Asphalt',one:'asphalt plant',def:'plantmaint'},
+  aplant:{label:'Asphalt plant',tab:'Plants',one:'asphalt plant',def:'plantmaint'},
 };
 const KINDS={
   job:{label:'Job',for:'crew'},
