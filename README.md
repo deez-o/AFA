@@ -28,7 +28,7 @@ Scheduling board for crews, staff, machines and the asphalt plant, with jobs, sh
    ```sql
    update public.profiles set role = 'admin' where email = 'you@yourcompany.com.au';
    ```
-4. Open the roster and sign in with your email and the temporary password. It asks you to choose your own password, then whether to start empty or with sample data.
+4. Open the roster and sign in with your email and the temporary password. It asks you to choose your own password, then to start the roster.
 
 ### Adding people
 1. **Authentication → Users → Add user → Create new user**: their email, a temporary password, tick **Auto Confirm User**.

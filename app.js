@@ -1836,7 +1836,7 @@ function SwitchRow({id,label,desc,on,onChange}){
     </span>
   </label>`;
 }
-function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account}){
+function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onRemoveSample}){
   const [open,setOpen]=useState(false);
   const ref=React.useRef(null);
   useEffect(()=>{if(!open)return;
@@ -1861,6 +1861,10 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account}){
         ${sectionLabel('Notifications')}
         ${NOTIF_TYPES.map(t=>html`<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
       </div>
+      ${onRemoveSample&&html`<div class="border-t border-line p-2 grid">
+        <div class="label px-2 pt-1 pb-1">Data</div>
+        <button class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);onRemoveSample()}}>${Icon.x} Remove sample data</button>
+      </div>`}
       ${account&&html`<div class="border-t border-line p-2 grid">
         <button class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);account.onChangePw()}}>${Icon.key} Change password</button>
         <button class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);account.onSignOut()}}>${Icon.logout} Sign out</button>
@@ -2162,6 +2166,53 @@ function TeamCalImport({data,setData,onClose,notify}){
   </div>`;
 }
 
+/* ---------- removing the sample data ---------- */
+/* The sample roster uses fixed ids (crews c1–c4, staff s0–s12, machines m0–m6, plant a0, jobs j1–j8).
+   Anything imported or added by people has different ids, so it is left alone. */
+const SAMPLE_RES=new Set(['c1','c2','c3','c4',...Array.from({length:13},(_,i)=>'s'+i),...Array.from({length:7},(_,i)=>'m'+i)]);
+const SAMPLE_JOBS=new Set(Array.from({length:8},(_,i)=>'j'+(i+1)));
+const SAMPLE_PLANT_TITLES=new Set(['Burner service','Drum flight repairs','One silo only']);
+function sampleParts(d){
+  const res=d.resources.filter(r=>SAMPLE_RES.has(r.id));const rid=new Set(res.map(r=>r.id));
+  const blocks=d.blocks.filter(b=>!b.importKey&&(rid.has(b.resourceId)||(b.resourceId==='a0'&&SAMPLE_PLANT_TITLES.has(b.title))||(b.kind==='job'&&SAMPLE_JOBS.has(b.jobId))));
+  const bid=new Set(blocks.map(b=>b.id));
+  const keepJobs=new Set(d.blocks.filter(b=>!bid.has(b.id)).map(b=>b.jobId));
+  const jobs=d.jobs.filter(j=>SAMPLE_JOBS.has(j.id)&&!keepJobs.has(j.id));
+  return {res,blocks,jobs};
+}
+function removeSampleData(d){
+  const p=sampleParts(d);const rid=new Set(p.res.map(r=>r.id)),bid=new Set(p.blocks.map(b=>b.id)),jid=new Set(p.jobs.map(j=>j.id));
+  let resources=d.resources.filter(r=>!rid.has(r.id)).map(r=>r.crewId&&rid.has(r.crewId)?{...r,crewId:null}:r);
+  /* the sample plant becomes a plain plant with no sample maintenance */
+  resources=resources.map(r=>r.id==='a0'&&r.sub==='Narangba'?{...r,sub:'Main plant'}:r);
+  const blocks=d.blocks.filter(b=>!bid.has(b.id)).map(b=>b.plantIds&&b.plantIds.some(x=>rid.has(x))?{...b,plantIds:b.plantIds.filter(x=>!rid.has(x))}:b);
+  const left=new Set(blocks.map(b=>b.id));
+  return {...d,resources,blocks,jobs:d.jobs.filter(j=>!jid.has(j.id)),quoteChanges:(d.quoteChanges||[]).filter(c=>left.has(c.bookingId))};
+}
+function RemoveSample({data,setData,onClose,notify}){
+  const p=sampleParts(data);const n=p.res.length+p.blocks.length+p.jobs.length;
+  useEffect(()=>{const h=e=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
+  return html`<div class="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div class="panel pop w-full max-w-[420px] p-5 flex flex-col gap-3" role="alertdialog" aria-modal="true" aria-labelledby="rs-title">
+      <div id="rs-title" class="font-display text-[17px] font-semibold">Remove sample data</div>
+      ${n===0
+        ?html`<p class="text-[13px] text-muted">There’s no sample data in the roster.</p>
+            <div class="flex justify-end"><button class="btn" onClick=${onClose}>Close</button></div>`
+        :html`<p class="text-[13px] text-muted">This removes the practice crews, staff, machines, jobs and bookings for everyone. Anything you imported from TeamCal or added yourself stays, and so do your mixes and binders.</p>
+            <ul class="text-[13px] rounded-lg bg-sunken border border-line px-3 py-2 grid gap-0.5 tnum">
+              <li><b>${p.res.length}</b> sample crews, staff and machines</li>
+              <li><b>${p.jobs.length}</b> sample jobs</li>
+              <li><b>${p.blocks.length}</b> sample bookings</li>
+            </ul>
+            <p class="text-[12px]" style=${{color:'var(--bad)'}}>This can’t be undone.</p>
+            <div class="flex gap-2 justify-end">
+              <button class="btn" onClick=${onClose} autoFocus=${true}>Cancel</button>
+              <button class="btn" style=${{background:'var(--bad)',borderColor:'var(--bad)',color:'#fff'}} onClick=${()=>{setData(d=>removeSampleData(d));notify('Sample data removed');onClose()}}>Remove sample data</button>
+            </div>`}
+    </div>
+  </div>`;
+}
+
 /* ---------- app ---------- */
 function App({boot,live}){
   /* ---- live data: local state, saved to Supabase, kept current with everyone else's changes ---- */
@@ -2200,6 +2251,7 @@ function App({boot,live}){
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
   const [importing,setImporting]=useState(false);
+  const [removingSample,setRemovingSample]=useState(false);
   const [forecast,setForecast]=useState(false);
   const [changePw,setChangePw]=useState(false);
   const [notifPrefs,setNotifPrefs]=useState(loadNotifPrefs);
@@ -2322,7 +2374,7 @@ function App({boot,live}){
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
         <button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis('crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>
         <button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>
-        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}}/>
+        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} onRemoveSample=${live.canEdit?()=>setRemovingSample(true):null} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}}/>
       </header>
 
       <section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
@@ -2350,6 +2402,7 @@ function App({boot,live}){
 
     ${changePw&&html`<${SetPassword} sb=${live.sb} onDone=${()=>{setChangePw(false);setToast('Password changed')}} onCancel=${()=>setChangePw(false)}/>`}
     ${forecast&&html`<${ForecastDialog} data=${data} onClose=${()=>setForecast(false)} notify=${setToast}/>`}
+    ${removingSample&&html`<${RemoveSample} data=${data} setData=${setData} onClose=${()=>setRemovingSample(false)} notify=${setToast}/>`}
     ${importing&&html`<${TeamCalImport} data=${data} setData=${setData} onClose=${()=>setImporting(false)} notify=${setToast}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)}/>`}
@@ -2518,9 +2571,8 @@ function FirstRun({canEdit,onStart}){
     ${canEdit
       ?html`<div class="flex flex-col gap-3">
           <div class="font-semibold">Set up your roster</div>
-          <p class="text-[13px] text-muted">The roster is empty. Start fresh and add your own crews, staff, machines, jobs and mixes, or load the sample data to practise with. Sample data can be deleted later.</p>
-          <button class="btn btn-primary justify-center" disabled=${busy} onClick=${async()=>{setBusy(true);await onStart(emptyRoster())}}>Start empty</button>
-          <button class="btn justify-center" disabled=${busy} onClick=${async()=>{setBusy(true);await onStart(seed())}}>Load sample data</button>
+          <p class="text-[13px] text-muted">The roster is empty. Start it, then add your crews, staff and machines in the Resources panel, or bring in your jobs with Import from TeamCal in the Jobs tab.</p>
+          <button class="btn btn-primary justify-center" disabled=${busy} onClick=${async()=>{setBusy(true);await onStart(emptyRoster())}}>Start the roster</button>
         </div>`
       :html`<p class="text-[13px] text-muted">The roster hasn’t been set up yet. A planner needs to sign in first.</p>`}
   <//>`;
