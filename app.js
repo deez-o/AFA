@@ -1049,6 +1049,7 @@ function qtyTotals(b){
 const rekeyShifts=(sd,dx)=>sd&&dx?Object.fromEntries(Object.entries(sd).map(([k,v])=>[iso(addDays(parse(k),dx)),v])):sd;
 
 const COLS='grid-cols-[1fr_1fr_1fr_28px] sm:grid-cols-[1fr_92px_80px_88px_76px_28px]';
+const SEAL_COLS='grid-cols-[1fr_1fr_28px] sm:grid-cols-[1fr_110px_100px_28px]';  /* seal: type, binder, area */
 function AsphaltShifts({f,set,data}){
   /* list = company mixes + any new ones typed in this booking (so other lines can pick them straight away) */
   const myCrew=data.resources.find(r=>r.id===f.resourceId);const seal=isSealCrew(myCrew);
@@ -1057,6 +1058,7 @@ function AsphaltShifts({f,set,data}){
     :[...new Set([...mixTypesOf(data),...linesTypes(f.shiftData)])].filter(t=>!sealSet.has(t.toLowerCase())||mixTypesOf(data).includes(t));  /* paving can't pick seal products */
   const BF=v=>binderForProduct(data,myCrew,v);
   const BINDS=seal?sealBindersOf(data):bindersOf(data);
+  const CO=seal?SEAL_COLS:COLS;
   const tot=qtyTotals(f);
   const sd=f.shiftData||{};
   const night=f.shift==='night';
@@ -1108,13 +1110,13 @@ function AsphaltShifts({f,set,data}){
 
     <div class="rounded-xl border border-line bg-sunken p-3 grid gap-2.5">
       <div class="grid grid-cols-2 gap-3">
-        <div><div class="label">Total asphalt</div><div class="font-display text-[20px] font-semibold tnum">${fmtN(tot.tonnes)}<span class="text-[12px] text-muted font-normal"> t</span></div></div>
+        ${!seal&&html`<div><div class="label">Total asphalt</div><div class="font-display text-[20px] font-semibold tnum">${fmtN(tot.tonnes)}<span class="text-[12px] text-muted font-normal"> t</span></div></div>`}
         <div><div class="label">Total area</div><div class="font-display text-[20px] font-semibold tnum">${fmtN(tot.area)}<span class="text-[12px] text-muted font-normal"> m²</span></div></div>
       </div>
       ${tot.byType.length>0&&html`<div class="flex flex-wrap gap-1.5">
         ${tot.byType.map(g=>html`<span key=${g.type} class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] bg-surface border border-line">
           <span class="font-semibold mono">${g.type}</span>
-          <span class="text-muted tnum">${fmtN(g.tonnes)} t · ${fmtN(g.area)} m² · ${g.shifts} shift${g.shifts===1?'':'s'}</span></span>`)}
+          <span class="text-muted tnum">${seal?'':`${fmtN(g.tonnes)} t · `}${fmtN(g.area)} m² · ${g.shifts} shift${g.shifts===1?'':'s'}</span></span>`)}
       </div>`}
     </div>
 
@@ -1127,7 +1129,7 @@ function AsphaltShifts({f,set,data}){
           <div class="max-h-[340px] overflow-y-auto">
             <div class="hidden sm:grid grid-cols-[118px_1fr] gap-2 px-2.5 py-1.5 bg-sunken border-b border-line sticky top-0 z-[1]">
               <span class="label">Shift</span>
-              <div class=${'grid gap-2 '+COLS}><span class="label">${seal?'Seal type':'Asphalt type'}</span><span class="label">Binder</span><span class="label">Tonnes</span><span class="label">Area m²</span><span class="label">Depth mm</span><span></span></div>
+              <div class=${'grid gap-2 '+CO}><span class="label">${seal?'Seal type':'Asphalt type'}</span><span class="label">Binder</span>${!seal&&html`<span class="label">Tonnes</span>`}<span class="label">Area m²</span>${!seal&&html`<span class="label">Depth mm</span>`}<span></span></div>
             </div>
             ${tot.dates.map((k,i)=>{
               const ls=shown(k);const d=parse(k);
@@ -1158,12 +1160,12 @@ function AsphaltShifts({f,set,data}){
                       ${otherCrews.map(r=>html`<option key=${r.id} value=${r.id}>${r.name}</option>`)}
                       ${c&&!otherCrews.some(r=>r.id===c)&&html`<option value=${c}>Removed crew</option>`}
                     </select></label>`})()}
-                  ${multi&&html`<div class="text-[11px] text-muted tnum">${fmtN(sub.t)} t · ${fmtN(sub.a)} m²</div>`}
+                  ${multi&&html`<div class="text-[11px] text-muted tnum">${seal?'':`${fmtN(sub.t)} t · `}${fmtN(sub.a)} m²</div>`}
                   ${i>0&&!hasQty(sd[k])&&hasQty(sd[tot.dates[i-1]])&&html`<button type="button" class="ml-auto sm:ml-0 text-[11px] text-muted underline underline-offset-2 hover:text-ink" onClick=${()=>copyPrev(i)} title="Copy the previous shift's figures">Same as above</button>`}
                 </div>
                 <div class="grid gap-1.5 min-w-0">
                   ${ls.map((l,j)=>{const h=depthHint(l);const n=ls.length>1?` line ${j+1}`:'';
-                    return html`<div key=${j} class=${'grid gap-2 items-center '+COLS}>
+                    return html`<div key=${j} class=${'grid gap-2 items-center '+CO}>
                       <div class="col-span-2 sm:col-span-1 flex items-center gap-1.5 min-w-0">
                       <label class="flex-1 min-w-0"><span class="sr-only">Shift ${i+1}${n} ${seal?'seal':'asphalt'} type</span>
                         ${l._custom
@@ -1178,7 +1180,7 @@ function AsphaltShifts({f,set,data}){
                               ${l.type&&!MIXES.includes(l.type)&&html`<option value=${l.type} style=${{color:'var(--ink)'}}>${l.type}</option>`}
                               <option value="__other" style=${{color:'var(--ink)'}}>Other…</option>
                             </select>`}</label>
-                      ${(()=>{const rp=num((data?.mixRap||{})[(l.type||'').trim()]);const off=!rp&&!l.virgin;
+                      ${!seal&&(()=>{const rp=num((data?.mixRap||{})[(l.type||'').trim()]);const off=!rp&&!l.virgin;
                         return html`<label class=${'inline-flex items-center gap-1 shrink-0 text-[11.5px] '+(off?'opacity-40 cursor-not-allowed':'cursor-pointer')}
                           title=${off?'This mix has no RAP':l.virgin?`Virgin: the ${fmtN(rp)}% RAP is left off this line`:`Tick if this line is laid as virgin mix (no RAP)`}>
                           <input id=${`sh-${k}-${j}-virgin`} type="checkbox" class="w-3.5 h-3.5" style=${{accentColor:'var(--accent)'}} checked=${!!l.virgin} disabled=${off}
@@ -1191,19 +1193,19 @@ function AsphaltShifts({f,set,data}){
                           ${BINDS.map(b=>html`<option key=${b} value=${b} style=${{color:'var(--ink)'}}>${b}</option>`)}
                           ${l.binder&&!BINDS.includes(l.binder)&&html`<option value=${l.binder}>${l.binder}</option>`}
                         </select></label>
-                      <label><span class="sr-only">Shift ${i+1}${n} tonnes</span>
-                        <input id=${`sh-${k}-${j}-t`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist} placeholder="t" value=${l.tonnes??''} onInput=${e=>setLine(k,j,{tonnes:e.target.value})}/></label>
+                      ${!seal&&html`<label><span class="sr-only">Shift ${i+1}${n} tonnes</span>
+                        <input id=${`sh-${k}-${j}-t`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist} placeholder="t" value=${l.tonnes??''} onInput=${e=>setLine(k,j,{tonnes:e.target.value})}/></label>`}
                       <label><span class="sr-only">Shift ${i+1}${n} area in square metres</span>
                         <input id=${`sh-${k}-${j}-a`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist} placeholder="m²" value=${l.area??''} onInput=${e=>setLine(k,j,{area:e.target.value})}/></label>
-                      <label><span class="sr-only">Shift ${i+1}${n} depth in millimetres</span>
+                      ${!seal&&html`<label><span class="sr-only">Shift ${i+1}${n} depth in millimetres</span>
                         <input id=${`sh-${k}-${j}-d`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist}
                           placeholder=${h!=null?`${h} mm`:'mm'} title=${h!=null?`Works out at about ${h} mm from the tonnes and area (2.4 t/m³)`:'Compacted depth in mm'}
-                          value=${l.depth??''} onInput=${e=>setLine(k,j,{depth:e.target.value})}/></label>
+                          value=${l.depth??''} onInput=${e=>setLine(k,j,{depth:e.target.value})}/></label>`}
                       ${ls.length>1
                         ?html`<button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>removeLine(k,j)} aria-label=${`Remove shift ${i+1} line ${j+1}`} title="Remove this line">${Icon.x}</button>`
                         :html`<span></span>`}
                     </div>`;})}
-                  <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>addLine(k)}>${Icon.plus} Add another mix</button></div>
+                  <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>addLine(k)}>${Icon.plus} Add another ${seal?'seal':'mix'}</button></div>
                 </div>
               </div>`;})}
           </div>
@@ -1221,8 +1223,8 @@ function AsphaltShifts({f,set,data}){
 /* Tabs are a list so more can be added later: give each an id, label, when it applies, and a render function. */
 const BOOKING_TABS=[
   {id:'details',label:'Booking Details',applies:()=>true,render:p=>html`<${BookingDetails} ...${p}/>`},
-  {id:'quantities',label:'Plant, Asphalt & Quantities',applies:f=>f.kind==='job',
-    badge:f=>{const t=qtyTotals(f).tonnes;return t?`${fmtN(t)} t`:null},
+  {id:'quantities',label:(f,d)=>isSealCrew(d.resources.find(r=>r.id===f.resourceId))?'Plant, Seal & Quantities':'Plant, Asphalt & Quantities',applies:f=>f.kind==='job',
+    badge:(f,d)=>{const q=qtyTotals(f);if(isSealCrew(d.resources.find(r=>r.id===f.resourceId)))return q.area?`${fmtN(q.area)} m²`:null;return q.tonnes?`${fmtN(q.tonnes)} t`:null},
     render:p=>html`<div class="grid gap-6"><${PlantPicker} f=${p.f} set=${p.set} data=${p.data}/><div class="h-px bg-line"></div><${AsphaltShifts} f=${p.f} set=${p.set} data=${p.data}/></div>`},
 ];
 
@@ -1382,7 +1384,7 @@ function Editor({initial,data,onSave,onDelete,onClose}){
           ${tabs.map(t=>html`<button type="button" key=${t.id} role="tab" id=${'tab-'+t.id} aria-selected=${active.id===t.id} aria-controls=${'panel-'+t.id}
             class="py-2 text-[13.5px] font-medium whitespace-nowrap border-b-2 transition-colors"
             style=${active.id===t.id?{borderColor:'var(--accent)',color:'var(--ink)'}:{borderColor:'transparent',color:'var(--muted)'}}
-            onClick=${()=>setTab(t.id)}>${t.label}${t.badge&&t.badge(f)&&html`<span class="ml-1.5 mono text-[11px] px-1.5 py-0.5 rounded bg-sunken text-muted">${t.badge(f)}</span>`}</button>`)}
+            onClick=${()=>setTab(t.id)}>${typeof t.label==='function'?t.label(f,data):t.label}${t.badge&&t.badge(f,data)&&html`<span class="ml-1.5 mono text-[11px] px-1.5 py-0.5 rounded bg-sunken text-muted">${t.badge(f,data)}</span>`}</button>`)}
         </div>
       </div>
       <div class="flex-1 min-h-0 overflow-y-auto px-5 py-5" role="tabpanel" id=${'panel-'+active.id} aria-labelledby=${'tab-'+active.id}>
