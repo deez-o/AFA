@@ -2302,7 +2302,7 @@ function drawProgram(doc,data,{b,k,crewId}){
     .forEach(([l,v,o])=>{cell(140,ry,22,rh,l,{border:false,align:'right',size:6.8,color:[70,70,70]});cell(162,ry,38,rh,v,o);ry+=rh});
   let my=16;
   [['CLIENT:',job.customer||''],['PROJECT LOCATION:',b.address||job.address||job.name],['JOB:',job.name],['SUPERVISOR:',pick('supervisor')],['QUOTE No:',b.quoteNo||'']]
-    .forEach(([l,v])=>{cell(64,my,26,rh,l,{bold:true,size:6.6});cell(90,my,48,rh,v,{bold:l!=='SUPERVISOR:'});my+=rh});
+    .forEach(([l,v])=>{cell(62,my,30,rh,l,{bold:true,size:6.4});cell(92,my,46,rh,v,{bold:l!=='SUPERVISOR:'});my+=rh});
 
   const top=Math.max(ry,my)+4;const LX=M,LW=94,RX=M+96,RW=94;
 
