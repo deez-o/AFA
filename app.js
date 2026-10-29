@@ -511,6 +511,25 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
   const crews=data.resources.filter(r=>r.type==='crew');
   const list=data.resources.filter(r=>r.type===tab&&(r.name+' '+r.sub).toLowerCase().includes(q.toLowerCase()));
   const crewName=id=>crews.find(c=>c.id===id)?.name;
+  /* Machines tab: drag categories into a new order, and machines within their category; saved straight away */
+  const [mdrag,setMdrag]=useState(null);   /* {kind:'cat'|'mach', id, cat, over, after} */
+  const canDragM=tab==='machine'&&!q;
+  const mStart=(e,kind,id,cat)=>{if(e.button!==undefined&&e.button!==0)return;e.preventDefault();e.stopPropagation();try{e.currentTarget.setPointerCapture(e.pointerId)}catch(x){}setMdrag({kind,id,cat,over:null,after:false})};
+  const mMove=e=>{if(!mdrag)return;const el=document.elementFromPoint(e.clientX,e.clientY);const t=el&&el.closest(mdrag.kind==='cat'?'[data-mcat-head]':'[data-mid]');
+    if(!t){if(mdrag.over)setMdrag({...mdrag,over:null});return}
+    const over=mdrag.kind==='cat'?t.getAttribute('data-mcat-head'):t.getAttribute('data-mid');
+    if(mdrag.kind==='mach'&&t.getAttribute('data-mcat')!==mdrag.cat){if(mdrag.over)setMdrag({...mdrag,over:null});return}
+    const bx=t.getBoundingClientRect();const after=e.clientY>bx.top+bx.height/2;
+    if(over!==mdrag.over||after!==mdrag.after)setMdrag({...mdrag,over,after})};
+  const mEnd=()=>{const m=mdrag;setMdrag(null);if(!m||!m.over||m.over===m.id)return;
+    if(m.kind==='cat'){setData(d=>{const o=machineCatsOf(d).filter(c=>c.toLowerCase()!==m.id);const lbl=machineCatsOf(d).find(c=>c.toLowerCase()===m.id);if(!lbl)return d;
+      let i=o.findIndex(c=>c.toLowerCase()===m.over);if(i<0)return d;if(m.after)i++;o.splice(i,0,lbl);return {...d,machineCats:o}})}
+    else setData(d=>{const res=[...d.resources];const from=res.findIndex(r=>r.id===m.id);if(from<0)return d;const [x]=res.splice(from,1);
+      let i=res.findIndex(r=>r.id===m.over);if(i<0)return d;if(m.after)i++;res.splice(i,0,x);return {...d,resources:res}})};
+  const mLine=(kind,id)=>mdrag&&mdrag.kind===kind&&mdrag.over===id&&mdrag.over!==mdrag.id?(mdrag.after?'inset 0 -2px 0 var(--accent)':'inset 0 2px 0 var(--accent)'):'none';
+  const mGrip=(kind,id,cat,label)=>html`<span role="button" tabindex="-1" class="w-5 h-6 shrink-0 inline-flex items-center justify-center rounded text-faint hover:text-ink hover:bg-surface select-none"
+    style=${{cursor:mdrag?'grabbing':'grab',touchAction:'none'}} title=${kind==='cat'?'Drag to move this category':'Drag to reorder within the category'} aria-label=${'Drag '+label}
+    onPointerDown=${e=>mStart(e,kind,id,cat)} onPointerMove=${mMove} onPointerUp=${mEnd} onPointerCancel=${()=>setMdrag(null)}>${Icon.grip}</span>`;
 
   const add=e=>{
     e.preventDefault();if(!f.name.trim())return;
@@ -573,7 +592,9 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
       ${(tab==='crew'?groupCrews(list).flatMap(g=>g.rows.map((r,i)=>({r,head:i===0?g:null})))
         :tab==='machine'?groupMachines(list,data).flatMap(g=>g.rows.map((r,i)=>({r,head:i===0?g:null})))
         :list.map(r=>({r,head:null}))).map(({r,head})=>{
-        const hdr=head&&html`<li key=${'h-'+head.key} class="px-2 pt-3 pb-1 flex items-center gap-2">
+        const hdr=head&&html`<li key=${'h-'+head.key} class="px-2 pt-3 pb-1 flex items-center gap-2" data-mcat-head=${tab==='machine'&&head.key!=='~'?head.key:undefined}
+            style=${tab==='machine'?{boxShadow:mLine('cat',head.key),opacity:mdrag&&mdrag.kind==='cat'&&mdrag.id===head.key?.45:1}:null}>
+          ${canDragM&&head.key!=='~'&&mGrip('cat',head.key,null,head.label)}
           <span class="label" style=${{color:'var(--ink)'}}>${head.label}</span><span class="mono text-[11px] text-faint">${head.rows.length}</span><span class="flex-1 h-px bg-line"></span></li>`;
         const s=rowStats(r,data,days);
         let meta;
@@ -629,7 +650,10 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
               </div>
             </div>
           </form></li>`];
-        return [hdr,html`<li key=${r.id} class=${'group rounded-lg px-2 py-2 flex items-start gap-3 hover:bg-sunken '+(r.visible?'':'opacity-55')}>
+        return [hdr,html`<li key=${r.id} class=${'group rounded-lg px-2 py-2 flex items-start gap-3 hover:bg-sunken '+(r.visible?'':'opacity-55')}
+            data-mid=${tab==='machine'?r.id:undefined} data-mcat=${tab==='machine'?(machCatOf(r).toLowerCase()||'~'):undefined}
+            style=${tab==='machine'?{boxShadow:mLine('mach',r.id),...(mdrag&&mdrag.kind==='mach'&&mdrag.id===r.id?{opacity:.45}:{})}:null}>
+          ${canDragM&&html`<span class="-ml-1 mt-1.5">${mGrip('mach',r.id,machCatOf(r).toLowerCase()||'~',r.name)}</span>`}
           <${Badge} r=${r}/>
           <div class="min-w-0 flex-1">
             <div class="font-medium truncate flex items-center gap-1.5"><span class="truncate">${r.name}</span>${r.type==='crew'&&r.subbie&&html`<${SubTag}/>`}</div>
