@@ -72,6 +72,12 @@ function blockStyle(b,data){
 }
 const jobLabel=j=>j?((j.customer||'').trim()?`${j.customer.trim()} · ${j.name}`:j.name):'Job';
 const MAINT_LABEL={day:'Day shift',night:'Night shift'};
+/* text for bars too narrow for the full title (one-day jobs in the 14-day, 30-day and 2-month views):
+   the customer, or the job name when there is no customer; the full details are in the hover */
+const shortLabel=b=>{const D=window.__rosterData;
+  if(b.kind==='job'){const j=D&&D.jobs.find(x=>x.id===b.jobId);return (j&&((j.customer||'').trim()||j.name))||'Job'}
+  if(b.kind==='onjob'){const j=D&&D.jobs.find(x=>x.id===b.jobId);return (j&&((j.customer||'').trim()||j.name))||b.address||'Job'}
+  return b.title||KINDS[b.kind].label};
 const blockTitle=(b,jobs)=>b.kind==='plantmaint'&&MAINT_LABEL[b.maintShift]?`${b.title||KINDS[b.kind].label} · ${MAINT_LABEL[b.maintShift]}`:b.kind==='onjob'?(b.address||jobs.find(j=>j.id===b.jobId)?.name||'On job'):b.kind==='job'?jobLabel(jobs.find(j=>j.id===b.jobId)):(b.title||KINDS[b.kind].label);
 
 const HUES=[12,205,150,280,40,330,185,100,240,60,0,120];
@@ -612,6 +618,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
   };
   const Grip=(label,onDown,extra='')=>html`<span class=${'grip '+extra} role="button" tabindex="-1" aria-label=${label} title="Drag to reorder"
     onPointerDown=${onDown} onClick=${e=>{e.preventDefault();e.stopPropagation()}}>${Icon.grip}</span>`;
+  window.__rosterData=data;
   const N=days.length;
   const colMin=view===7?120:view===14?68:view===60?26:40;
   const nameW=view===7?210:180;
@@ -748,7 +755,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             ${!v&&quoteFresh.has(it.b.id)&&html`<span class="shrink-0 w-2 h-2 rounded-full" style=${{background:'var(--accent)',boxShadow:'0 0 0 2px var(--surface)'}} title="Quote number changed in the last 48 hours"></span>`}
             ${v&&!compact&&html`<span class="shrink-0 inline-flex opacity-80">${Icon.pin}</span>`}
             ${compact
-              ?(!night&&html`<span class="t text-[11px]">${KINDS[it.b.kind].label.split(/[\s/]/)[0].slice(0,4)}</span>`)
+              ?html`<span class="t text-[10.5px] leading-tight">${shortLabel(it.b)}</span>`
               :html`<span class="t">${title}</span>`}
             ${!compact&&span>=2&&view===7&&html`<span class="ml-auto mono text-[10.5px] opacity-70 shrink-0">${span}d</span>`}
             ${it.cutR&&html`<span aria-hidden="true" class=${compact?'':'ml-auto'}>›</span>`}
