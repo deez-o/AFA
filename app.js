@@ -2172,7 +2172,7 @@ const truckHas=t=>!!t&&!!(t.co||t.driver||t.w||t.time||t.loc);
 const subHas=s=>!!s&&!!(s.name||s.info||s.time);
 const progHas=q=>!!q&&((q.trucks||[]).some(truckHas)||(q.subs||[]).some(subHas)||!!q.start||!!(q.comments||'').trim());
 const progClean=q=>{const o={};if(!q)return o;
-  const t=(q.trucks||[]).filter(truckHas).map(x=>({co:(x.co||'').trim(),driver:(x.driver||'').trim(),w:x.w||'',time:x.time||'',loc:(x.loc||'').trim()}));if(t.length)o.trucks=t;
+  const t=(q.trucks||[]).filter(truckHas).map(x=>({co:(x.co||'').trim(),driver:(x.driver||'').trim(),w:x.w||'',time:x.time||'',loc:(x.loc||'').trim(),...(x.pace?{pace:true}:{})}));if(t.length)o.trucks=t;
   const s=(q.subs||[]).filter(subHas).map(x=>({name:(x.name||'').trim(),info:(x.info||'').trim(),time:x.time||''}));if(s.length)o.subs=s;
   if(q.start)o.start=q.start;const c=(q.comments||'').trim();if(c)o.comments=c;return o};
 const linesOnly=q=>!q?[]:Array.isArray(q.lines)?q.lines:(q.type||q.tonnes||q.area?[q]:[]);
@@ -2207,15 +2207,27 @@ function ProgramShifts({f,set,data}){
   const trucks=q.trucks&&q.trucks.length?q.trucks:[{}];
   const subs=q.subs&&q.subs.length?q.subs:[{}];
   /* default times: subcontractors start with the shift; the first truck at the start time, each one after 15 minutes later */
-  const truckDefault=(list,j)=>j===0?(q.start||''):(list[j-1]&&list[j-1].time?addMin(list[j-1].time,15):'');
-  const setT=(j,p)=>{const list=trucks.map(t=>({...t}));const t={...list[j],...p};
-    if(!('time' in p)&&!t.time&&truckHas(t))t.time=truckDefault(list,j);list[j]=t;upd({trucks:list})};
+  /* the pacing truck (first truck unless another is picked): trucks before it and the pacer itself start with the shift,
+     each truck after it defaults to 15 minutes after the one before */
+  const paceOf=list=>{const x=list.findIndex(t=>t&&t.pace);return x<0?0:x};
+  const truckDefault=(list,j)=>{const p=paceOf(list);if(j<=p)return q.start||'';const pt=list[p]&&list[p].time;return pt?addMin(pt,15*(j-p)):''};
+  const follow=(list,p,oldT,newT)=>list.forEach((x,i)=>{if(i<=p||!truckHas(x))return;const od=oldT?addMin(oldT,15*(i-p)):'';
+    if(!x.time||x.time===od)list[i]={...x,time:newT?addMin(newT,15*(i-p)):''}});
+  const setT=(j,p)=>{const list=trucks.map(t=>({...t}));const before=list[j];const t={...before,...p};
+    if(!('time' in p)&&!t.time&&truckHas(t))t.time=truckDefault(list,j);list[j]=t;
+    if('time' in p&&j===paceOf(list))follow(list,j,before.time||'',p.time||'');
+    upd({trucks:list})};
+  const setPace=j=>{const list=trucks.map((t,x)=>{const {pace,...r}=t;return x===j?{...r,pace:true}:r});
+    if(!list[j].time&&q.start)list[j].time=q.start;const pt=list[j].time||'';
+    if(pt)list.forEach((x,i)=>{if(i>j&&truckHas(x))list[i]={...x,time:addMin(pt,15*(i-j))}});
+    upd({trucks:list})};
   const setS=(j,p)=>{const s0={...subs[j],...p};if(!('time' in p)&&!s0.time&&subHas(s0)&&q.start)s0.time=q.start;upd({subs:subs.map((s,x)=>x===j?s0:s)})};
   const setStart=v=>{const old=q.start||'';
     const subs2=(q.subs||[]).map(s=>subHas(s)&&(!s.time||s.time===old)?{...s,time:v}:s);
-    let po='',pn='';const tr2=(q.trucks||[]).map((t,j)=>{const od=j===0?old:(po?addMin(po,15):''),nd=j===0?v:(pn?addMin(pn,15):'');
-      const time=truckHas(t)&&(!t.time||t.time===od)?nd:t.time;po=t.time||'';pn=time||'';return {...t,time}});
-    upd({start:v,subs:subs2,trucks:tr2})};
+    const orig=q.trucks||[];const list=orig.map(t=>({...t}));const p=paceOf(list);
+    list.forEach((x,i)=>{if(i<=p&&truckHas(x)&&(!x.time||x.time===old))list[i]={...x,time:v}});
+    const op=(orig[p]&&orig[p].time)||'',np=(list[p]&&list[p].time)||'';if(op!==np)follow(list,p,op,np);
+    upd({start:v,subs:subs2,trucks:list})};
   const prog=o=>({trucks:(o.trucks||[]).map(t=>({...t})),subs:(o.subs||[]).map(s=>({...s})),start:o.start||'',comments:o.comments||''});
   const copyPrev=()=>upd(prog(sd[dates[i-1]]||{}));
   const copyAll=()=>{const next={...sd};dates.forEach(d=>{if(d===k)return;const o=sd[d]||{};next[d]={...shiftBase(o),lines:linesOnly(o),...prog(q)}});set({shiftData:next})};
@@ -2223,7 +2235,7 @@ function ProgramShifts({f,set,data}){
   const night=f.shift==='night';
   const locs=[...new Set([...PROGRAM_LOCATIONS,...(f.address?[f.address]:[])])];
   const fs={height:30,fontSize:13};const iconX='w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken';
-  const TC='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.3fr_1fr_76px_104px_1.2fr_28px] items-center';
+  const TC='grid gap-2 grid-cols-[22px_1fr_1fr_28px] sm:grid-cols-[22px_1.3fr_1fr_76px_104px_1.2fr_28px] items-center';
   const SC2='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.4fr_1.2fr_104px_28px] items-center';
   return html`<section class="grid gap-4" aria-labelledby="sec-program">
     <datalist id="dl-truckco">${truckCosOf(data).map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
@@ -2245,9 +2257,11 @@ function ProgramShifts({f,set,data}){
     </div>
 
     <div class="grid gap-1.5">
-      <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Trucks</span><span class="text-[12px] text-muted tnum">${tl.length} · ${fmtN(totT)}T</span><span class="flex-1 h-px bg-line self-center"></span></div>
-      <div class=${'hidden sm:grid '+TC}><span class="label">Truck</span><span class="label">Driver</span><span class="label">Weight</span><span class="label">Time</span><span class="label">Location</span><span></span></div>
+      <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Trucks</span><span class="text-[12px] text-muted tnum">${tl.length} · ${fmtN(totT)}T</span><span class="text-[11.5px] text-faint hidden sm:inline">Pick the pacing truck: each truck after it defaults to 15 min later</span><span class="flex-1 h-px bg-line self-center"></span></div>
+      <div class=${'hidden sm:grid '+TC}><span class="label" title="Pacing truck">Pace</span><span class="label">Truck</span><span class="label">Driver</span><span class="label">Weight</span><span class="label">Time</span><span class="label">Location</span><span></span></div>
       ${trucks.map((t,j)=>html`<div key=${j} class=${TC}>
+        <label class="w-[22px] h-[30px] inline-flex items-center justify-center cursor-pointer" title="Pacing truck: each truck after this one defaults to 15 minutes later">
+          <input type="radio" name="pg-pace" class="w-3.5 h-3.5" style=${{accentColor:'var(--accent)'}} checked=${paceOf(trucks)===j} onChange=${()=>setPace(j)} aria-label=${`Truck ${j+1} sets the pace`}/></label>
         <input id=${`pg-t${j}-co`} class="field field-sm" style=${fs} list="dl-truckco" placeholder="Truck" value=${t.co||''} onInput=${e=>setT(j,{co:e.target.value})} aria-label=${`Truck ${j+1} company`}/>
         <input id=${`pg-t${j}-dr`} class="field field-sm" style=${fs} placeholder="Driver" value=${t.driver||''} onInput=${e=>setT(j,{driver:e.target.value})} aria-label=${`Truck ${j+1} driver`}/>
         <select id=${`pg-t${j}-w`} class="field field-sm mono" style=${{...fs,color:t.w?'var(--ink)':'var(--faint)'}} value=${t.w||''} onChange=${e=>setT(j,{w:e.target.value})} aria-label=${`Truck ${j+1} weight`}>
@@ -2259,7 +2273,7 @@ function ProgramShifts({f,set,data}){
       </div>`)}
       <div class="flex flex-wrap gap-3">
         <button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>{const l=trucks.filter(truckHas);upd({trucks:[...l,{time:truckDefault(l,l.length)}]})}}>${Icon.plus} Add truck</button>
-        ${truckHas(trucks[trucks.length-1])&&html`<button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>{const last=trucks[trucks.length-1];upd({trucks:[...trucks,{...last,driver:'',time:last.time?addMin(last.time,15):truckDefault(trucks,trucks.length)}]})}}>${Icon.plus} Same truck again</button>`}
+        ${truckHas(trucks[trucks.length-1])&&html`<button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>{const {pace,...last}=trucks[trucks.length-1];upd({trucks:[...trucks,{...last,driver:'',time:truckDefault(trucks,trucks.length)}]})}}>${Icon.plus} Same truck again</button>`}
       </div>
     </div>
 
