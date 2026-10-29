@@ -2174,7 +2174,7 @@ const progHas=q=>!!q&&((q.trucks||[]).some(truckHas)||(q.subs||[]).some(subHas)|
 const progClean=q=>{const o={};if(!q)return o;
   const t=(q.trucks||[]).filter(truckHas).map(x=>({co:(x.co||'').trim(),driver:(x.driver||'').trim(),w:x.w||'',time:x.time||'',loc:(x.loc||'').trim(),...(x.pace?{pace:true}:{})}));if(t.length)o.trucks=t;
   const s=(q.subs||[]).filter(subHas).map(x=>({name:(x.name||'').trim(),info:(x.info||'').trim(),time:x.time||''}));if(s.length)o.subs=s;
-  if(q.start)o.start=q.start;const c=(q.comments||'').trim();if(c)o.comments=c;return o};
+  if(q.start)o.start=q.start;if(+q.interval&&+q.interval!==15)o.interval=+q.interval;const c=(q.comments||'').trim();if(c)o.comments=c;return o};
 const linesOnly=q=>!q?[]:Array.isArray(q.lines)?q.lines:(q.type||q.tonnes||q.area?[q]:[]);
 const fmtTime=t=>{if(!t)return '';const m=/^(\d{1,2}):(\d{2})/.exec(t);if(!m)return t;let h=+m[1];const ap=h>=12?'PM':'AM';h=h%12||12;return `${h}:${m[2]} ${ap}`};
 const truckT=w=>parseFloat(String(w||'').replace(/[^\d.]/g,''))||0;
@@ -2223,28 +2223,40 @@ function ProgramShifts({f,set,data}){
   const trucks=q.trucks&&q.trucks.length?q.trucks:[{}];
   const subs=q.subs&&q.subs.length?q.subs:[{}];
   /* default times: subcontractors start with the shift; the first truck at the start time, each one after 15 minutes later */
-  /* the pacing truck (first truck unless another is picked): trucks before it and the pacer itself start with the shift,
-     each truck after it defaults to 15 minutes after the one before */
-  const paceOf=list=>{const x=list.findIndex(t=>t&&t.pace);return x<0?0:x};
-  const truckDefault=(list,j)=>{const p=paceOf(list);if(j<=p)return q.start||'';const pt=list[p]&&list[p].time;return pt?addMin(pt,15*(j-p)):''};
-  const follow=(list,p,oldT,newT)=>list.forEach((x,i)=>{if(i<=p||!truckHas(x))return;const od=oldT?addMin(oldT,15*(i-p)):'';
-    if(!x.time||x.time===od)list[i]={...x,time:newT?addMin(newT,15*(i-p)):''}});
-  const setT=(j,p)=>{const list=trucks.map(t=>({...t}));const before=list[j];const t={...before,...p};
+  /* truck times: the first truck starts with the shift; every truck after it starts with the first truck,
+     unless an "interval start" truck is picked: trucks after that one are spaced by the interval (15 min unless changed) */
+  const intv=Math.round(num(q.interval))||15;
+  const paceOf=list=>list.findIndex(t=>t&&t.pace);
+  const truckDefault=(list,j)=>{const p=paceOf(list);
+    if(p>=0&&j>p){const pt=list[p]&&list[p].time;return pt?addMin(pt,intv*(j-p)):''}
+    return j===0?(q.start||''):((list[0]&&list[0].time)||q.start||'')};
+  const follow=(list,p,oldT,newT,oldStep=intv,newStep=intv)=>list.forEach((x,i)=>{if(i<=p||!truckHas(x))return;
+    const od=oldT?addMin(oldT,oldStep*(i-p)):'';if(!x.time||x.time===od)list[i]={...x,time:newT?addMin(newT,newStep*(i-p)):''}});
+  /* after a time change: trucks still on the first truck's time move with it, and trucks after the interval truck follow it */
+  const cascade=(orig,list)=>{const p=paceOf(list);
+    const o0=(orig[0]&&orig[0].time)||'',n0=(list[0]&&list[0].time)||'',opT=p>=0?((orig[p]&&orig[p].time)||''):'';
+    if(o0!==n0){const lim=p>=0?p:list.length-1;for(let i=1;i<=lim;i++){const x=list[i];if(x&&truckHas(x)&&(!x.time||x.time===o0))list[i]={...x,time:n0}}}
+    if(p>=0){const npT=(list[p]&&list[p].time)||'';if(opT!==npT)follow(list,p,opT,npT)}
+    return list};
+  const setT=(j,p)=>{const list=trucks.map(t=>({...t}));const t={...list[j],...p};
     if(!('time' in p)&&!t.time&&truckHas(t))t.time=truckDefault(list,j);list[j]=t;
-    if('time' in p&&j===paceOf(list))follow(list,j,before.time||'',p.time||'');
-    upd({trucks:list})};
+    upd({trucks:'time' in p?cascade(trucks,list):list})};
   const setPace=j=>{const list=trucks.map((t,x)=>{const {pace,...r}=t;return x===j?{...r,pace:true}:r});
-    if(!list[j].time&&q.start)list[j].time=q.start;const pt=list[j].time||'';
-    if(pt)list.forEach((x,i)=>{if(i>j&&truckHas(x))list[i]={...x,time:addMin(pt,15*(i-j))}});
+    if(!list[j].time)list[j].time=truckDefault(list,j);const pt=list[j].time||'';
+    if(pt)list.forEach((x,i)=>{if(i>j&&truckHas(x))list[i]={...x,time:addMin(pt,intv*(i-j))}});
     upd({trucks:list})};
+  const clearPace=()=>{const p=paceOf(trucks);if(p<0)return;const pt=trucks[p].time||'';const first=(trucks[0]&&trucks[0].time)||q.start||'';
+    upd({trucks:trucks.map((t,i)=>{const {pace,...r}=t;return i>p&&pt&&r.time===addMin(pt,intv*(i-p))?{...r,time:first}:r})})};
+  const setIntv=v=>{const n=Math.round(num(v))||15;const list=trucks.map(t=>({...t}));const p=paceOf(list);
+    if(p>=0){const pt=list[p].time||'';if(pt)follow(list,p,pt,pt,intv,n)}upd({interval:n===15?'':n,trucks:list})};
   const setS=(j,p)=>{const s0={...subs[j],...p};if(!('time' in p)&&!s0.time&&subHas(s0)&&q.start)s0.time=q.start;upd({subs:subs.map((s,x)=>x===j?s0:s)})};
   const setStart=v=>{const old=q.start||'';
     const subs2=(q.subs||[]).map(s=>subHas(s)&&(!s.time||s.time===old)?{...s,time:v}:s);
-    const orig=q.trucks||[];const list=orig.map(t=>({...t}));const p=paceOf(list);
-    list.forEach((x,i)=>{if(i<=p&&truckHas(x)&&(!x.time||x.time===old))list[i]={...x,time:v}});
-    const op=(orig[p]&&orig[p].time)||'',np=(list[p]&&list[p].time)||'';if(op!==np)follow(list,p,op,np);
+    const orig=q.trucks||[];const list=orig.map(t=>({...t}));
+    if(list[0]&&truckHas(list[0])&&(!list[0].time||list[0].time===old))list[0]={...list[0],time:v};
+    cascade(orig,list);
     upd({start:v,subs:subs2,trucks:list})};
-  const prog=o=>({trucks:(o.trucks||[]).map(t=>({...t})),subs:(o.subs||[]).map(s=>({...s})),start:o.start||'',comments:o.comments||''});
+  const prog=o=>({trucks:(o.trucks||[]).map(t=>({...t})),subs:(o.subs||[]).map(s=>({...s})),start:o.start||'',comments:o.comments||'',interval:o.interval||''});
   const copyPrev=()=>upd(prog(sd[dates[i-1]]||{}));
   const copyAll=()=>{const next={...sd};dates.forEach(d=>{if(d===k)return;const o=sd[d]||{};next[d]={...shiftBase(o),lines:linesOnly(o),...prog(q)}});set({shiftData:next})};
   const tl=trucks.filter(truckHas);const totT=tl.reduce((a,t)=>a+truckT(t.w),0);
@@ -2273,11 +2285,17 @@ function ProgramShifts({f,set,data}){
     </div>
 
     <div class="grid gap-1.5">
-      <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Trucks</span><span class="text-[12px] text-muted tnum">${tl.length} · ${fmtN(totT)}T</span><span class="text-[11.5px] text-faint hidden sm:inline">Pick the pacing truck: each truck after it defaults to 15 min later</span><span class="flex-1 h-px bg-line self-center"></span></div>
-      <div class=${'hidden sm:grid '+TC}><span class="label" title="Pacing truck">Pace</span><span class="label">Truck</span><span class="label">Driver</span><span class="label">Weight</span><span class="label">Time</span><span class="label">Location</span><span></span></div>
+      <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Trucks</span><span class="text-[12px] text-muted tnum">${tl.length} · ${fmtN(totT)}T</span><span class="flex-1 h-px bg-line self-center"></span></div>
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted">
+        <span>${paceOf(trucks)>=0?html`Trucks after the <span class="font-semibold text-ink">interval start</span> truck (◉) are spaced every`:html`Every truck starts with the first truck. Tick ◉ on the truck that <span class="font-semibold text-ink">starts the interval</span>; trucks after it are spaced every`}</span>
+        <select id="pg-interval" class="field field-sm mono w-auto" style=${{height:26,fontSize:12,paddingLeft:6}} value=${String(intv)} onChange=${e=>setIntv(e.target.value)} aria-label="Minutes between trucks">
+          ${[...new Set([5,10,15,20,25,30,45,60,intv])].sort((a,c)=>a-c).map(m=>html`<option key=${m} value=${String(m)}>${m} min</option>`)}</select>
+        ${paceOf(trucks)>=0&&html`<button type="button" class="underline underline-offset-2 hover:text-ink" onClick=${clearPace}>No interval</button>`}
+      </div>
+      <div class=${'hidden sm:grid '+TC}><span class="label" title="Interval start: trucks after this one are spaced by the interval">Int.</span><span class="label">Truck</span><span class="label">Driver</span><span class="label">Weight</span><span class="label">Time</span><span class="label">Location</span><span></span></div>
       ${trucks.map((t,j)=>html`<div key=${j} class=${TC}>
-        <label class="w-[22px] h-[30px] inline-flex items-center justify-center cursor-pointer" title="Pacing truck: each truck after this one defaults to 15 minutes later">
-          <input type="radio" name="pg-pace" class="w-3.5 h-3.5" style=${{accentColor:'var(--accent)'}} checked=${paceOf(trucks)===j} onChange=${()=>setPace(j)} aria-label=${`Truck ${j+1} sets the pace`}/></label>
+        <label class="w-[22px] h-[30px] inline-flex items-center justify-center cursor-pointer" title=${`Interval start: each truck after this one is ${intv} minutes after the one before`}>
+          <input type="radio" name="pg-pace" class="w-3.5 h-3.5" style=${{accentColor:'var(--accent)'}} checked=${paceOf(trucks)===j} onChange=${()=>setPace(j)} aria-label=${`Truck ${j+1} starts the interval`}/></label>
         <input id=${`pg-t${j}-co`} class="field field-sm" style=${fs} list="dl-truckco" placeholder="Truck" value=${t.co||''} onInput=${e=>setT(j,{co:e.target.value})} aria-label=${`Truck ${j+1} company`}/>
         <input id=${`pg-t${j}-dr`} class="field field-sm" style=${fs} placeholder="Driver" value=${t.driver||''} onInput=${e=>setT(j,{driver:e.target.value})} aria-label=${`Truck ${j+1} driver`}/>
         <select id=${`pg-t${j}-w`} class="field field-sm mono" style=${{...fs,color:t.w?'var(--ink)':'var(--faint)'}} value=${t.w||''} onChange=${e=>setT(j,{w:e.target.value})} aria-label=${`Truck ${j+1} weight`}>
