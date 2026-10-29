@@ -2296,9 +2296,9 @@ const truckHas=t=>!!t&&!!(t.co||t.driver||t.w||t.time||t.loc);
 const subHas=s=>!!s&&!!(s.name||s.info||s.time);
 const progHas=q=>!!q&&((q.trucks||[]).some(truckHas)||(q.subs||[]).some(subHas)||!!q.start||!!(q.comments||'').trim());
 const progClean=q=>{const o={};if(!q)return o;
-  const t=(q.trucks||[]).filter(truckHas).map(x=>({co:(x.co||'').trim(),driver:(x.driver||'').trim(),w:x.w||'',time:x.time||'',loc:(x.loc||'').trim(),...(x.pace?{pace:true}:{})}));if(t.length)o.trucks=t;
+  const t=(q.trucks||[]).filter(truckHas).map(x=>({co:(x.co||'').trim(),driver:(x.driver||'').trim(),w:x.w||'',time:x.time||'',loc:(x.loc||'').trim(),...(x.manual?{manual:true}:{})}));if(t.length)o.trucks=t;
   const s=(q.subs||[]).filter(subHas).map(x=>({name:(x.name||'').trim(),info:(x.info||'').trim(),time:x.time||''}));if(s.length)o.subs=s;
-  if(q.start)o.start=q.start;if(+q.interval&&+q.interval!==15)o.interval=+q.interval;const c=(q.comments||'').trim();if(c)o.comments=c;return o};
+  if(q.start)o.start=q.start;if(q.locTimes){const L={};Object.entries(q.locTimes).forEach(([kk,v])=>{if(v&&(v.start||+v.gap))L[kk]={...(v.start?{start:v.start}:{}),...(+v.gap?{gap:+v.gap}:{})}});if(Object.keys(L).length)o.locTimes=L}const c=(q.comments||'').trim();if(c)o.comments=c;return o};
 const linesOnly=q=>!q?[]:Array.isArray(q.lines)?q.lines:(q.type||q.tonnes||q.area?[q]:[]);
 const fmtTime=t=>{if(!t)return '';const m=/^(\d{1,2}):(\d{2})/.exec(t);if(!m)return t;let h=+m[1];const ap=h>=12?'PM':'AM';h=h%12||12;return `${h}:${m[2]} ${ap}`};
 const truckT=w=>parseFloat(String(w||'').replace(/[^\d.]/g,''))||0;
@@ -2356,7 +2356,7 @@ function ProgramShifts({f,set,data}){
   /* opens on today's shift (or the next one, or the last one if the job is finished) */
   const defShift=()=>{const t=iso(TODAY);return dates.includes(t)?t:(dates.find(k=>k>=t)||dates[dates.length-1]||'')};
   const [sel,setSel]=useState(defShift);
-  const [editPastP,setEditPastP]=useState(false);   /* before any early return: hooks must always run */
+  const [editPastP,setEditPastP]=useState(false);const [newLoc,setNewLoc]=useState('');   /* before any early return: hooks must always run */
   const k=dates.includes(sel)?sel:defShift();
   if(!k)return html`<div class="text-[12.5px] text-muted">This booking has no shifts yet. Check the dates and the weekend ticks.</div>`;
   const q=sd[k]||{};const i=dates.indexOf(k);
@@ -2364,53 +2364,44 @@ function ProgramShifts({f,set,data}){
   const trucks=q.trucks&&q.trucks.length?q.trucks:[{}];
   const subs=q.subs&&q.subs.length?q.subs:[{}];
   /* default times: subcontractors start with the shift; the first truck at the start time, each one after 15 minutes later */
-  /* truck times: the first truck starts with the shift; every truck after it starts with the first truck,
-     unless an "interval start" truck is picked: trucks after that one are spaced by the interval (15 min unless changed) */
-  const intv=Math.round(num(q.interval))||15;
-  const paceOf=list=>list.findIndex(t=>t&&t.pace);
-  const truckDefault=(list,j)=>{const p=paceOf(list);
-    if(p>=0&&j>p){const pt=list[p]&&list[p].time;return pt?addMin(pt,intv*(j-p)):''}
-    return j===0?(q.start||''):((list[0]&&list[0].time)||q.start||'')};
-  const follow=(list,p,oldT,newT,oldStep=intv,newStep=intv)=>list.forEach((x,i)=>{if(i<=p||!truckHas(x))return;
-    const od=oldT?addMin(oldT,oldStep*(i-p)):'';if(!x.time||x.time===od)list[i]={...x,time:newT?addMin(newT,newStep*(i-p)):''}});
-  /* after a time change: trucks still on the first truck's time move with it, and trucks after the interval truck follow it */
-  const cascade=(orig,list)=>{const p=paceOf(list);
-    const o0=(orig[0]&&orig[0].time)||'',n0=(list[0]&&list[0].time)||'',opT=p>=0?((orig[p]&&orig[p].time)||''):'';
-    if(o0!==n0){const lim=p>=0?p:list.length-1;for(let i=1;i<=lim;i++){const x=list[i];if(x&&truckHas(x)&&(!x.time||x.time===o0))list[i]={...x,time:n0}}}
-    if(p>=0){const npT=(list[p]&&list[p].time)||'';if(opT!==npT)follow(list,p,opT,npT)}
-    return list};
-  const setT=(j,p)=>{const list=trucks.map(t=>({...t}));const t={...list[j],...p};
+  /* truck times, location by location: each location has a first time (the shift start unless changed) and a gap;
+     its trucks are timed in list order (first time, + gap, + 2 gaps...). A time picked on a truck sticks until it's reset. */
+  const lt=q.locTimes||{};
+  const lkey=t=>((t&&t.loc)||'').trim().toLowerCase();
+  const locStart=key=>(lt[key]&&lt[key].start)||q.start||'';
+  const locGap=key=>Math.round(num(lt[key]&&lt[key].gap))||0;
+  const retime=(list,locT=lt,st=q.start)=>{const idx={};return list.map(t=>{if(!truckHas(t))return t;const kk=lkey(t);const n=idx[kk]=(idx[kk]??-1)+1;
+    if(t.manual)return t;const s0=(locT[kk]&&locT[kk].start)||st||'';const g=Math.round(num(locT[kk]&&locT[kk].gap))||0;return {...t,time:s0?addMin(s0,g*n):''}})};
+  /* bookings saved before location timing: keep their typed times (anything not on the shift start counts as set by hand) */
+  const realTrucks=q.locTimes?(q.trucks||[]):(q.trucks||[]).map(t=>t.time&&t.time!==q.start?{...t,manual:true}:t);
+  const updT=tr=>upd({trucks:tr,locTimes:lt});
+  const setT=(j,p)=>{const list=realTrucks.map(t=>({...t}));const t={...list[j],...p};
     /* picking a truck fills its default driver and weight (unless they were typed in) */
     if('co' in p){const nd=truckDefOf(data,p.co),od=truckDefOf(data,list[j].co);
       if(nd.driver&&(!t.driver||t.driver===od.driver))t.driver=nd.driver;else if(!nd.driver&&t.driver&&t.driver===od.driver)t.driver='';
       if(nd.w&&(!t.w||t.w===od.w))t.w=nd.w;else if(!nd.w&&t.w&&t.w===od.w)t.w=''}
-    if(!('time' in p)&&!t.time&&truckHas(t))t.time=truckDefault(list,j);list[j]=t;
-    upd({trucks:'time' in p?cascade(trucks,list):list})};
-  const setPace=j=>{const list=trucks.map((t,x)=>{const {pace,...r}=t;return x===j?{...r,pace:true}:r});
-    if(!list[j].time)list[j].time=truckDefault(list,j);const pt=list[j].time||'';
-    if(pt)list.forEach((x,i)=>{if(i>j&&truckHas(x))list[i]={...x,time:addMin(pt,intv*(i-j))}});
-    upd({trucks:list})};
-  const clearPace=()=>{const p=paceOf(trucks);if(p<0)return;const pt=trucks[p].time||'';const first=(trucks[0]&&trucks[0].time)||q.start||'';
-    upd({trucks:trucks.map((t,i)=>{const {pace,...r}=t;return i>p&&pt&&r.time===addMin(pt,intv*(i-p))?{...r,time:first}:r})})};
-  const setIntv=v=>{const n=Math.round(num(v))||15;const list=trucks.map(t=>({...t}));const p=paceOf(list);
-    if(p>=0){const pt=list[p].time||'';if(pt)follow(list,p,pt,pt,intv,n)}upd({interval:n===15?'':n,trucks:list})};
+    if('time' in p){if(p.time)t.manual=true;else delete t.manual}
+    list[j]=t;updT(retime(list))};
+  const autoTime=j=>{const list=realTrucks.map(t=>({...t}));delete list[j].manual;updT(retime(list))};
+  const addTruck=(loc,copy)=>{const list=realTrucks.filter(truckHas).map(t=>({...t}));const kk=(loc||'').trim().toLowerCase();let at=-1;list.forEach((t,x)=>{if(lkey(t)===kk)at=x});
+    const nt={...(copy?{co:copy.co||'',w:copy.w||''}:{}),loc:loc||''};
+    if(at<0)list.push(nt);else list.splice(at+1,0,nt);updT(retime(list))};
+  const removeTruck=j=>updT(retime(realTrucks.filter((_,x)=>x!==j)));
+  const setLoc=(key,p)=>{const nl={...lt,[key]:{...(lt[key]||{}),...p}};upd({locTimes:nl,trucks:retime(realTrucks,nl)})};
   const setS=(j,p)=>{const s0={...subs[j],...p};if(!('time' in p)&&!s0.time&&subHas(s0)&&q.start)s0.time=q.start;upd({subs:subs.map((s,x)=>x===j?s0:s)})};
   const setStart=v=>{const old=q.start||'';
     const subs2=(q.subs||[]).map(s=>subHas(s)&&(!s.time||s.time===old)?{...s,time:v}:s);
-    const orig=q.trucks||[];const list=orig.map(t=>({...t}));
-    if(list[0]&&truckHas(list[0])&&(!list[0].time||list[0].time===old))list[0]={...list[0],time:v};
-    cascade(orig,list);
-    upd({start:v,subs:subs2,trucks:list})};
-  const prog=o=>({trucks:(o.trucks||[]).map(t=>({...t})),subs:(o.subs||[]).map(s=>({...s})),start:o.start||'',comments:o.comments||'',interval:o.interval||''});
+    upd({start:v,subs:subs2,trucks:retime(realTrucks,lt,v),locTimes:lt})};
+  const prog=o=>({trucks:(o.trucks||[]).map(t=>({...t})),subs:(o.subs||[]).map(s=>({...s})),start:o.start||'',comments:o.comments||'',locTimes:{...(o.locTimes||{})}});
   const copyPrev=()=>upd(prog(sd[dates[i-1]]||{}));
   const todayP=iso(TODAY);const lockedP=k<todayP&&!editPastP;
   const copyAll=()=>{const next={...sd};dates.forEach(d=>{if(d===k||(d<todayP&&!editPastP))return;const o=sd[d]||{};next[d]={...shiftBase(o),lines:linesOnly(o),...prog(q)}});set({shiftData:next})};
-  const tl=trucks.filter(truckHas);const totT=tl.reduce((a,t)=>a+truckT(t.w),0);
+  const tl=(q.trucks||[]).filter(truckHas);const totT=tl.reduce((a,t)=>a+truckT(t.w),0);
   const night=f.shift==='night';
   const sealJob=isSealCrew(data.resources.find(r=>r.id===f.resourceId));   /* seal jobs: subcontractors only, no trucks */
   const locs=[...new Set([...programLocsOf(data),...(f.address?[f.address]:[])])];
   const fs={height:30,fontSize:13};const iconX='w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken';
-  const TC='grid gap-2 grid-cols-[22px_1fr_1fr_28px] sm:grid-cols-[22px_1.2fr_1fr_72px_164px_1.1fr_28px] items-center';
+  const TC='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.2fr_1fr_72px_190px_1.1fr_28px] items-center';
   const SC2='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.3fr_1.2fr_164px_28px] items-center';
   return html`<section class="grid gap-4" aria-labelledby="sec-program">
     <datalist id="dl-truckco">${truckCosOf(data).map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
@@ -2436,31 +2427,47 @@ function ProgramShifts({f,set,data}){
     </div>
 
     <fieldset disabled=${lockedP} class="grid gap-4 border-0 p-0 m-0 min-w-0" style=${lockedP?{opacity:.5}:null}>
-    ${!sealJob&&html`<div class="grid gap-1.5">
+    ${!sealJob&&html`<div class="grid gap-2">
       <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Trucks</span><span class="text-[12px] text-muted tnum">${tl.length} · ${fmtN(totT)}T</span><span class="flex-1 h-px bg-line self-center"></span></div>
-      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted">
-        <span>${paceOf(trucks)>=0?html`Trucks after the <span class="font-semibold text-ink">interval start</span> truck (◉) are spaced every`:html`Every truck starts with the first truck. Tick ◉ on the truck that <span class="font-semibold text-ink">starts the interval</span>; trucks after it are spaced every`}</span>
-        <select id="pg-interval" class="field field-sm mono w-auto" style=${{height:26,fontSize:12,paddingLeft:6}} value=${String(intv)} onChange=${e=>setIntv(e.target.value)} aria-label="Minutes between trucks">
-          ${[...new Set([5,10,15,20,25,30,45,60,intv])].sort((a,c)=>a-c).map(m=>html`<option key=${m} value=${String(m)}>${m} min</option>`)}</select>
-        ${paceOf(trucks)>=0&&html`<button type="button" class="underline underline-offset-2 hover:text-ink" onClick=${clearPace}>No interval</button>`}
-      </div>
-      <div class=${'hidden sm:grid '+TC}><span class="label" title="Interval start: trucks after this one are spaced by the interval">Int.</span><span class="label">Truck</span><span class="label">Driver</span><span class="label">Weight</span><span class="label">Time</span><span class="label">Location</span><span></span></div>
-      ${trucks.map((t,j)=>html`<div key=${j} class=${TC}>
-        <label class="w-[22px] h-[30px] inline-flex items-center justify-center cursor-pointer" title=${`Interval start: each truck after this one is ${intv} minutes after the one before`}>
-          <input type="radio" name="pg-pace" class="w-3.5 h-3.5" style=${{accentColor:'var(--accent)'}} checked=${paceOf(trucks)===j} onChange=${()=>setPace(j)} aria-label=${`Truck ${j+1} starts the interval`}/></label>
-        <input id=${`pg-t${j}-co`} class="field field-sm" style=${fs} list="dl-truckco" placeholder="Truck" value=${t.co||''} onInput=${e=>setT(j,{co:e.target.value})} aria-label=${`Truck ${j+1} company`}/>
-        <input id=${`pg-t${j}-dr`} class="field field-sm" style=${fs} placeholder="Driver" value=${t.driver||''} onInput=${e=>setT(j,{driver:e.target.value})} aria-label=${`Truck ${j+1} driver`}/>
-        <select id=${`pg-t${j}-w`} class="field field-sm mono" style=${{...fs,color:t.w?'var(--ink)':'var(--faint)'}} value=${t.w||''} onChange=${e=>setT(j,{w:e.target.value})} aria-label=${`Truck ${j+1} weight`}>
-          <option value="">T</option>${TRUCK_WEIGHTS.map(w=>html`<option key=${w} value=${w} style=${{color:'var(--ink)'}}>${w}</option>`)}
-          ${t.w&&!TRUCK_WEIGHTS.includes(t.w)&&html`<option value=${t.w}>${t.w}</option>`}</select>
-        <${TimeSelect} id=${`pg-t${j}-time`} label=${`Truck ${j+1} time`} value=${t.time||''} pm=${night} onChange=${v=>setT(j,{time:v})}/>
-        <input id=${`pg-t${j}-loc`} class="field field-sm" style=${fs} list="dl-loc" placeholder="Location" value=${t.loc||''} onInput=${e=>setT(j,{loc:e.target.value})} aria-label=${`Truck ${j+1} location`}/>
-        <button type="button" class=${iconX} onClick=${()=>upd({trucks:trucks.filter((_,x)=>x!==j)})} aria-label=${`Remove truck ${j+1}`} title="Remove">${Icon.x}</button>
-      </div>`)}
-      <div class="flex flex-wrap gap-3">
-        <button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>{const l=trucks.filter(truckHas);upd({trucks:[...l,{time:truckDefault(l,l.length)}]})}}>${Icon.plus} Add truck</button>
-        ${truckHas(trucks[trucks.length-1])&&html`<button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>{const {pace,...last}=trucks[trucks.length-1];upd({trucks:[...trucks,{...last,driver:'',time:truckDefault(trucks,trucks.length)}]})}}>${Icon.plus} Same truck again</button>`}
-      </div>
+      <div class="text-[12px] text-muted -mt-1">Trucks are grouped by location. Each location has a first truck time and a gap: its trucks follow on in order. Pick a time on a truck to set it by hand.</div>
+      ${(()=>{const groups=[];realTrucks.forEach((t,j)=>{const kk=lkey(t);let g=groups.find(x=>x.key===kk);if(!g){g={key:kk,label:(t.loc||'').trim(),items:[]};groups.push(g)}g.items.push({t,j})});
+        return groups.map(g=>{const tT=g.items.reduce((a,{t})=>a+truckT(t.w),0);const sw=g.label?locColorOf(data,g.key===(f.address||'').trim().toLowerCase()?'SITE':g.label):'var(--line-strong)';
+          return html`<div key=${'g-'+g.key} class="rounded-lg border border-line overflow-hidden">
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-2.5 py-2 bg-sunken border-b border-line">
+              <span class="w-3 h-3 rounded-sm shrink-0" style=${{background:sw}}></span>
+              <span class="text-[13px] font-semibold mr-1">${g.label||'No location'}</span>
+              <span class="text-[12px] text-muted tnum">${g.items.length} truck${g.items.length===1?'':'s'} · ${fmtN(tT)}T</span>
+              <span class="flex-1"></span>
+              <span class="text-[12px] text-muted">First truck</span>
+              <span style=${{width:164}}><${TimeSelect} id=${`pg-loc-${g.key||'none'}-start`} label=${`First truck time at ${g.label||'no location'}`} value=${locStart(g.key)} pm=${night} onChange=${v=>setLoc(g.key,{start:v})}/></span>
+              <span class="text-[12px] text-muted">then</span>
+              <select id=${`pg-loc-${g.key||'none'}-gap`} class="field field-sm mono w-auto" style=${{height:30,fontSize:12.5,paddingLeft:6}} value=${String(locGap(g.key))} onChange=${e=>setLoc(g.key,{gap:+e.target.value})} aria-label=${`Gap between trucks at ${g.label||'no location'}`}>
+                ${[...new Set([0,5,10,15,20,25,30,45,60,locGap(g.key)])].sort((a,c)=>a-c).map(m=>html`<option key=${m} value=${String(m)}>${m?`every ${m} min`:'same time'}</option>`)}</select>
+            </div>
+            <div class="px-2.5 py-2 grid gap-1.5">
+              <div class=${'hidden sm:grid '+TC}><span class="label">Truck</span><span class="label">Driver</span><span class="label">Weight</span><span class="label">Time</span><span class="label">Location</span><span></span></div>
+              ${g.items.map(({t,j})=>html`<div key=${j} class=${TC}>
+                <input id=${`pg-t${j}-co`} class="field field-sm" style=${fs} list="dl-truckco" placeholder="Truck" value=${t.co||''} onInput=${e=>setT(j,{co:e.target.value})} aria-label=${`Truck ${j+1} company`}/>
+                <input id=${`pg-t${j}-dr`} class="field field-sm" style=${fs} placeholder="Driver" value=${t.driver||''} onInput=${e=>setT(j,{driver:e.target.value})} aria-label=${`Truck ${j+1} driver`}/>
+                <select id=${`pg-t${j}-w`} class="field field-sm mono" style=${{...fs,color:t.w?'var(--ink)':'var(--faint)'}} value=${t.w||''} onChange=${e=>setT(j,{w:e.target.value})} aria-label=${`Truck ${j+1} weight`}>
+                  <option value="">T</option>${TRUCK_WEIGHTS.map(w=>html`<option key=${w} value=${w} style=${{color:'var(--ink)'}}>${w}</option>`)}
+                  ${t.w&&!TRUCK_WEIGHTS.includes(t.w)&&html`<option value=${t.w}>${t.w}</option>`}</select>
+                <span class="flex items-center gap-1 min-w-0"><span class="flex-1 min-w-0"><${TimeSelect} id=${`pg-t${j}-time`} label=${`Truck ${j+1} time`} value=${t.time||''} pm=${night} onChange=${v=>setT(j,{time:v})}/></span>
+                  ${t.manual?html`<button type="button" class="w-6 h-6 shrink-0 inline-flex items-center justify-center rounded text-[13px] text-muted hover:text-ink hover:bg-sunken" onClick=${()=>autoTime(j)} title="Set by hand. Click to go back to the location's timing" aria-label=${`Truck ${j+1}: go back to automatic time`}>↺</button>`:html`<span class="w-6 shrink-0 text-[10px] text-faint text-center" title="Timed from the location">auto</span>`}</span>
+                <input id=${`pg-t${j}-loc`} class="field field-sm" style=${fs} list="dl-loc" placeholder="Location" value=${t.loc||''} onInput=${e=>setT(j,{loc:e.target.value})} aria-label=${`Truck ${j+1} location`}/>
+                <button type="button" class=${iconX} onClick=${()=>removeTruck(j)} aria-label=${`Remove truck ${j+1}`} title="Remove">${Icon.x}</button>
+              </div>`)}
+              <div class="flex flex-wrap gap-3 pt-0.5">
+                <button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>addTruck(g.label)}>${Icon.plus} Add truck${g.label?` at ${g.label}`:''}</button>
+                ${g.items.length>0&&html`<button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>addTruck(g.label,g.items[g.items.length-1].t)}>${Icon.plus} Same truck again</button>`}
+              </div>
+            </div>
+          </div>`})})()}
+      <form class="flex flex-wrap items-center gap-2" onSubmit=${e=>{e.preventDefault();const v=newLoc.trim();if(!v)return;addTruck(v);setNewLoc('')}}>
+        <span class="text-[12px] text-muted">${realTrucks.length?'Add trucks at another location':'Add trucks at'}</span>
+        <input id="pg-newloc" class="field field-sm" style=${{...fs,width:200}} list="dl-loc" placeholder="Location, e.g. SCA" value=${newLoc} onInput=${e=>setNewLoc(e.target.value)} aria-label="Location for new trucks"/>
+        <button type="submit" class="btn" style=${{height:30}} disabled=${!newLoc.trim()}>${Icon.plus} Add</button>
+      </form>
     </div>`}
 
     <div class="grid gap-1.5">
