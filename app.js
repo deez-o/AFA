@@ -17,7 +17,8 @@ const sunOn=b=>b.sunShift!==undefined?!!b.sunShift:b.shift==='night'?true:!!b.we
 /* night works also have a Friday switch (Friday night is part of the weekend); day works always work Fridays */
 const friOn=b=>b.shift!=='night'||!!b.friShift;
 const worksOn=(b,d)=>b.offDays&&b.offDays.includes(iso(d))?false:d.getDay()===6?satOn(b):d.getDay()===0?sunOn(b):d.getDay()===5?friOn(b):true;
-const TODAY=(()=>{const t=new Date();t.setHours(12,0,0,0);return t})();
+/* today's date; kept current if the page is left open past midnight (see App) */
+let TODAY=(()=>{const t=new Date();t.setHours(12,0,0,0);return t})();
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const WD=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const fmtShort=d=>`${d.getDate()} ${MON[d.getMonth()]}`;
@@ -2352,9 +2353,11 @@ function TimeSelect({id,value,onChange,label,pm}){
 /* booking editor tab: one shift at a time */
 function ProgramShifts({f,set,data}){
   const dates=shiftDates(f);const sd=f.shiftData||{};
-  const [sel,setSel]=useState(()=>{const t=iso(TODAY);return dates.includes(t)?t:(dates.find(k=>k>=t)||dates[0]||'')});
+  /* opens on today's shift (or the next one, or the last one if the job is finished) */
+  const defShift=()=>{const t=iso(TODAY);return dates.includes(t)?t:(dates.find(k=>k>=t)||dates[dates.length-1]||'')};
+  const [sel,setSel]=useState(defShift);
   const [editPastP,setEditPastP]=useState(false);   /* before any early return: hooks must always run */
-  const k=dates.includes(sel)?sel:dates[0];
+  const k=dates.includes(sel)?sel:defShift();
   if(!k)return html`<div class="text-[12.5px] text-muted">This booking has no shifts yet. Check the dates and the weekend ticks.</div>`;
   const q=sd[k]||{};const i=dates.indexOf(k);
   const upd=p=>set({shiftData:{...sd,[k]:{...shiftBase(q),lines:linesOnly(q),...p}}});
@@ -3168,6 +3171,11 @@ function App({boot,live}){
   const toggleResources=()=>{let wide=true;try{wide=window.matchMedia('(min-width: 1024px)').matches}catch(e){}
     if(wide)setPanel(p=>!p);else setDrawer(d=>!d)};
   const [tab,setTab]=useState('crew');
+  /* roll "today" over at midnight when the page stays open */
+  const [,setDayTick]=useState(0);
+  useEffect(()=>{const chk=()=>{const n=new Date();if(iso(n)!==iso(TODAY)){n.setHours(12,0,0,0);TODAY=n;setDayTick(x=>x+1)}};
+    const t=setInterval(chk,60000);document.addEventListener('visibilitychange',chk);window.addEventListener('focus',chk);
+    return()=>{clearInterval(t);document.removeEventListener('visibilitychange',chk);window.removeEventListener('focus',chk)}},[]);
   /* which screen of the left menu is open (remembered in this browser) */
   const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return SCREENS[v]?v:'schedule'}catch(e){return 'schedule'}});
   const goScreen=k=>{setScreen(k);try{localStorage.setItem(KEY+':screen',k)}catch(e){}
