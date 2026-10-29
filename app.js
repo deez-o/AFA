@@ -1062,17 +1062,17 @@ function PlantPicker({f,set,data}){
     return null;
   };
   const b2s=b=>b.start===b.end?fmtShort(parse(b.start)):`${fmtShort(parse(b.start))}–${fmtShort(parse(b.end))}`;
-  return html`<section class="grid gap-2">
-    <div class="flex items-center gap-2">
-      <h3 class="font-display text-[15px] font-semibold">Mobile plant</h3>
+  return html`<section class="grid gap-3 md:grid-cols-[minmax(0,1fr)_300px] md:items-start">
+    <div class="flex items-center gap-2 md:col-span-2">
+      <h3 class="font-display text-[15px] font-semibold">Machines</h3>
       <span class="mono text-[11px] text-faint">${picked.size} assigned</span>
       <span class="flex-1"></span>
       ${own.length>0&&own.some(m=>!picked.has(m.id))&&html`<button type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${addOwn}>Add ${crew?.name||'crew'}'s plant</button>`}
     </div>
     ${machines.length===0
-      ?html`<div class="text-[12.5px] text-muted">No machines yet. Add them in the Resources panel under Machines.</div>`
-      :html`${machines.length>8&&html`<input id="pl-search" class="field field-sm" style=${{height:30,fontSize:13}} placeholder="Search machine #, description, rego or category" value=${pq} onInput=${e=>setPq(e.target.value)} aria-label="Search machines"/>`}
-      <ul class="border border-line rounded-lg max-h-[260px] overflow-y-auto divide-y" style=${{borderColor:'var(--line)'}}>
+      ?html`<div class="text-[12.5px] text-muted md:col-span-2">No machines yet. Add them on the Machines screen (left menu), in the Resources panel.</div>`
+      :html`${machines.length>8&&html`<input id="pl-search" class="field field-sm md:col-start-1" style=${{height:30,fontSize:13}} placeholder="Search machine #, description, rego or category" value=${pq} onInput=${e=>setPq(e.target.value)} aria-label="Search machines"/>`}
+      <ul class="border border-line rounded-lg max-h-[min(460px,55vh)] overflow-y-auto divide-y md:col-start-1" style=${{borderColor:'var(--line)'}}>
         ${plantSections.length===0&&html`<li class="px-3 py-3 text-[12.5px] text-muted">No machines match.</li>`}
         ${plantSections.flatMap(sec=>[html`<li key=${'h-'+sec.key} class="px-2.5 py-1 bg-sunken label sticky top-0 z-[1]" style=${{borderColor:'var(--line)'}}>${sec.label} <span class="mono text-faint">${sec.rows.length}</span></li>`,
           ...sec.rows.map(m=>{const st=status(m);const isOwn=m.crewId===f.resourceId;
@@ -1087,14 +1087,15 @@ function PlantPicker({f,set,data}){
               ${m.rego&&html`<span class="mono text-[10.5px] text-faint shrink-0">${m.rego}</span>`}
             </label></li>`;})])}
       </ul>`}
-    ${picked.size>0&&(()=>{const sel=machines.filter(m=>picked.has(m.id));const warn=sel.filter(m=>status(m)).length;
-      return html`<div class="rounded-lg border border-line bg-sunken p-2.5 grid gap-2" aria-label="Machines selected for this job">
+    ${machines.length>0&&(()=>{const sel=machines.filter(m=>picked.has(m.id));const warn=sel.filter(m=>status(m)).length;
+      return html`<div class="rounded-lg border border-line bg-sunken p-2.5 grid gap-2 content-start md:col-start-2 md:row-start-2 md:row-span-3" aria-label="Machines selected for this job">
         <div class="flex items-center gap-2">
           <span class="label" style=${{color:'var(--ink)'}}>Selected for this job</span><span class="mono text-[11px] text-faint">${sel.length}</span>
           ${warn>0&&html`<span class="text-[11.5px] font-medium" style=${{color:'var(--warn)'}}>${warn} need${warn===1?'s':''} checking</span>`}
           <span class="flex-1"></span>
-          <button type="button" class="text-[12px] font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>set({plantIds:[]})}>Clear all</button>
+          ${sel.length>0&&html`<button type="button" class="text-[12px] font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>set({plantIds:[]})}>Clear all</button>`}
         </div>
+        ${sel.length===0&&html`<div class="text-[12.5px] text-muted py-2">Nothing selected yet. Tick machines in the list.</div>`}
         ${groupMachines(sel,data).map(g=>html`<div key=${g.key} class="grid gap-1">
           <div class="text-[11.5px] font-semibold text-muted">${g.label} <span class="mono text-faint">${g.rows.length}</span></div>
           <div class="flex flex-wrap gap-1.5">
@@ -1377,9 +1378,11 @@ function AsphaltShifts({f,set,data}){
 /* Tabs are a list so more can be added later: give each an id, label, when it applies, and a render function. */
 const BOOKING_TABS=[
   {id:'details',label:'Booking Details',applies:()=>true,render:p=>html`<${BookingDetails} ...${p}/>`},
-  {id:'quantities',label:(f,d)=>isSealCrew(d.resources.find(r=>r.id===f.resourceId))?'Plant, Seal & Quantities':'Plant, Asphalt & Quantities',applies:f=>f.kind==='job',
+  {id:'machines',label:'Machines',applies:f=>f.kind==='job',badge:f=>(f.plantIds||[]).length?`${(f.plantIds||[]).length}`:null,
+    render:p=>html`<${PlantPicker} f=${p.f} set=${p.set} data=${p.data}/>`},
+  {id:'quantities',label:(f,d)=>isSealCrew(d.resources.find(r=>r.id===f.resourceId))?'Seal & Quantities':'Asphalt & Quantities',applies:f=>f.kind==='job',
     badge:(f,d)=>{const q=qtyTotals(f);if(isSealCrew(d.resources.find(r=>r.id===f.resourceId)))return q.area?`${fmtN(q.area)} m²`:null;return q.tonnes?`${fmtN(q.tonnes)} t`:null},
-    render:p=>html`<div class="grid gap-6"><${PlantPicker} f=${p.f} set=${p.set} data=${p.data}/><div class="h-px bg-line"></div><${AsphaltShifts} f=${p.f} set=${p.set} data=${p.data}/></div>`},
+    render:p=>html`<${AsphaltShifts} f=${p.f} set=${p.set} data=${p.data}/>`},
   {id:'program',label:(f,d)=>isSealCrew(d.resources.find(r=>r.id===f.resourceId))?'Subcontractors':'Trucks & Subcontractors',applies:f=>f.kind==='job',
     badge:(f,d)=>{const seal=isSealCrew(d.resources.find(r=>r.id===f.resourceId));
       const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&(seal?q.subs:q.trucks))||[]).filter(seal?subHas:truckHas).length,0);return n?`${n}`:null},
@@ -1449,7 +1452,7 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
           </div>
           <label class="grid gap-1"><span class="label">Site address</span>
             <input id="ed-address" class="field" placeholder="Street, suburb, postcode" value=${f.address||''} onInput=${e=>set({address:e.target.value})}/>
-            <span class="text-[11.5px] text-faint">Shown on each piece of plant assigned in the Plant, Asphalt & Quantities tab.</span></label>
+            <span class="text-[11.5px] text-faint">Shown on each machine assigned in the Machines tab.</span></label>
           <label class="grid gap-1"><span class="label">Notes</span>
             <textarea id="ed-notes" class="field" style=${{height:'auto',minHeight:60,padding:'8px 10px',resize:'vertical'}} rows="2" placeholder="Anything the crew or plant should know" value=${f.notes||''} onInput=${e=>set({notes:e.target.value})}></textarea></label>
           <div class="grid gap-1"><span class="label">Shift</span>
@@ -1475,7 +1478,7 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
         const hits=[];for(let d=parse(f.start);iso(d)<=f.end;d=addDays(d,1)){const k=iso(d);const n=plantMaintOn(data,data.blocks,k,f.shift||'day');if(n.length&&!exbinOf(f,k))hits.push(`${WD[d.getDay()]} ${fmtShort(d)}`)}
         return hits.length?html`<div class="flex gap-2 items-start text-[12.5px] rounded-md px-3 py-2" role="alert" style=${{background:'hsl(0 75% var(--blk-l))',color:'hsl(0 60% var(--blk-fg-l))'}}>
           <span class="mt-0.5 inline-flex">${Icon.alert}</span>
-          <span>Asphalt plant maintenance on ${hits.join(', ')}. Tick Exbin on those shifts in the Plant, Asphalt & Quantities tab if asphalt is coming from another supplier.</span></div>`:null})()}
+          <span>Asphalt plant maintenance on ${hits.join(', ')}. Tick Exbin on those shifts in the Asphalt & Quantities tab if asphalt is coming from another supplier.</span></div>`:null})()}
       ${f.kind==='job'&&f.jobId&&f.jobId!=='__new'&&(()=>{
             const job=data.jobs.find(j=>j.id===f.jobId);if(!job)return null;
             const done=f._jobDone??!!job.completed;const today=iso(TODAY);
