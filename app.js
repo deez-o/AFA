@@ -333,7 +333,7 @@ function MixesManager({data,setData}){
 
 /* ---------- jobs manager (Resources panel → Jobs tab) ---------- */
 const JOB_HUES=[205,152,268,330,185,48,100,20,240,300];
-function JobsManager({data,setData}){
+function JobsManager({data,setData,onImport}){
   const [q,setQ]=useState('');
   const [f,setF]=useState({name:'',customer:'',address:''});
   const [edit,setEdit]=useState(null); /* {id,name,customer,address} */
@@ -370,7 +370,7 @@ function JobsManager({data,setData}){
   const save=e=>{e.preventDefault();const name=edit.name.trim();
     if(!name){setMsg('Give the job a name.');return}
     if(dup(name,edit.id)){setMsg(`There is already a job called ${name}.`);return}
-    setData(d=>({...d,jobs:d.jobs.map(j=>j.id===edit.id?{...j,name,customer:edit.customer.trim(),address:edit.address.trim()}:j)}));
+    setData(d=>({...d,jobs:d.jobs.map(j=>j.id===edit.id?{...j,name,customer:edit.customer.trim(),address:edit.address.trim(),projectNo:(edit.projectNo||'').trim()}:j)}));
     setEdit(null);setMsg('')};
   const remove=id=>{setData(d=>({...d,jobs:d.jobs.filter(j=>j.id!==id)}));setConfirm(null)};
   const iconBtn='w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-surface';
@@ -406,6 +406,7 @@ function JobsManager({data,setData}){
         <button type="button" class="flex-1" aria-pressed=${view==='active'} onClick=${()=>{setView('active');setEdit(null);setConfirm(null)}}>Active <span class="mono text-[11px] text-faint">${nActive}</span></button>
         <button type="button" class="flex-1" aria-pressed=${view==='completed'} onClick=${()=>{setView('completed');setEdit(null);setConfirm(null)}}>Completed <span class="mono text-[11px] text-faint">${nDone}</span></button>
       </div>
+      ${onImport&&html`<button type="button" class="btn w-full justify-center" onClick=${onImport}>${Icon.download} Import from TeamCal</button>`}
       <label for="job-search" class="sr-only">Search jobs</label>
       <input id="job-search" class="field" placeholder="Search job, customer or address" value=${q} onInput=${e=>setQ(e.target.value)}/>
     </div>
@@ -417,6 +418,8 @@ function JobsManager({data,setData}){
               <input id=${'je-c-'+j.id} list="jobs-customers" class="field field-sm" style=${fs} placeholder="e.g. CMB" value=${edit.customer} onInput=${e=>setEdit({...edit,customer:e.target.value})}/></label>
             <label class="grid gap-0.5"><span class="label">Job name</span>
               <input id=${'je-n-'+j.id} class="field field-sm" style=${fs} value=${edit.name} autoFocus=${true} onInput=${e=>{setEdit({...edit,name:e.target.value});setMsg('')}}/></label>
+            <label class="grid gap-0.5"><span class="label">Project number</span>
+              <input id=${'je-p-'+j.id} class="field field-sm mono" style=${fs} placeholder="e.g. 402313" value=${edit.projectNo||''} onInput=${e=>setEdit({...edit,projectNo:e.target.value})}/></label>
             <label class="grid gap-0.5"><span class="label">Site address</span>
               <input id=${'je-a-'+j.id} class="field field-sm" style=${fs} placeholder="Street, suburb, postcode" value=${edit.address} onInput=${e=>setEdit({...edit,address:e.target.value})}/></label>
             <span class="text-[11.5px] text-muted">The address is the default for new bookings. Existing bookings keep their own address.</span>
@@ -434,7 +437,7 @@ function JobsManager({data,setData}){
           </label>
           <div class="min-w-0 flex-1">
             <div class="text-[13px] truncate">${j.customer?html`<span class="font-semibold">${j.customer}</span><span class="text-muted"> · </span>`:''}<span class="font-medium">${j.name}</span></div>
-            <div class="text-[12px] text-muted truncate">${j.address||'No site address'}</div>
+            <div class="text-[12px] text-muted truncate">${j.projectNo?html`<span class="mono">P ${j.projectNo}</span> · `:''}${j.address||'No site address'}</div>
             ${st
               ?html`<div class="mt-1 grid gap-0.5 text-[11.5px] text-muted">
                   <div><span class="font-medium" style=${{color:'var(--ok)'}}>Completed ${j.completedAt?`${fmtShort(parse(j.completedAt))} ${parse(j.completedAt).getFullYear()}`:''}</span></div>
@@ -453,7 +456,7 @@ function JobsManager({data,setData}){
                   <button class="text-[11px] font-semibold px-2 py-0.5 rounded" style=${{background:'hsl(352 70% var(--blk-l))',color:'hsl(352 60% var(--blk-fg-l))'}} onClick=${()=>remove(j.id)}>Remove</button>
                   <button class="text-[11px] text-muted px-1.5" onClick=${()=>setConfirm(null)}>Keep</button></div>`)
             :html`<div class="flex items-center gap-0.5 lg:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                <button class=${iconBtn} onClick=${()=>{setEdit({id:j.id,name:j.name,customer:j.customer||'',address:j.address||''});setConfirm(null);setMsg('')}} aria-label=${'Edit '+j.name} title="Edit">${Icon.pencil}</button>
+                <button class=${iconBtn} onClick=${()=>{setEdit({id:j.id,name:j.name,customer:j.customer||'',address:j.address||'',projectNo:j.projectNo||''});setConfirm(null);setMsg('')}} aria-label=${'Edit '+j.name} title="Edit">${Icon.pencil}</button>
                 <button class=${iconBtn} onClick=${()=>{setConfirm(j.id);setEdit(null)}} aria-label=${'Remove '+j.name} title="Remove">${Icon.x}</button></div>`}
         </li>`;})}
       ${list.length===0&&html`<li class="px-3 py-6 text-center text-muted text-[13px]">${q?`No jobs match “${q}”.`:view==='completed'?'No completed jobs yet. Tick a job in Active when it is finished.':'No active jobs. Add one below.'}</li>`}
@@ -472,7 +475,7 @@ function JobsManager({data,setData}){
 }
 
 /* ---------- sidebar ---------- */
-function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId}){
+function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onImport}){
   const [q,setQ]=useState('');
   const [f,setF]=useState({name:'',sub:'',crewId:''});
   const [confirmId,setConfirmId]=useState(null);
@@ -508,7 +511,7 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId}){
       </div>`;
   if(tab==='jobs')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
-    <${JobsManager} data=${data} setData=${setData}/>
+    <${JobsManager} data=${data} setData=${setData} onImport=${onImport}/>
   </aside>`;
   if(tab==='mixes')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
@@ -790,7 +793,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             style=${{...blockStyle(it.b,data),top:10+it.lane*32,left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
               borderTopLeftRadius:it.cutL?0:6,borderBottomLeftRadius:it.cutL?0:6,borderTopRightRadius:it.cutR?0:6,borderBottomRightRadius:it.cutR?0:6,
               justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined}}
-            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?'\nClick to edit the crew job':''}`}
+            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?'\nClick to edit the crew job':''}`}
             onPointerDown=${e=>v?e.stopPropagation():startDrag(e,it.b)}
             onClick=${v?()=>onEdit(it.b.parent):undefined}
             onKeyDown=${e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onEdit(v?it.b.parent:it.b)}
@@ -1236,11 +1239,17 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
             <input id="ed-new-job" class="field" placeholder="e.g. Duntroon St resheet" value=${f._newJobName||''} autoFocus=${true} onInput=${e=>set({_newJobName:e.target.value})}/>
             <span class="text-[11.5px] text-faint">Added to the Jobs list when you save, with the customer and address on this booking.</span></label>`}
 
-          <label class="grid gap-1"><span class="label">Quote number</span>
-            <input id="ed-quote" class="field mono" placeholder="e.g. Q-24518" value=${f.quoteNo||''} onInput=${e=>set({quoteNo:e.target.value})}/></label>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="grid gap-1"><span class="label">Quote number</span>
+              <input id="ed-quote" class="field mono" placeholder="e.g. 260271" value=${f.quoteNo||''} onInput=${e=>set({quoteNo:e.target.value})}/></label>
+            <label class="grid gap-1"><span class="label">Project number</span>
+              <input id="ed-project" class="field mono" placeholder="e.g. 402313" value=${f.projectNo??(data.jobs.find(j=>j.id===f.jobId)?.projectNo||'')} onInput=${e=>set({projectNo:e.target.value})}/></label>
+          </div>
           <label class="grid gap-1"><span class="label">Site address</span>
             <input id="ed-address" class="field" placeholder="Street, suburb, postcode" value=${f.address||''} onInput=${e=>set({address:e.target.value})}/>
             <span class="text-[11.5px] text-faint">Shown on each piece of plant assigned in the Plant, Asphalt & Quantities tab.</span></label>
+          <label class="grid gap-1"><span class="label">Notes</span>
+            <textarea id="ed-notes" class="field" style=${{height:'auto',minHeight:60,padding:'8px 10px',resize:'vertical'}} rows="2" placeholder="Anything the crew or plant should know" value=${f.notes||''} onInput=${e=>set({notes:e.target.value})}></textarea></label>
           <div class="grid gap-1"><span class="label">Shift</span>
             <div class="seg w-max">
               <button type="button" aria-pressed=${(f.shift||'day')==='day'} onClick=${()=>set({shift:'day'})}>Day works</button>
@@ -1302,7 +1311,9 @@ function Editor({initial,data,onSave,onDelete,onClose}){
   const submit=e=>{e.preventDefault();if(err)return;
     const out={...f,id:f.id||uid()};
     if(out.kind!=='job'){delete out.jobId;delete out.shift;delete out.address;delete out.plantIds}
-    else{out.jobId=out.jobId||data.jobs[0]?.id||'__new';out.shift=out.shift||'day';out.plantIds=out.plantIds||[];out.address=(out.address||'').trim();out.quoteNo=(out.quoteNo||'').trim();if(!out.quoteNo)delete out.quoteNo}
+    else{out.jobId=out.jobId||data.jobs[0]?.id||'__new';out.shift=out.shift||'day';out.plantIds=out.plantIds||[];out.address=(out.address||'').trim();out.quoteNo=(out.quoteNo||'').trim();if(!out.quoteNo)delete out.quoteNo;
+      if(out.projectNo===undefined){const pj=data.jobs.find(j=>j.id===out.jobId)?.projectNo;if(pj)out.projectNo=pj}
+      out.projectNo=(out.projectNo||'').trim();if(!out.projectNo)delete out.projectNo;out.notes=(out.notes||'').trim();if(!out.notes)delete out.notes}
     /* keep every shift's figures (including dates now outside the range); drop only fully empty rows */
     /* only mixes typed under "Other…" join the company list; removed mixes stay removed */
     const newMixes=[...new Set(Object.values(out.shiftData||{}).flatMap(q=>linesOf(q)).filter(l=>l._custom&&(l.type||'').trim()).map(l=>l.type.trim()))];
@@ -1902,6 +1913,255 @@ function Notifications({data,onOpen,prefs,setPrefs}){
   </div>`;
 }
 
+/* ---------- TeamCal import: reading the export ---------- */
+/* TeamCal columns: Name (crew), Start Date, End Date, Summary (customer - quote - site (Project No.)),
+   Location (quantities, e.g. "14,086m2 @ 90mm EME = 3,106 tons (7 Shifts)"). */
+const TC_CUSTOMER_FIX={'wisnlow':'Winslow','bmd con':'BMD'};
+const TC_KNOWN_CUSTOMER={'402236':'CMB'}; /* Old Gympie Rd, Caboolture: TeamCal doesn't name the customer */
+const tcNum=s=>parseFloat(String(s).replace(/,/g,''));
+const tcIsQuote=s=>/^\d{2}\/?\d{4,5}[A-Z]?$/i.test(String(s).trim());
+function tcParseSummary(raw){
+  let s=String(raw||'').replace(/\^/g,'').replace(/\s+/g,' ').trim();
+  let projectNo='';
+  s=s.replace(/\(\s*Project\s*No\.?\s*([\w\/-]+)\s*\)/i,(m,p)=>{projectNo=p;return ''}).trim();
+  const parts=s.split(/\s*-\s+/).map(x=>x.trim()).filter(Boolean);
+  let customer='',quoteNo='',site='';
+  const lead=parts[0]?parts[0].match(/^(\d{2}\/?\d{4,5}[A-Z]?)\s+(.+)$/i):null;
+  if(lead){quoteNo=lead[1];site=[lead[2],...parts.slice(1)].join(' - ')}
+  else if(parts.length>=3&&tcIsQuote(parts[1])){customer=parts[0];quoteNo=parts[1];site=parts.slice(2).join(' - ')}
+  else if(parts.length>=2){customer=parts[0];site=parts.slice(1).join(' - ')}
+  else site=parts[0]||'';
+  customer=TC_CUSTOMER_FIX[customer.toLowerCase()]||customer;
+  if(!customer&&projectNo&&TC_KNOWN_CUSTOMER[projectNo])customer=TC_KNOWN_CUSTOMER[projectNo];
+  return {customer,quoteNo,site,projectNo};
+}
+function tcParseMix(t){
+  let m;
+  if(/\bEME\s*2?\b/i.test(t))return 'EME2';
+  if(/\bSMA\s*\d*/i.test(t))return 'SMA';
+  if((m=t.match(/\bType[-\s]?(\d)/i)))return 'Type'+m[1];
+  if((m=t.match(/\bAC\s*(\d+)/i)))return 'AC'+m[1];
+  if((m=t.match(/\bDG\s*(\d+)/i)))return 'DG'+m[1];
+  return '';
+}
+function tcParseBinder(t,mix){
+  if(/BIO\s*BINDER\s*C320|C320\s*BIO/i.test(t))return 'C320 Bio';
+  for(const b of ['A15E','C600','C320','MG']){if(new RegExp('\\b'+b+'\\b','i').test(t))return b}
+  if(mix==='EME2')return 'EME2';
+  if(mix==='SMA')return 'A15E';
+  return '';
+}
+/* one "segment" of the Location text: area, depth, mix, binder, tonnes, shift count */
+function tcParseSegment(seg){
+  const t=String(seg);
+  const tons=[...t.matchAll(/([\d,]+(?:\.\d+)?)\s*(?:tonnes|tonne|tons|ton|t)\b/gi)].map(m=>tcNum(m[1]));
+  const tonnes=tons.length?tons[tons.length-1]:0;
+  const am=t.match(/([\d,]+(?:\.\d+)?)\s*m(?:2|²)/i);
+  const dm=t.match(/([\d.]+)\s*mm/i);
+  const sm=t.match(/\(\s*(\d+)\s*shifts?\s*\)/i);
+  const mix=tcParseMix(t);
+  return {tonnes,area:am?tcNum(am[1]):0,depth:dm?tcNum(dm[1]):0,mix,binder:tcParseBinder(t,mix),shifts:sm?Number(sm[1]):0,text:t.trim()};
+}
+const tcRound=v=>Math.round(v*10)/10;
+/* spread a booking's tonnes over its days: "(N Shifts)" means the total is shared by N shifts,
+   given out day by day in order; without it, the total is split evenly across the booking's days */
+function tcAllocate(dates,segments){
+  const out={};const add=(k,l)=>{(out[k]=out[k]||{lines:[]}).lines.push(l)};
+  const asphalt=segments.filter(s=>s.tonnes>0);
+  if(!asphalt.length)return {shiftData:null,warnings:[]};
+  const warnings=[];
+  if(asphalt.some(s=>s.shifts)){
+    let at=0;
+    asphalt.forEach((s,si)=>{
+      const n=s.shifts||Math.max(1,dates.length-at);
+      const use=dates.slice(at,at+n);
+      if(!use.length){warnings.push(`${s.mix||'A mix'} (${s.tonnes} t) didn’t fit in the booking’s days`);return}
+      const per=s.tonnes/n,perA=s.area/n;
+      use.forEach(k=>add(k,{type:s.mix,binder:s.binder,tonnes:tcRound(per),area:Math.round(perA)||'',depth:s.depth||''}));
+      if(n>use.length)warnings.push(`${s.mix||'Mix'}: ${n} shifts in TeamCal, ${use.length} in this booking (${tcRound(per)} t each)`);
+      if(asphalt.length>1)at+=use.length;
+    });
+  }else{
+    asphalt.forEach(s=>{
+      const n=dates.length;let left=s.tonnes;
+      dates.forEach((k,i)=>{const t=i===n-1?tcRound(left):tcRound(s.tonnes/n);left-=t;
+        add(k,{type:s.mix,binder:s.binder,tonnes:t,area:Math.round(s.area/n)||'',depth:s.depth||''})});
+    });
+  }
+  asphalt.filter(s=>!s.mix).forEach(s=>warnings.push(`No mix type found in “${s.text}”`));
+  return {shiftData:out,warnings};
+}
+function tcDays(start,end){const out=[];for(let d=parse(start);iso(d)<=end;d=addDays(d,1))out.push(iso(d));return out}
+/* rows: [{name,start,end,summary,location}] (dates as YYYY-MM-DD) -> bookings ready to map onto crews/jobs */
+function tcParseRows(rows){
+  return rows.filter(r=>r&&r.name&&r.start).map((r,i)=>{
+    const end=r.end&&r.end>=r.start?r.end:r.start;
+    const sum=tcParseSummary(r.summary);
+    const loc=String(r.location||'').replace(/\s+/g,' ').trim();
+    const segs=loc.split(/\s*\/\/\s*/).map(tcParseSegment);
+    const dates=tcDays(r.start,end);
+    const {shiftData,warnings}=tcAllocate(dates,segs);
+    return {row:i+2,crewName:String(r.name).trim(),start:r.start,end,...sum,notes:loc,shiftData,warnings,
+      tonnes:segs.reduce((a,s)=>a+s.tonnes,0),
+      importKey:['tc',String(r.name).trim(),r.start,end,String(r.summary||'').trim(),loc].join('|')};
+  });
+}
+
+/* ---------- TeamCal import: reading the file, review, and adding to the roster ---------- */
+const tcCellText=v=>{if(v==null)return '';if(v instanceof Date)return v;if(typeof v==='object'){if(v.richText)return v.richText.map(r=>r.text).join('');if(v.text!=null)return String(v.text);if(v.result!=null)return v.result instanceof Date?v.result:String(v.result)}return String(v)};
+const tcDateKey=v=>{
+  if(v instanceof Date)return `${v.getUTCFullYear()}-${pad(v.getUTCMonth()+1)}-${pad(v.getUTCDate())}`;
+  const s=String(v||'').trim();let m;
+  if((m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)))return `${m[1]}-${pad(+m[2])}-${pad(+m[3])}`;
+  if((m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/)))return `${m[3].length===2?'20'+m[3]:m[3]}-${pad(+m[2])}-${pad(+m[1])}`;
+  return '';
+};
+async function readTeamCalFile(file){
+  const ExcelJS=await loadExcelJS();const wb=new ExcelJS.Workbook();
+  await wb.xlsx.load(await file.arrayBuffer());
+  const ws=wb.worksheets[0];if(!ws)throw new Error('The file has no sheets.');
+  const head={};ws.getRow(1).eachCell((c,i)=>{head[String(tcCellText(c.value)).trim().toLowerCase()]=i});
+  const col=n=>head[n];
+  const need=['name','start date','end date','summary','location'];
+  const missing=need.filter(n=>!col(n));
+  if(missing.length)throw new Error(`This doesn’t look like a TeamCal export. Missing column${missing.length>1?'s':''}: ${missing.join(', ')}.`);
+  const rows=[];
+  for(let r=2;r<=ws.rowCount;r++){const row=ws.getRow(r);const g=n=>tcCellText(row.getCell(col(n)).value);
+    const name=String(g('name')).trim();if(!name)continue;
+    rows.push({name,start:tcDateKey(g('start date')),end:tcDateKey(g('end date')),summary:String(g('summary')),location:String(g('location'))});}
+  return rows;
+}
+const tcPretty=n=>{const s=n.replace(/^SUB\s*-\s*/i,'').toLowerCase().replace(/\b\w/g,c=>c.toUpperCase()).replace(/\bAfa\b/g,'AFA');return /^SUB\s*-/i.test(n)?`${s} (sub)`:s};
+const tcWorkType=n=>/seal/i.test(n)?'Seal':/small/i.test(n)?'Small works':'Paving';
+const tcJobKey=b=>(b.customer||'').toLowerCase()+'|'+(b.site||'').toLowerCase();
+
+/* add the reviewed TeamCal bookings to the roster data */
+function applyTeamCalImport(d,{bookings,crewMap,customers}){
+  let resources=[...d.resources],jobs=[...d.jobs],blocks=[...d.blocks];
+  const crewId={};let newCrews=0,newJobs=0,added=0;
+  Object.entries(crewMap).forEach(([tcName,m])=>{
+    if(m.use!=='new'){crewId[tcName]=m.use;return}
+    const id='c'+uid();const n=resources.filter(r=>r.type==='crew').length;
+    resources.push({id,type:'crew',name:m.name.trim()||tcPretty(tcName),sub:m.sub.trim()||'Paving',hue:CREW_HUES[n%CREW_HUES.length],visible:true});
+    crewId[tcName]=id;newCrews++;
+  });
+  const jobFor={};
+  bookings.forEach(b=>{const key=tcJobKey(b);if(jobFor[key])return;
+    const cust=(customers[key]??b.customer).trim();
+    const proj=bookings.filter(x=>tcJobKey(x)===key).map(x=>x.projectNo).find(Boolean)||'';
+    let j=jobs.find(x=>proj&&x.projectNo===proj)||jobs.find(x=>x.name.trim().toLowerCase()===b.site.toLowerCase()&&(x.customer||'').trim().toLowerCase()===cust.toLowerCase());
+    if(!j){j={id:'j'+uid(),name:b.site,customer:cust,address:b.site,projectNo:proj,hue:JOB_HUES[jobs.length%JOB_HUES.length]};jobs.push(j);newJobs++}
+    else if(proj&&!j.projectNo){j={...j,projectNo:proj};jobs=jobs.map(x=>x.id===j.id?j:x)}
+    jobFor[key]=j.id;
+  });
+  const have=new Set(blocks.map(b=>b.importKey).filter(Boolean));
+  bookings.forEach(b=>{if(have.has(b.importKey)||!crewId[b.crewName])return;
+    blocks.push({id:uid(),resourceId:crewId[b.crewName],kind:'job',title:'',start:b.start,end:b.end,shift:'day',
+      jobId:jobFor[tcJobKey(b)],address:b.site,plantIds:[],...(b.quoteNo?{quoteNo:b.quoteNo}:{}),...(b.projectNo?{projectNo:b.projectNo}:{}),
+      notes:b.notes,weekendShifts:true,...(b.shiftData?{shiftData:b.shiftData}:{}),importKey:b.importKey});
+    added++});
+  /* mixes and binders the roster doesn't know yet */
+  const mixes=[...mixTypesOf(d)],binders=[...bindersOf(d)];
+  bookings.forEach(b=>Object.values(b.shiftData||{}).forEach(q=>q.lines.forEach(l=>{
+    if(l.type&&!mixes.some(m=>m.toLowerCase()===l.type.toLowerCase()))mixes.push(l.type);
+    if(l.binder&&!binders.some(m=>m.toLowerCase()===l.binder.toLowerCase()))binders.push(l.binder)})));
+  return {data:{...d,resources,jobs,blocks,mixTypes:mixes,binders},added,newCrews,newJobs};
+}
+
+function TeamCalImport({data,setData,onClose,notify}){
+  const [step,setStep]=useState('pick');const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
+  const [parsed,setParsed]=useState([]);const [crewMap,setCrewMap]=useState({});const [customers,setCustomers]=useState({});
+  useEffect(()=>{const h=e=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
+  const crews=data.resources.filter(r=>r.type==='crew');
+  const pick=async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;setBusy(true);setErr('');
+    try{const rows=await readTeamCalFile(file);const bk=tcParseRows(rows);
+      if(!bk.length)throw new Error('No bookings found in that file.');
+      const cm={};[...new Set(bk.map(b=>b.crewName))].forEach(n=>{
+        const ex=crews.find(c=>c.name.toLowerCase()===n.toLowerCase()||c.name.toLowerCase()===tcPretty(n).toLowerCase());
+        cm[n]=ex?{use:ex.id,name:ex.name,sub:ex.sub}:{use:'new',name:tcPretty(n),sub:tcWorkType(n)}});
+      setParsed(bk);setCrewMap(cm);setCustomers({});setStep('review');
+    }catch(x){setErr(x.message||'Couldn’t read that file.')}finally{setBusy(false);e.target.value=''}};
+  const have=new Set(data.blocks.map(b=>b.importKey).filter(Boolean));
+  const fresh=parsed.filter(b=>!have.has(b.importKey));
+  const groups=[];fresh.forEach(b=>{const k=tcJobKey(b);let g=groups.find(x=>x.key===k);if(!g){g={key:k,site:b.site,customer:b.customer,projectNo:'',n:0,t:0};groups.push(g)}
+    g.n++;g.t+=b.tonnes;if(b.projectNo&&!g.projectNo)g.projectNo=b.projectNo});
+  const warnings=fresh.flatMap(b=>b.warnings.map(w=>`${fmtShort(parse(b.start))} · ${b.site}: ${w}`));
+  const missingCust=groups.filter(g=>!(customers[g.key]??g.customer).trim()).length;
+  const run=()=>{setData(d=>{const r=applyTeamCalImport(d,{bookings:fresh,crewMap,customers});
+      setTimeout(()=>notify(`Imported ${r.added} booking${r.added===1?'':'s'}${r.newJobs?` · ${r.newJobs} new job${r.newJobs===1?'':'s'}`:''}${r.newCrews?` · ${r.newCrews} new crew${r.newCrews===1?'':'s'}`:''}`),0);
+      return r.data});onClose()};
+  const fs={height:30,fontSize:13};
+  return html`<div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div class="panel pop w-full ${step==='review'?'max-w-[920px]':'max-w-[460px]'} flex flex-col max-h-full overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="tc-title">
+      <div class="px-5 pt-5 pb-3 border-b border-line flex items-start gap-3">
+        <div class="min-w-0 flex-1">
+          <div id="tc-title" class="font-display text-[18px] font-semibold">Import from TeamCal</div>
+          <div class="text-[12.5px] text-muted">${step==='review'?'Check the details, then import. Nothing is added until you click Import.':'Upload the Excel export from TeamCal.'}</div>
+        </div>
+        <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button>
+      </div>
+      ${step==='pick'
+        ?html`<div class="p-5 grid gap-3">
+            <label class="grid gap-2 place-items-center text-center rounded-xl border-2 border-dashed border-line px-4 py-8 cursor-pointer hover:bg-sunken">
+              <span class="font-medium">${busy?'Reading…':'Choose the TeamCal .xlsx file'}</span>
+              <span class="text-[12px] text-muted">Columns needed: Name, Start Date, End Date, Summary, Location</span>
+              <input id="tc-file" type="file" accept=".xlsx" class="sr-only" onChange=${pick} disabled=${busy}/>
+            </label>
+            ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+            <p class="text-[12px] text-muted">Each TeamCal booking becomes a crew job. Tonnes are spread across the booking’s days: when TeamCal says “(N Shifts)”, each shift gets the total ÷ N. Bookings already imported are skipped, so you can import an updated export again.</p>
+          </div>`
+        :html`<div class="flex-1 min-h-0 overflow-y-auto p-5 grid gap-6">
+            <div class="flex flex-wrap gap-2 text-[12.5px]">
+              <span class="px-2.5 py-1 rounded-full bg-sunken border border-line"><b>${fresh.length}</b> booking${fresh.length===1?'':'s'} to add</span>
+              ${parsed.length>fresh.length&&html`<span class="px-2.5 py-1 rounded-full bg-sunken border border-line">${parsed.length-fresh.length} already imported, skipped</span>`}
+              <span class="px-2.5 py-1 rounded-full bg-sunken border border-line">${groups.length} job${groups.length===1?'':'s'}</span>
+              <span class="px-2.5 py-1 rounded-full bg-sunken border border-line">${fmtN(Math.round(fresh.reduce((a,b)=>a+b.tonnes,0)))} t</span>
+            </div>
+            <section class="grid gap-2"><h3 class="font-display text-[15px] font-semibold">Crews</h3>
+              <p class="text-[12px] text-muted -mt-1">Match each TeamCal name to a crew, or add it as a new crew.</p>
+              ${Object.entries(crewMap).map(([n,m])=>html`<div key=${n} class="flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2">
+                <span class="mono text-[12.5px] font-semibold w-[150px] truncate" title=${n}>${n}</span><span class="text-muted">→</span>
+                <select id=${'tc-crew-'+n} class="field field-sm w-auto" style=${fs} value=${m.use} onChange=${e=>setCrewMap({...crewMap,[n]:{...m,use:e.target.value}})}>
+                  <option value="new">New crew…</option>
+                  ${crews.map(c=>html`<option key=${c.id} value=${c.id}>${c.name} · ${c.sub}</option>`)}</select>
+                ${m.use==='new'&&html`<input id=${'tc-cn-'+n} class="field field-sm w-[150px]" style=${fs} value=${m.name} onInput=${e=>setCrewMap({...crewMap,[n]:{...m,name:e.target.value}})} aria-label="New crew name"/>
+                  <input id=${'tc-cs-'+n} list="work-types-tc" class="field field-sm w-[130px]" style=${fs} value=${m.sub} onInput=${e=>setCrewMap({...crewMap,[n]:{...m,sub:e.target.value}})} aria-label="Type of work"/>`}
+              </div>`)}
+              <datalist id="work-types-tc"><option value="Paving"></option><option value="Seal"></option><option value="Small works"></option></datalist>
+            </section>
+            <section class="grid gap-2"><h3 class="font-display text-[15px] font-semibold">Jobs</h3>
+              ${missingCust>0&&html`<p class="text-[12px] -mt-1" style=${{color:'var(--warn)'}}>${missingCust} job${missingCust===1?' has':'s have'} no customer in TeamCal. Fill ${missingCust===1?'it':'them'} in below.</p>`}
+              <div class="rounded-lg border border-line overflow-x-auto">
+                <table class="w-full text-[12.5px]"><thead><tr class="bg-sunken text-left">
+                  <th class="label px-3 py-2">Customer</th><th class="label px-3 py-2">Job / site</th><th class="label px-3 py-2">Project no.</th><th class="label px-3 py-2 text-right">Bookings</th><th class="label px-3 py-2 text-right">Tonnes</th></tr></thead>
+                  <tbody>${groups.map(g=>{const c=customers[g.key]??g.customer;return html`<tr key=${g.key} class="border-t border-line">
+                    <td class="px-3 py-1.5"><input id=${'tc-cu-'+g.key} class="field field-sm w-[120px]" style=${{...fs,borderColor:c.trim()?'var(--line)':'var(--warn)'}} value=${c} placeholder="Customer" onInput=${e=>setCustomers({...customers,[g.key]:e.target.value})}/></td>
+                    <td class="px-3 py-1.5">${g.site}</td><td class="px-3 py-1.5 mono">${g.projectNo||html`<span class="text-faint">–</span>`}</td>
+                    <td class="px-3 py-1.5 text-right tnum">${g.n}</td><td class="px-3 py-1.5 text-right tnum">${g.t?fmtN(Math.round(g.t)):'–'}</td></tr>`})}</tbody></table>
+              </div>
+            </section>
+            ${warnings.length>0&&html`<section class="grid gap-1.5"><h3 class="font-display text-[15px] font-semibold">Check these</h3>
+              <ul class="text-[12.5px] grid gap-1">${warnings.map((w,i)=>html`<li key=${i} class="flex gap-2"><span style=${{color:'var(--warn)'}}>${Icon.alert}</span><span>${w}</span></li>`)}</ul>
+              <p class="text-[12px] text-muted">You can fix any of these in the booking afterwards.</p></section>`}
+            <section class="grid gap-2"><h3 class="font-display text-[15px] font-semibold">Bookings</h3>
+              <div class="rounded-lg border border-line max-h-[260px] overflow-y-auto">
+                ${fresh.map(b=>{const days=Object.keys(b.shiftData||{}).length;return html`<div key=${b.importKey} class="px-3 py-2 border-b border-line last:border-b-0 flex flex-wrap gap-x-3 gap-y-0.5 text-[12.5px]">
+                  <span class="mono w-[118px] shrink-0">${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}</span>
+                  <span class="w-[130px] shrink-0 truncate text-muted">${crewMap[b.crewName]?.use==='new'?crewMap[b.crewName].name:(crews.find(c=>c.id===crewMap[b.crewName]?.use)?.name||b.crewName)}</span>
+                  <span class="min-w-0 flex-1 truncate"><b>${(customers[tcJobKey(b)]??b.customer)||'?'}</b> · ${b.site}${b.quoteNo?html` <span class="text-faint mono">Q ${b.quoteNo}</span>`:''}</span>
+                  <span class="tnum text-muted shrink-0">${b.shiftData?`${fmtN(Math.round(Object.values(b.shiftData).reduce((a,q)=>a+q.lines.reduce((x,l)=>x+num(l.tonnes),0),0)))} t over ${days} shift${days===1?'':'s'}`:'No asphalt'}</span>
+                </div>`})}
+              </div></section>
+          </div>
+          <div class="px-5 py-3 border-t border-line bg-sunken flex flex-wrap items-center gap-2">
+            <span class="text-[12px] text-muted mr-auto">Shifts are set to day works and include weekends. Change them in each booking if needed.</span>
+            <button type="button" class="btn" onClick=${()=>setStep('pick')}>Choose another file</button>
+            <button type="button" class="btn btn-primary" disabled=${!fresh.length} onClick=${run}>Import ${fresh.length} booking${fresh.length===1?'':'s'}</button>
+          </div>`}
+    </div>
+  </div>`;
+}
+
 /* ---------- app ---------- */
 function App({boot,live}){
   /* ---- live data: local state, saved to Supabase, kept current with everyone else's changes ---- */
@@ -1939,6 +2199,7 @@ function App({boot,live}){
   const [tab,setTab]=useState('crew');
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
+  const [importing,setImporting]=useState(false);
   const [forecast,setForecast]=useState(false);
   const [changePw,setChangePw]=useState(false);
   const [notifPrefs,setNotifPrefs]=useState(loadNotifPrefs);
@@ -2031,10 +2292,10 @@ function App({boot,live}){
   const legend=[['Crews',['job','standby','crewtraining']],['Asphalt plant',['plantmaint','plantreduced']],['Machines',['onjob','service','repair','inspection']],['Staff',['leave','sick','rdo','training']]];
 
   return html`<div class="shell h-full flex gap-4">
-    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel?' lg:block':'')}><${Sidebar} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId}/></div>
+    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel?' lg:block':'')}><${Sidebar} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
-        <${Sidebar} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onClose=${()=>setDrawer(false)}/></div></div>`}
+        <${Sidebar} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
 
     <main class="flex-1 min-w-0 h-full flex flex-col gap-3">
       <header class="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -2089,6 +2350,7 @@ function App({boot,live}){
 
     ${changePw&&html`<${SetPassword} sb=${live.sb} onDone=${()=>{setChangePw(false);setToast('Password changed')}} onCancel=${()=>setChangePw(false)}/>`}
     ${forecast&&html`<${ForecastDialog} data=${data} onClose=${()=>setForecast(false)} notify=${setToast}/>`}
+    ${importing&&html`<${TeamCalImport} data=${data} setData=${setData} onClose=${()=>setImporting(false)} notify=${setToast}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)}/>`}
     ${toast&&html`<div class="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-[13px] font-medium pop" role="status"
