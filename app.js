@@ -9,6 +9,11 @@ const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
 const diffDays=(a,b)=>Math.round((parse(iso(b))-parse(iso(a)))/864e5);
 const mondayOf=d=>addDays(d,-((d.getDay()+6)%7));
 const isWeekend=d=>d.getDay()===0||d.getDay()===6;
+/* is this date a working shift for the booking? weekdays always; Saturday and Sunday only when ticked
+   (older bookings only have the single weekendShifts switch, which covers both days) */
+const satOn=b=>b.satShift!==undefined?!!b.satShift:!!b.weekendShifts;
+const sunOn=b=>b.sunShift!==undefined?!!b.sunShift:!!b.weekendShifts;
+const worksOn=(b,d)=>d.getDay()===6?satOn(b):d.getDay()===0?sunOn(b):true;
 const TODAY=(()=>{const t=new Date();t.setHours(12,0,0,0);return t})();
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const WD=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -53,7 +58,8 @@ function plantMaintOn(data,blocks,k,shift){ /* names of asphalt plants under mai
 function plantBookings(blocks,machineId){
   return blocks.filter(b=>b.kind==='job'&&(b.plantIds||[]).includes(machineId)).map(b=>({
     id:'v-'+b.id+'-'+machineId,virtual:true,parent:b,kind:'onjob',resourceId:machineId,
-    crewId:b.resourceId,jobId:b.jobId,start:b.start,end:b.end,shift:b.shift,address:b.address}));
+    crewId:b.resourceId,jobId:b.jobId,start:b.start,end:b.end,shift:b.shift,address:b.address,
+    weekendShifts:b.weekendShifts,satShift:b.satShift,sunShift:b.sunShift}));
 }
 
 /* Day jobs take their crew's colour; night works are always red. */
@@ -750,6 +756,8 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             onClick=${v?()=>onEdit(it.b.parent):undefined}
             onKeyDown=${e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onEdit(v?it.b.parent:it.b)}
               else if(!v&&e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){e.preventDefault();nudge(it.b,e.key==='ArrowLeft'?-1:1)}}}>
+            ${(it.b.kind==='job'||it.b.kind==='onjob')&&days.slice(it.s,it.e+1).map((d,i)=>worksOn(it.b,d)?null:html`<span key=${'w'+i} class="wkoff" aria-hidden="true"
+                style=${{left:`${i/span*100}%`,width:`${100/span}%`}} title=${`${WD[d.getDay()]}: no shift`}></span>`)}
             ${it.cutL&&html`<span aria-hidden="true">‹</span>`}
             ${night&&html`<span class="shrink-0 inline-flex" title="Night works">${Icon.moon}</span>`}
             ${!v&&quoteFresh.has(it.b.id)&&html`<span class="shrink-0 w-2 h-2 rounded-full" style=${{background:'var(--accent)',boxShadow:'0 0 0 2px var(--surface)'}} title="Quote number changed in the last 48 hours"></span>`}
@@ -799,7 +807,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
   const tonnesOn=dateKey=>{ /* Map(type -> tonnes) for one date */
     const m=new Map();
     pavJobs.forEach(b=>{if(dateKey<b.start||dateKey>b.end)return;
-      if(!b.weekendShifts&&isWeekend(parse(dateKey)))return;
+      if(!worksOn(b,parse(dateKey)))return;
       linesOf(b.shiftData[dateKey]).filter(lineHas).forEach(l=>{const t=num(l.tonnes);if(!t)return;
         const k=mixLabel(l);m.set(k,(m.get(k)||0)+t)})});
     return m;
@@ -955,7 +963,7 @@ const linesTypes=sd=>Object.values(sd||{}).flatMap(q=>linesOf(q)).map(l=>(l.type
 function shiftDates(b){
   if(!b.start||!b.end||b.end<b.start)return [];
   const out=[];const n=diffDays(parse(b.start),parse(b.end));
-  for(let i=0;i<=n;i++){const d=addDays(parse(b.start),i);if(b.weekendShifts||!isWeekend(d))out.push(iso(d))}
+  for(let i=0;i<=n;i++){const d=addDays(parse(b.start),i);if(worksOn(b,d))out.push(iso(d))}
   return out;
 }
 const num=v=>{const n=parseFloat(v);return isFinite(n)&&n>=0?n:0};
@@ -1015,8 +1023,8 @@ function AsphaltShifts({f,set,data}){
   const copyFirst=()=>{const src=linesOf(sd[first]);const next={...sd};empties.forEach(k=>{next[k]={...shiftBase(sd[k]),lines:src.map(l=>({...l}))}});set({shiftData:next})};
   const copyPrev=i=>{const p=tot.dates[i-1];if(p&&sd[p])put(tot.dates[i],linesOf(sd[p]).map(l=>({...l})))};
   const depthHint=l=>{const t=num(l.tonnes),a=num(l.area);return t&&a?Math.round(t/DEFAULT_DENSITY/a*1000):null};
-  /* adding a shift moves the booking's end date to the next working day (weekends only when they are included) */
-  const nextShift=()=>{if(!f.end||f.end<f.start)return null;let d=addDays(parse(f.end),1);while(!f.weekendShifts&&isWeekend(d))d=addDays(d,1);return d};
+  /* adding a shift moves the booking's end date to the next working day (Saturday / Sunday only when ticked) */
+  const nextShift=()=>{if(!f.end||f.end<f.start)return null;let d=addDays(parse(f.end),1);for(let g=0;g<7&&!worksOn(f,d);g++)d=addDays(d,1);return d};
   const prevShiftEnd=()=>{const ds=tot.dates;if(ds.length<2)return null;return ds[ds.length-2]};
   const ns=nextShift(),pe=prevShiftEnd();
   const addShift=()=>{if(ns)set({end:iso(ns)})};
@@ -1028,9 +1036,13 @@ function AsphaltShifts({f,set,data}){
       <h3 id="sec-asphalt" class="font-display text-[15px] font-semibold">Asphalt & job quantities</h3>
       <span class="text-[12px] text-muted">${tot.dates.length} shift${tot.dates.length===1?'':'s'} · ${tot.filled} filled in</span>
       <span class="flex-1"></span>
-      <label class="inline-flex items-center gap-1.5 text-[12.5px] text-muted cursor-pointer">
-        <input id="ed-weekends" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!f.weekendShifts} onChange=${e=>set({weekendShifts:e.target.checked})}/>
-        Include weekend shifts</label>
+      <span class="inline-flex items-center gap-3 text-[12.5px] text-muted" role="group" aria-label="Weekend shifts" title="Unticked weekend days are greyed out on the booking and get no shift">
+        <label class="inline-flex items-center gap-1.5 cursor-pointer">
+          <input id="ed-sat" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${satOn(f)} onChange=${e=>set({satShift:e.target.checked,sunShift:sunOn(f)})}/>
+          Saturday</label>
+        <label class="inline-flex items-center gap-1.5 cursor-pointer">
+          <input id="ed-sun" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${sunOn(f)} onChange=${e=>set({sunShift:e.target.checked,satShift:satOn(f)})}/>
+          Sunday</label></span>
     </div>
 
     <div class="rounded-xl border border-line bg-sunken p-3 grid gap-2.5">
@@ -1046,7 +1058,7 @@ function AsphaltShifts({f,set,data}){
     </div>
 
     ${tot.dates.length===0
-      ?html`<div class="text-[12.5px] text-muted">${f.end<f.start?'Fix the dates above to see the shifts.':'This booking only covers weekend days. Tick "Include weekend shifts" to enter quantities.'}</div>`
+      ?html`<div class="text-[12.5px] text-muted">${f.end<f.start?'Fix the dates above to see the shifts.':'This booking only covers weekend days. Tick Saturday or Sunday to enter quantities.'}</div>`
       :html`<div>
         ${first&&empties.length>0&&html`<div class="flex justify-end mb-1.5">
           <button type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${copyFirst}>Copy Shift ${tot.dates.indexOf(first)+1} to ${empties.length} empty shift${empties.length===1?'':'s'}</button></div>`}
@@ -1326,7 +1338,7 @@ const isPavingCrew=r=>r.type==='crew'&&workKey(r.sub).includes('pav');
 /* every asphalt line laid by a paving crew on one date: [{b, l}] */
 function pavingLinesOn(data,k){
   const pav=new Set(data.resources.filter(isPavingCrew).map(r=>r.id));
-  return data.blocks.filter(b=>b.kind==='job'&&pav.has(b.resourceId)&&b.shiftData&&k>=b.start&&k<=b.end&&(b.weekendShifts||!isWeekend(parse(k))))
+  return data.blocks.filter(b=>b.kind==='job'&&pav.has(b.resourceId)&&b.shiftData&&k>=b.start&&k<=b.end&&worksOn(b,parse(k)))
     .flatMap(b=>linesOf(b.shiftData[k]).filter(lineHas).map(l=>({b,l})));
 }
 function loadExcelJS(){
@@ -1637,7 +1649,7 @@ function forecastJobs(data,y,m){ /* paving jobs worked in a month: crews, booked
     const j=data.jobs.find(x=>x.id===b.jobId);const e=byJob.get(b.jobId)||{job:j,crews:new Set(),days:0,nights:0,t:0,a:0,first:null,last:null};
     e.crews.add(data.resources.find(r=>r.id===b.resourceId)?.name||'');
     for(let d=parse(b.start>fk?b.start:fk);iso(d)<=(b.end<lk?b.end:lk);d=addDays(d,1)){const k=iso(d);
-      if(!isWeekend(d)||b.weekendShifts){e.days++;if(b.shift==='night')e.nights++}
+      if(worksOn(b,d)){e.days++;if(b.shift==='night')e.nights++}
       if(!e.first||k<e.first)e.first=k;if(!e.last||k>e.last)e.last=k}
     shiftDates(b).forEach(k=>{if(k<fk||k>lk||!b.shiftData)return;linesOf(b.shiftData[k]).filter(lineHas).forEach(l=>{e.t+=num(l.tonnes);e.a+=num(l.area)})});
     byJob.set(b.jobId,e)});
@@ -2010,7 +2022,7 @@ function applyTeamCalImport(d,{bookings,crewMap,customers}){
   bookings.forEach(b=>{if(have.has(b.importKey)||!crewId[b.crewName])return;
     blocks.push({id:uid(),resourceId:crewId[b.crewName],kind:'job',title:'',start:b.start,end:b.end,shift:'day',
       jobId:jobFor[tcJobKey(b)],address:b.site,plantIds:[],...(b.quoteNo?{quoteNo:b.quoteNo}:{}),...(b.projectNo?{projectNo:b.projectNo}:{}),
-      notes:b.notes,weekendShifts:true,...(b.shiftData?{shiftData:b.shiftData}:{}),importKey:b.importKey});
+      notes:b.notes,weekendShifts:true,satShift:true,sunShift:true,...(b.shiftData?{shiftData:b.shiftData}:{}),importKey:b.importKey});
     added++});
   /* mixes and binders the roster doesn't know yet */
   const mixes=[...mixTypesOf(d)],binders=[...bindersOf(d)];

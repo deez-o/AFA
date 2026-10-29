@@ -63,6 +63,8 @@ body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:1
 .field:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
 .blk{position:absolute;height:28px;border-radius:6px;display:flex;align-items:center;gap:6px;padding:0 8px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;cursor:grab;transition:transform .1s,box-shadow .1s;user-select:none;touch-action:none}
+.blk>*:not(.wkoff){position:relative;z-index:1}
+.blk .wkoff{position:absolute;top:0;bottom:0;z-index:0;pointer-events:none;background-color:color-mix(in srgb,var(--weekend) 78%,transparent);background-image:repeating-linear-gradient(135deg,color-mix(in srgb,var(--ink) 10%,transparent) 0 3px,transparent 3px 7px)}
 .blk.dragging{cursor:grabbing;z-index:6;transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.22),0 0 0 2px var(--accent);transition:none}
 body.is-dragging,body.is-dragging *{cursor:grabbing!important;user-select:none}
 .droprow{box-shadow:inset 0 0 0 2px var(--accent)}
@@ -95,6 +97,6 @@ tailwind.config={theme:{extend:{colors:{
 </head>
 <body>
 <div id="root"></div>
-<script src="/app.js?v=202610292037"></script>
+<script src="/app.js?v=202610292042"></script>
 </body>
 </html>
