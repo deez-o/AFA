@@ -1814,8 +1814,51 @@ const NOTIF_KEY=KEY+':notif-prefs';
 const loadNotifPrefs=()=>{try{return {quote:true,...JSON.parse(localStorage.getItem(NOTIF_KEY)||'{}')}}catch(e){return {quote:true}}};
 const recentQuoteChanges=data=>(data.quoteChanges||[]).filter(c=>Date.now()-c.at<NOTIF_MS).sort((a,b)=>b.at-a.at);
 const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.round(m/60);return `${h} hr${h===1?'':'s'} ago`};
+/* ---------- settings menu: dark mode, notifications and (live) account ---------- */
+function SwitchRow({id,label,desc,on,onChange}){
+  return html`<label class="flex items-start gap-3 px-2 py-2 rounded-lg hover:bg-sunken cursor-pointer">
+    <span class="min-w-0 flex-1"><span class="block text-[13px] font-medium">${label}</span>${desc&&html`<span class="block text-[12px] text-muted">${desc}</span>`}</span>
+    <span class="relative inline-flex shrink-0 mt-0.5">
+      <input id=${id} type="checkbox" role="switch" class="peer sr-only" checked=${!!on} onChange=${e=>onChange(e.target.checked)}/>
+      <span class="w-9 h-5 rounded-full transition-colors" style=${{background:on?'var(--accent)':'var(--line-strong)'}}></span>
+      <span class="absolute top-0.5 w-4 h-4 rounded-full transition-all" style=${{left:on?18:2,background:'var(--surface)',boxShadow:'0 1px 2px rgba(0,0,0,.2)'}}></span>
+    </span>
+  </label>`;
+}
+function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account}){
+  const [open,setOpen]=useState(false);
+  const ref=React.useRef(null);
+  useEffect(()=>{if(!open)return;
+    const out=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};const esc=e=>{if(e.key==='Escape')setOpen(false)};
+    document.addEventListener('pointerdown',out);window.addEventListener('keydown',esc);
+    return()=>{document.removeEventListener('pointerdown',out);window.removeEventListener('keydown',esc)}},[open]);
+  const initial=account&&account.email?account.email[0].toUpperCase():'';
+  const sectionLabel=t=>html`<div class="label px-2 pt-2 pb-1">${t}</div>`;
+  return html`<div class="relative" ref=${ref}>
+    <button class="btn px-2" onClick=${()=>setOpen(o=>!o)} aria-expanded=${open} aria-label="Settings" title="Settings">
+      ${account?html`<span class="w-6 h-6 rounded-full inline-flex items-center justify-center text-[12px] font-bold" style=${{background:'var(--ink)',color:'var(--surface)'}}>${initial}</span>`:Icon.gear}
+    </button>
+    ${open&&html`<div class="panel pop absolute right-0 top-[38px] z-40 w-[min(320px,calc(100vw-32px))] overflow-hidden" role="dialog" aria-label="Settings">
+      ${account&&html`<div class="px-4 py-3 border-b border-line">
+        <div class="text-[12px] text-muted">Signed in as</div>
+        <div class="text-[13.5px] font-semibold truncate">${account.email}</div>
+        <div class="text-[11.5px] text-muted mt-0.5">${account.role==='admin'?'Administrator':account.role==='planner'?'Planner (can edit)':'View only'}</div>
+      </div>`}
+      <div class="p-2">
+        ${sectionLabel('Appearance')}
+        <${SwitchRow} id="set-dark" label="Dark mode" on=${theme==='dark'} onChange=${()=>toggleTheme()}/>
+        ${sectionLabel('Notifications')}
+        ${NOTIF_TYPES.map(t=>html`<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
+      </div>
+      ${account&&html`<div class="border-t border-line p-2 grid">
+        <button class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);account.onChangePw()}}>${Icon.key} Change password</button>
+        <button class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);account.onSignOut()}}>${Icon.logout} Sign out</button>
+      </div>`}
+    </div>`}
+  </div>`;
+}
+
 function Notifications({data,onOpen,prefs,setPrefs}){
-  const [settings,setSettings]=useState(false);
   const SEEN=KEY+':quote-seen';
   const [open,setOpen]=useState(false);
   const [seen,setSeen]=useState(()=>{try{return Number(localStorage.getItem(SEEN))||0}catch(e){return 0}});
@@ -1829,7 +1872,7 @@ function Notifications({data,onOpen,prefs,setPrefs}){
   const list=prefs.quote?recentQuoteChanges(data):[];
   const allOff=NOTIF_TYPES.every(t=>!prefs[t.id]);
   const unseen=list.filter(c=>c.at>seen).length;
-  const toggle=()=>{const now=!open;setOpen(now);setSettings(false);if(now){const t=Date.now();setSeen(t);try{localStorage.setItem(SEEN,String(t))}catch(e){}}};
+  const toggle=()=>{const now=!open;setOpen(now);if(now){const t=Date.now();setSeen(t);try{localStorage.setItem(SEEN,String(t))}catch(e){}}};
   return html`<div class="relative" ref=${ref}>
     <button class="btn px-2 relative" onClick=${toggle} aria-expanded=${open} aria-label=${`Notifications${unseen?`, ${unseen} new`:''}`} title="Quote changes in the last 48 hours">
       ${allOff?Icon.bellOff:Icon.bell}
@@ -1838,23 +1881,12 @@ function Notifications({data,onOpen,prefs,setPrefs}){
     ${open&&html`<div class="panel pop absolute right-0 top-[38px] z-40 w-[min(360px,calc(100vw-32px))] overflow-hidden" role="dialog" aria-label="Notifications">
       <div class="px-4 py-3 border-b border-line flex items-start gap-2">
         <div class="min-w-0 flex-1">
-          <div class="font-display text-[15px] font-semibold">${settings?'Notification settings':'Notifications'}</div>
-          <div class="text-[12px] text-muted">${settings?'Choose what you are notified about. This only changes your own view.':'Changes from the last 48 hours'}</div>
+          <div class="font-display text-[15px] font-semibold">Notifications</div>
+          <div class="text-[12px] text-muted">Changes from the last 48 hours</div>
         </div>
-        <button class="btn btn-ghost px-2" style=${{height:28}} onClick=${()=>setSettings(x=>!x)} aria-pressed=${settings} aria-label=${settings?'Back to notifications':'Notification settings'} title=${settings?'Back':'Settings'}>${settings?Icon.chevL:Icon.gear}</button>
       </div>
-      ${settings
-        ?html`<ul class="p-2">${NOTIF_TYPES.map(t=>html`<li key=${t.id}>
-            <label class="flex items-start gap-3 px-2 py-2 rounded-lg hover:bg-sunken cursor-pointer">
-              <span class="min-w-0 flex-1"><span class="block text-[13px] font-medium">${t.label}</span><span class="block text-[12px] text-muted">${t.desc}</span></span>
-              <span class="relative inline-flex shrink-0 mt-0.5">
-                <input id=${'np-'+t.id} type="checkbox" role="switch" class="peer sr-only" checked=${!!prefs[t.id]} onChange=${e=>setPrefs({...prefs,[t.id]:e.target.checked})}/>
-                <span class="w-9 h-5 rounded-full transition-colors peer-focus-visible:ring-2" style=${{background:prefs[t.id]?'var(--accent)':'var(--line-strong)'}}></span>
-                <span class="absolute top-0.5 w-4 h-4 rounded-full transition-all" style=${{left:prefs[t.id]?18:2,background:'var(--surface)',boxShadow:'0 1px 2px rgba(0,0,0,.2)'}}></span>
-              </span>
-            </label></li>`)}</ul>`
-        :html`<ul class="max-h-[360px] overflow-y-auto">
-        ${list.length===0&&html`<li class="px-4 py-6 text-center text-[13px] text-muted">${allOff?html`Notifications are off. <button class="underline underline-offset-2 hover:text-ink" onClick=${()=>setSettings(true)}>Change settings</button>`:'No quote changes in the last 48 hours.'}</li>`}
+      ${html`<ul class="max-h-[360px] overflow-y-auto">
+        ${list.length===0&&html`<li class="px-4 py-6 text-center text-[13px] text-muted">${allOff?'Notifications are off. Turn them on in Settings.':'No quote changes in the last 48 hours.'}</li>`}
         ${list.map(c=>{const b=data.blocks.find(x=>x.id===c.bookingId);const j=b&&data.jobs.find(x=>x.id===b.jobId);const crew=b&&data.resources.find(r=>r.id===b.resourceId);
           return html`<li key=${c.id} class="px-4 py-2.5 border-b border-line last:border-b-0 flex items-start gap-3">
             <span class="w-2 h-2 rounded-full mt-1.5 shrink-0" style=${{background:c.at>seen&&open?'var(--accent)':'var(--line-strong)'}}></span>
@@ -2026,12 +2058,10 @@ function App({boot,live}){
           <button class="btn" onClick=${()=>setAnchor(mondayOf(TODAY))} disabled=${atToday}>Today</button>
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>
-        <button class="btn px-2" onClick=${toggleTheme} role="switch" aria-checked=${theme==='dark'} aria-label="Dark mode" title=${theme==='dark'?'Switch to light mode':'Switch to dark mode'}>${theme==='dark'?Icon.sun:Icon.moonLg}</button>
-        <button class="btn px-2" onClick=${()=>setChangePw(true)} aria-label="Change password" title="Change password">${Icon.key}</button>
-        <button class="btn px-2" onClick=${()=>live.sb.auth.signOut()} aria-label="Sign out" title=${`Signed in as ${live.user.email}. Sign out`}>${Icon.logout}</button>
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
         <button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis('crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>
         <button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>
+        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}}/>
       </header>
 
       <section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
