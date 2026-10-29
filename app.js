@@ -1855,11 +1855,81 @@ function ForecastDialog({data,onClose,notify}){
 const DAY_MS=864e5;
 const NOTIF_MS=2*DAY_MS; /* notifications stay for 48 hours */
 /* kinds of notification a person can switch on or off (kept per person in this browser) */
-const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking\'s quote number is added, changed or removed.'}];
+const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking\'s quote number is added, changed or removed.'},
+  {id:'booking',label:'Bookings',desc:'Bookings added, moved, changed or deleted.'},
+  {id:'job',label:'Jobs',desc:'Jobs added, changed, completed or deleted.'},
+  {id:'resource',label:'Crews, staff, machines & plants',desc:'Added, renamed or removed.'},
+  {id:'lists',label:'Mixes & seal lists',desc:'Mix, seal and binder lists edited.'}];
 const NOTIF_KEY=KEY+':notif-prefs';
-const loadNotifPrefs=()=>{try{return {quote:true,...JSON.parse(localStorage.getItem(NOTIF_KEY)||'{}')}}catch(e){return {quote:true}}};
+const NOTIF_DEFAULT={quote:true,booking:true,job:true,resource:true,lists:true};
+const loadNotifPrefs=()=>{try{return {...NOTIF_DEFAULT,...JSON.parse(localStorage.getItem(NOTIF_KEY)||'{}')}}catch(e){return {...NOTIF_DEFAULT}}};
 const recentQuoteChanges=data=>(data.quoteChanges||[]).filter(c=>Date.now()-c.at<NOTIF_MS).sort((a,b)=>b.at-a.at);
 const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.round(m/60);return `${h} hr${h===1?'':'s'} ago`};
+/* ---------- change log: every change to the shared roster becomes a notification ---------- */
+const CHANGE_KEEP=7*DAY_MS;
+const LIST_SETTINGS=[['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
+const RES_WORD={crew:'Crew',person:'Staff member',machine:'Machine',aplant:'Plant'};
+function describeChanges(a,b){
+  const out=[];const same=(x,y)=>JSON.stringify(x)===JSON.stringify(y);
+  const rname=(d,id)=>d.resources.find(r=>r.id===id)?.name||'';
+  const jname=(d,id)=>{const j=d.jobs.find(x=>x.id===id);return j?jobLabel(j):''};
+  const what=(d,x)=>x.kind==='job'?(jname(d,x.jobId)||'Job'):(x.title||(KINDS[x.kind]&&KINDS[x.kind].label)||'Booking');
+  const when=x=>x.start?`${fmtShort(parse(x.start))}${x.end&&x.end!==x.start?' – '+fmtShort(parse(x.end)):''}`:'';
+  if(a.blocks!==b.blocks){
+    const am=new Map(a.blocks.map(x=>[x.id,x])),bm=new Map(b.blocks.map(x=>[x.id,x]));
+    b.blocks.forEach(x=>{const p=am.get(x.id);
+      if(!p){out.push({type:'booking',text:`Booking added: ${what(b,x)}`,sub:`${rname(b,x.resourceId)} · ${when(x)}`,blockId:x.id});return}
+      if(p===x||same(p,x))return;
+      if((p.quoteNo||'')!==(x.quoteNo||'')&&same({...p,quoteNo:''},{...x,quoteNo:''}))return;  /* quote-only changes have their own notification */
+      const parts=[];
+      if(p.resourceId!==x.resourceId)parts.push(`moved from ${rname(a,p.resourceId)}`);
+      if(p.start!==x.start||p.end!==x.end)parts.push(`was ${when(p)}`);
+      if((p.shift||'day')!==(x.shift||'day'))parts.push(x.shift==='night'?'now night works':'now day works');
+      if(p.jobId!==x.jobId)parts.push(`job was ${jname(a,p.jobId)||'another job'}`);
+      if(!same(p.shiftData||{},x.shiftData||{}))parts.push('quantities');
+      if(!same(p.plantIds||[],x.plantIds||[]))parts.push('mobile plant');
+      [['address','site address'],['notes','notes'],['projectNo','project number'],['title','label'],['maintShift','shift']].forEach(([f,l])=>{if((p[f]||'')!==(x[f]||''))parts.push(l)});
+      if(['friShift','satShift','sunShift','weekendShifts','offDays'].some(f=>!same(p[f],x[f])))parts.push('weekend shifts');
+      if(p.kind!==x.kind)parts.push('type');
+      out.push({type:'booking',text:`Booking changed: ${what(b,x)}`,sub:`${rname(b,x.resourceId)} · ${when(x)}${parts.length?` · ${parts.join(', ')}`:''}`,blockId:x.id})});
+    a.blocks.forEach(p=>{if(!bm.has(p.id))out.push({type:'booking',text:`Booking deleted: ${what(a,p)}`,sub:`${rname(a,p.resourceId)} · ${when(p)}`})});
+  }
+  if(a.jobs!==b.jobs){
+    const am=new Map(a.jobs.map(x=>[x.id,x])),bm=new Map(b.jobs.map(x=>[x.id,x]));
+    b.jobs.forEach(j=>{const p=am.get(j.id);const {pos:_a,...jj}=j;
+      if(!p){out.push({type:'job',text:`Job added: ${jobLabel(j)}`,sub:j.projectNo?`Project ${j.projectNo}`:''});return}
+      const {pos:_b,...pp}=p;if(same(pp,jj))return;
+      if(!!p.completed!==!!j.completed){out.push({type:'job',text:`Job ${j.completed?'completed':'reopened'}: ${jobLabel(j)}`,sub:''});return}
+      const parts=[];[['name','name'],['customer','customer'],['address','site address'],['projectNo','project number']].forEach(([f,l])=>{if((p[f]||'')!==(j[f]||''))parts.push(l)});
+      out.push({type:'job',text:`Job changed: ${jobLabel(j)}`,sub:parts.length?parts.join(', '):(p.name!==j.name?`was ${p.name}`:'details')})});
+    a.jobs.forEach(p=>{if(!bm.has(p.id))out.push({type:'job',text:`Job deleted: ${jobLabel(p)}`,sub:''})});
+  }
+  if(a.resources!==b.resources){
+    const strip=r=>{const {visible,pos,...x}=r;return x};
+    const am=new Map(a.resources.map(x=>[x.id,x])),bm=new Map(b.resources.map(x=>[x.id,x]));
+    b.resources.forEach(r=>{const p=am.get(r.id);const w=RES_WORD[r.type]||'Resource';
+      if(!p){out.push({type:'resource',text:`${w} added: ${r.name}`,sub:r.sub||''});return}
+      if(same(strip(p),strip(r)))return;
+      const parts=[];if(p.name!==r.name)parts.push(`was ${p.name}`);if((p.sub||'')!==(r.sub||''))parts.push(`now ${r.sub||'—'}`);
+      if((p.crewId||'')!==(r.crewId||''))parts.push(r.crewId?`now in ${rname(b,r.crewId)}`:'no crew');if(p.hue!==r.hue)parts.push('colour');
+      out.push({type:'resource',text:`${w} changed: ${r.name}`,sub:parts.join(', ')})});
+    a.resources.forEach(p=>{if(!bm.has(p.id))out.push({type:'resource',text:`${RES_WORD[p.type]||'Resource'} removed: ${p.name}`,sub:''})});
+  }
+  const lists=LIST_SETTINGS.filter(([k])=>a[k]!==b[k]&&!same(a[k],b[k])).map(([,l])=>l);
+  if(lists.length)out.push({type:'lists',text:`${lists.join(', ')} updated`,sub:''});
+  /* a big batch (import, merge) becomes one notification */
+  if(out.length>6){const c={};out.forEach(o=>{const k=o.text.split(':')[0];c[k]=(c[k]||0)+1});
+    return [{type:out.some(o=>o.type==='booking')?'booking':out[0].type,text:`${out.length} changes`,sub:Object.entries(c).map(([k,n])=>`${n} × ${k.toLowerCase()}`).join(', ')}]}
+  return out;
+}
+function withChangeLog(cur,next,by){
+  if(!next||next===cur)return next;
+  let ch;try{ch=describeChanges(cur,next)}catch(e){ch=[]}
+  if(!ch.length)return next;
+  const now=Date.now();const log=(next.changeLog||[]).filter(c=>now-c.at<CHANGE_KEEP);
+  return {...next,changeLog:[...log,...ch.map(c=>({id:uid(),at:now,...c,...(by?{by}:{})}))]};
+}
+const recentChanges=(data,prefs)=>(data.changeLog||[]).filter(c=>Date.now()-c.at<NOTIF_MS&&prefs[c.type]!==false);
 /* ---------- settings menu: dark mode, notifications and (live) account ---------- */
 function SwitchRow({id,label,desc,on,onChange}){
   return html`<label class="flex items-start gap-3 px-2 py-2 rounded-lg hover:bg-sunken cursor-pointer">
@@ -1915,12 +1985,13 @@ function Notifications({data,onOpen,prefs,setPrefs}){
     const out=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};const esc=e=>{if(e.key==='Escape')setOpen(false)};
     document.addEventListener('pointerdown',out);window.addEventListener('keydown',esc);
     return()=>{document.removeEventListener('pointerdown',out);window.removeEventListener('keydown',esc)}},[open]);
-  const list=prefs.quote?recentQuoteChanges(data):[];
+  const list=[...(prefs.quote?recentQuoteChanges(data).map(c=>({...c,_q:true})):[]),...recentChanges(data,prefs)].sort((a,b)=>b.at-a.at).slice(0,150);
+  const me=window.__rosterMe||'';
   const allOff=NOTIF_TYPES.every(t=>!prefs[t.id]);
   const unseen=list.filter(c=>c.at>seen).length;
   const toggle=()=>{const now=!open;setOpen(now);if(now){const t=Date.now();setSeen(t);try{localStorage.setItem(SEEN,String(t))}catch(e){}}};
   return html`<div class="relative" ref=${ref}>
-    <button class="btn px-2 relative" onClick=${toggle} aria-expanded=${open} aria-label=${`Notifications${unseen?`, ${unseen} new`:''}`} title="Quote changes in the last 48 hours">
+    <button class="btn px-2 relative" onClick=${toggle} aria-expanded=${open} aria-label=${`Notifications${unseen?`, ${unseen} new`:''}`} title="Changes in the last 48 hours">
       ${allOff?Icon.bellOff:Icon.bell}
       ${unseen>0&&html`<span class="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10.5px] font-bold inline-flex items-center justify-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}}>${unseen}</span>`}
     </button>
@@ -1932,8 +2003,18 @@ function Notifications({data,onOpen,prefs,setPrefs}){
         </div>
       </div>
       ${html`<ul class="max-h-[360px] overflow-y-auto">
-        ${list.length===0&&html`<li class="px-4 py-6 text-center text-[13px] text-muted">${allOff?'Notifications are off. Turn them on in Settings.':'No quote changes in the last 48 hours.'}</li>`}
-        ${list.map(c=>{const b=data.blocks.find(x=>x.id===c.bookingId);const j=b&&data.jobs.find(x=>x.id===b.jobId);const crew=b&&data.resources.find(r=>r.id===b.resourceId);
+        ${list.length===0&&html`<li class="px-4 py-6 text-center text-[13px] text-muted">${allOff?'Notifications are off. Turn them on in Settings.':'Nothing has changed in the last 48 hours.'}</li>`}
+        ${list.map(c=>{if(!c._q){const b=c.blockId&&data.blocks.find(x=>x.id===c.blockId);
+          return html`<li key=${c.id} class="px-4 py-2.5 border-b border-line last:border-b-0 flex items-start gap-3">
+            <span class="w-2 h-2 rounded-full mt-1.5 shrink-0" style=${{background:c.at>seen&&open?'var(--accent)':'var(--line-strong)'}}></span>
+            <div class="min-w-0 flex-1">
+              <div class="text-[13px]">${c.text}</div>
+              ${c.sub&&html`<div class="text-[12px] text-muted">${c.sub}</div>`}
+              <div class="text-[11.5px] text-faint">${agoText(c.at)}${c.by?` · ${c.by===me?'you':c.by}`:''}</div>
+            </div>
+            ${b&&html`<button class="btn shrink-0" style=${{height:28}} onClick=${()=>{setOpen(false);onOpen(b)}}>Open</button>`}
+          </li>`}
+          const b=data.blocks.find(x=>x.id===c.bookingId);const j=b&&data.jobs.find(x=>x.id===b.jobId);const crew=b&&data.resources.find(r=>r.id===b.resourceId);
           return html`<li key=${c.id} class="px-4 py-2.5 border-b border-line last:border-b-0 flex items-start gap-3">
             <span class="w-2 h-2 rounded-full mt-1.5 shrink-0" style=${{background:c.at>seen&&open?'var(--accent)':'var(--line-strong)'}}></span>
             <div class="min-w-0 flex-1">
@@ -2302,7 +2383,8 @@ function App({boot,live}){
   const savedRef=useRef(data),remoteRef=useRef(null),pushQ=useRef(Promise.resolve());
   const setData=fn=>setDataRaw(cur=>{const next=typeof fn==='function'?fn(cur):fn;
     if(!live.canEdit&&sharedKey(next)!==sharedKey(cur)){setTimeout(()=>setToast('You have view-only access. Ask an administrator for planner access to make changes.'),0);return cur}
-    return next});
+    return withChangeLog(cur,next,live.user.email)});
+  window.__rosterMe=live.user.email;
   const reloadAll=async()=>{try{const nd={...rowsToData(await fetchAllRows(live.sb))};nd.sectionOrder=nd.sectionOrder||[...DEFAULT_ORDER];remoteRef.current=nd;setDataRaw(nd)}catch(e){}};
   useEffect(()=>{
     writeLocal(LOCAL_HIDDEN,data.resources.filter(r=>r.visible===false).map(r=>r.id));
@@ -2503,7 +2585,7 @@ function App({boot,live}){
    Per-person choices stay in this browser: hidden rows, section order,
    view length, dark mode and notification settings.
    ===================================================================== */
-const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change']];
+const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
 const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
@@ -2516,7 +2598,7 @@ const storedForm=(coll,item,i)=>{const {visible,pos,...rest}=item;return ORDERED
 /* rows from Supabase -> the app's data object */
 function rowsToData(rows){
   const hidden=new Set(readLocal(LOCAL_HIDDEN,[]));
-  const d={resources:[],jobs:[],blocks:[],quoteChanges:[]};
+  const d={resources:[],jobs:[],blocks:[],quoteChanges:[],changeLog:[]};
   rows.forEach(r=>{
     if(r.kind==='setting'){if(SETTINGS.includes(r.id))d[r.id]=r.data&&r.data.value;return}
     const c=COLLECTIONS.find(([,k])=>k===r.kind);if(!c)return;
@@ -2578,7 +2660,7 @@ async function pushRows(sb,{upserts,deletes}){
 /* data for a brand-new, empty roster */
 function emptyRoster(){
   return {resources:[{id:'a'+uid(),type:'aplant',name:'Asphalt plant',sub:'Main plant',hue:8,visible:true}],
-    jobs:[],blocks:[],quoteChanges:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],
+    jobs:[],blocks:[],quoteChanges:[],changeLog:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],
     sectionOrder:[...DEFAULT_ORDER],orderV:2};
 }
 
