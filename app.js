@@ -193,7 +193,7 @@ function rowStats(r,data,days){
 
 /* ---------- mixes & binders manager (Resources panel → Mixes tab) ---------- */
 /* One editable list: reorder, rename (also updates booking lines that use it), remove, add. */
-function ListManager({title,hint,items,setItems,field,placeholder,data,setData,onRenamed,onRemoved,rapOf,binderOf,binderOptions,servicesOf}){
+function ListManager({title,hint,items,setItems,field,placeholder,data,setData,onRenamed,onRemoved,rapOf,binderOf,binderOptions,servicesOf,colorOf,onColor}){
   const [name,setName]=useState('');
   const [editing,setEditingItem]=useState(null); /* {from,to} */
   const [confirm,setConfirm]=useState(null);
@@ -264,6 +264,8 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
             ${rapOf&&rapOf(t)>0&&html`<div class="text-[11.5px] font-medium" style=${{color:'var(--ok)'}}>${fmtN(rapOf(t))}% RAP</div>`}
             ${servicesOf&&servicesOf(t).length>0&&html`<div class="text-[11.5px] text-muted truncate" title=${servicesOf(t).join(', ')}>${servicesOf(t).join(' · ')}</div>`}
           </div>
+          ${colorOf&&html`<label class="w-7 h-7 shrink-0 inline-flex items-center justify-center rounded hover:bg-surface cursor-pointer" title="Colour on the daily program PDF">
+            <input type="color" class="w-5 h-5 p-0 border-0 bg-transparent cursor-pointer" value=${colorOf(t)} onChange=${e=>onColor(t,e.target.value)} aria-label=${'Daily program colour for '+t}/></label>`}
           ${confirm===t
             ?html`<div class="flex flex-col items-end gap-1 max-w-[150px]">
                 ${n>0&&html`<span class="text-[11px] text-muted text-right leading-tight">Bookings using it keep it.</span>`}
@@ -1892,7 +1894,7 @@ const recentQuoteChanges=data=>(data.quoteChanges||[]).filter(c=>Date.now()-c.at
 const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.round(m/60);return `${h} hr${h===1?'':'s'} ago`};
 /* ---------- change log: every change to the shared roster becomes a notification ---------- */
 const CHANGE_KEEP=7*DAY_MS;
-const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['programLocs','Locations'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
+const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['programLocs','Locations'],['locColors','Location colours'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
 const RES_WORD={crew:'Crew',person:'Staff member',machine:'Machine',aplant:'Plant'};
 /* exactly what changed on one booking, as "Field: before → after" lines */
 function bookingDiff(a,b,p,x,rname,jname,when){
@@ -2171,6 +2173,13 @@ function learnProgramLists(d,b){
     const l=(x.loc||'').trim();if(l&&l.toLowerCase()!==(b.address||'').trim().toLowerCase()&&!has(locs,l)){locs.push(l);ch=true}});
   return ch?{...d,subCos,truckCos,subServices:svc,programLocs:locs}:d;
 }
+const DEFAULT_LOC_COLORS={'SITE':'#141414','SCA':'#9b0a1e','BALD HILLS YARD':'#407034'};
+const LOC_PALETTE=['#9b0a1e','#407034','#26548c','#966014','#603c82','#0f766e'];
+const locColorsOf=d=>d&&d.locColors&&typeof d.locColors==='object'?d.locColors:DEFAULT_LOC_COLORS;
+/* a location's colour: the one picked in Resources → Trucks, else a colour from the palette by its place in the list */
+const locColorOf=(d,name)=>{const m=locColorsOf(d);const n=String(name||'').trim().toLowerCase();const k=Object.keys(m).find(x=>x.toLowerCase()===n);if(k)return m[k];
+  const i=programLocsOf(d).findIndex(x=>x.toLowerCase()===n);return LOC_PALETTE[(i<0?0:i)%LOC_PALETTE.length]};
+const hexRgb=h=>{const m=/^#?([0-9a-f]{6})$/i.exec(h||'');if(!m)return [20,20,20];const v=parseInt(m[1],16);return [v>>16&255,v>>8&255,v&255]};
 const programLocsOf=d=>d&&Array.isArray(d.programLocs)?d.programLocs:PROGRAM_LOCATIONS;
 const truckCosOf=d=>d&&Array.isArray(d.truckCos)?d.truckCos:DEFAULT_TRUCKS;
 const subCosOf=d=>d&&Array.isArray(d.subCos)?d.subCos:DEFAULT_SUBS;
@@ -2194,8 +2203,11 @@ function TrucksManager({data,setData}){
       items=${truckCosOf(data)} setItems=${setter('truckCos')}/>
     <div class="border-t border-line mx-4"></div>
     <${ListManager} title="Locations" field="progloc" placeholder="e.g. BALD HILLS YARD" data=${data} setData=${setData}
-      hint="Where trucks load or meet, offered in the Location column of the Trucks & Subcontractors tab. The booking's own site address is always offered too."
-      items=${programLocsOf(data)} setItems=${setter('programLocs')}/>
+      hint="Where trucks load or meet, offered in the Location column of the Trucks & Subcontractors tab. The booking's own site address is always offered too and uses SITE's colour. Click a swatch to pick the colour it's highlighted in on the daily program."
+      items=${programLocsOf(data)} setItems=${setter('programLocs')}
+      colorOf=${t=>locColorOf(data,t)} onColor=${(t,c)=>setData(d=>({...d,locColors:{...locColorsOf(d),[t]:c}}))}
+      onRenamed=${(d,from,to)=>{const m={...locColorsOf(d)};if(m[from]){m[to]=m[from];delete m[from]}return {...d,locColors:m}}}
+      onRemoved=${(d,t)=>{const m={...locColorsOf(d)};delete m[t];return {...d,locColors:m}}}/>
   </div>`;
 }
 function SubsManager({data,setData}){
@@ -2445,9 +2457,15 @@ function drawProgram(doc,data,{b,k,crewId}){
   const groups=[];tr.forEach(t=>{const key=(t.loc||'').trim().toLowerCase();let g=groups.find(x=>x.key===key);if(!g){g={key,items:[]};groups.push(g)}g.items.push(t)});
   groups.forEach(g=>g.items.sort((a,c)=>(a.time||'99')<(c.time||'99')?-1:(a.time||'99')>(c.time||'99')?1:0));
   const LOC_FILLS=[AFA_RED,[64,112,52],[38,84,140],[150,96,20],[96,60,130]];let fi=0;
-  const tv=[];groups.forEach((g,gi)=>{const site=/site/i.test(g.key)||(b.address&&g.key===b.address.trim().toLowerCase());const fill=site?[20,20,20]:LOC_FILLS[(fi++)%LOC_FILLS.length];
+  const usedC=new Set(groups.map(g=>{const s=!!b.address&&g.key===b.address.trim().toLowerCase();return s?locColorOf(data,'SITE'):(programLocsOf(data).some(x=>x.toLowerCase()===g.key)||Object.keys(locColorsOf(data)).some(x=>x.toLowerCase()===g.key))?locColorOf(data,g.key):null}).filter(Boolean).map(c=>c.toLowerCase()));
+  const tv=[];groups.forEach((g,gi)=>{const isSite=!!b.address&&g.key===b.address.trim().toLowerCase();
+    const known=programLocsOf(data).some(x=>x.toLowerCase()===g.key)||Object.keys(locColorsOf(data)).some(x=>x.toLowerCase()===g.key);
+    let hex=isSite?locColorOf(data,'SITE'):known?locColorOf(data,g.key):null;
+    if(!hex){hex=LOC_PALETTE.find(c=>!usedC.has(c.toLowerCase()))||LOC_PALETTE[(fi++)%LOC_PALETTE.length]}usedC.add(hex.toLowerCase());
+    const fill=hexRgb(hex);
+    const ink=(fill[0]*299+fill[1]*587+fill[2]*114)/1000>150?[0,0,0]:[255,255,255];   /* dark text on light colours */
     if(gi)tv.push(['','','','','']);
-    g.items.forEach(t=>tv.push([t.co,{t:t.driver,color:AFA_RED,bold:true},t.w,fmtTime(t.time),t.loc?{t:t.loc,bold:true,fill,color:[255,255,255]}:'']))});
+    g.items.forEach(t=>tv.push([t.co,{t:t.driver,color:AFA_RED,bold:true},t.w,fmtTime(t.time),t.loc?{t:t.loc,bold:true,fill,color:ink}:'']))});
   if(tv.length>24)tv.length=24;
   while(tv.length<12)tv.push(['','','','','']);tv.forEach(v=>{ry2=row(RX,ry2,TCo,v)});
   const tot=tr.reduce((a,t)=>a+truckT(t.w),0);
@@ -3097,7 +3115,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','truckCos','subCos','subServices','programLocs'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','truckCos','subCos','subServices','programLocs','locColors'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
@@ -3170,7 +3188,7 @@ async function pushRows(sb,{upserts,deletes}){
 /* data for a brand-new, empty roster */
 function emptyRoster(){
   return {resources:[{id:'a'+uid(),type:'aplant',name:'Asphalt plant',sub:'Main plant',hue:8,visible:true}],
-    jobs:[],blocks:[],quoteChanges:[],changeLog:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},programLocs:[...PROGRAM_LOCATIONS],
+    jobs:[],blocks:[],quoteChanges:[],changeLog:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},programLocs:[...PROGRAM_LOCATIONS],locColors:{...DEFAULT_LOC_COLORS},
     sectionOrder:[...DEFAULT_ORDER],orderV:2};
 }
 
