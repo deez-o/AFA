@@ -1162,7 +1162,7 @@ function AsphaltShifts({f,set,data}){
                 <div class="flex flex-wrap sm:flex-col sm:items-start items-center gap-x-2 gap-y-0.5 min-w-0">
                   <div class="text-[13px] font-semibold flex items-center gap-1">Shift ${i+1}${night&&html`<span class="inline-flex" style=${{color:'hsl(0 60% var(--blk-edge-l))'}} title="Night works">${Icon.moon}</span>`}</div>
                   <div class="text-[11.5px] text-muted mono">${WD[d.getDay()]} ${fmtShort(d)}</div>
-                  ${(()=>{const down=plantDown(k);const ex=(sd[k]&&sd[k].exbin)||null;
+                  ${!seal&&(()=>{const down=plantDown(k);const ex=(sd[k]&&sd[k].exbin)||null;   /* exbin: asphalt jobs only */
                     return html`
                     ${down.length>0&&html`<div class="text-[11px] font-medium inline-flex items-center gap-1" style=${{color:ex?'var(--ok)':'hsl(0 65% var(--blk-edge-l))'}}
                       title=${`${down.join(', ')} under maintenance`}>${ex?'✓':Icon.alert} ${ex?'Plant down, exbin':'Plant maintenance'}</div>`}
