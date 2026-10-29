@@ -72,12 +72,12 @@ function blockStyle(b,data){
 }
 const jobLabel=j=>j?((j.customer||'').trim()?`${j.customer.trim()} · ${j.name}`:j.name):'Job';
 const MAINT_LABEL={day:'Day shift',night:'Night shift'};
-/* text for bars too narrow for the full title (one-day jobs in the 14-day, 30-day and 2-month views):
-   the customer, or the job name when there is no customer; the full details are in the hover */
+/* two short lines for bars too narrow for the full title (one-day jobs in the 14-day, 30-day and 2-month views):
+   the customer on top and the start of the job name underneath; the full details are in the hover */
 const shortLabel=b=>{const D=window.__rosterData;
-  if(b.kind==='job'){const j=D&&D.jobs.find(x=>x.id===b.jobId);return (j&&((j.customer||'').trim()||j.name))||'Job'}
-  if(b.kind==='onjob'){const j=D&&D.jobs.find(x=>x.id===b.jobId);return (j&&((j.customer||'').trim()||j.name))||b.address||'Job'}
-  return b.title||KINDS[b.kind].label};
+  if(b.kind==='job'||b.kind==='onjob'){const j=D&&D.jobs.find(x=>x.id===b.jobId);
+    if(!j)return [b.address||'Job',''];const c=(j.customer||'').trim();return c?[c,j.name]:[j.name,'']}
+  return [b.title||KINDS[b.kind].label,'']};
 const blockTitle=(b,jobs)=>b.kind==='plantmaint'&&MAINT_LABEL[b.maintShift]?`${b.title||KINDS[b.kind].label} · ${MAINT_LABEL[b.maintShift]}`:b.kind==='onjob'?(b.address||jobs.find(j=>j.id===b.jobId)?.name||'On job'):b.kind==='job'?jobLabel(jobs.find(j=>j.id===b.jobId)):(b.title||KINDS[b.kind].label);
 
 const HUES=[12,205,150,280,40,330,185,100,240,60,0,120];
@@ -755,7 +755,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             ${!v&&quoteFresh.has(it.b.id)&&html`<span class="shrink-0 w-2 h-2 rounded-full" style=${{background:'var(--accent)',boxShadow:'0 0 0 2px var(--surface)'}} title="Quote number changed in the last 48 hours"></span>`}
             ${v&&!compact&&html`<span class="shrink-0 inline-flex opacity-80">${Icon.pin}</span>`}
             ${compact
-              ?html`<span class="t text-[10.5px] leading-tight">${shortLabel(it.b)}</span>`
+              ?(sl=>html`<span class="flex flex-col min-w-0 max-w-full leading-[1.15] text-center"><span class="t text-[10px] font-semibold">${sl[0]}</span>${sl[1]&&html`<span class="t text-[9.5px] opacity-80">${sl[1]}</span>`}</span>`)(shortLabel(it.b))
               :html`<span class="t">${title}</span>`}
             ${!compact&&span>=2&&view===7&&html`<span class="ml-auto mono text-[10.5px] opacity-70 shrink-0">${span}d</span>`}
             ${it.cutR&&html`<span aria-hidden="true" class=${compact?'':'ml-auto'}>›</span>`}
