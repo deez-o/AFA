@@ -493,8 +493,8 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
 
   const placeholders={crew:['Crew name, e.g. Crew 5','Type of work, e.g. Paving, Seal'],person:['Full name','Role, e.g. Roller operator'],machine:['Fleet no., e.g. R-09','Description, e.g. Tandem roller'],aplant:['Plant name, e.g. Asphalt plant 2','Location, e.g. Narangba']};
 
-  const tabsBar=html`<div class="seg w-full !grid grid-cols-4 gap-0.5" role="tablist" aria-label="Resource type">
-        ${[...orderOf(data).filter(t=>TYPES[t]).map(t=>[t,TYPES[t].tab||TYPES[t].label,data.resources.filter(r=>r.type===t).length]),['jobs','Jobs',data.jobs.length],['mixes','Mixes',mixTypesOf(data).length],['seal','Seal',sealTypesOf(data).length],['trucks','Trucks',truckCosOf(data).length]]
+  const tabsBar=html`<div class="seg w-full !grid grid-cols-3 gap-0.5" role="tablist" aria-label="Resource type">
+        ${[...orderOf(data).filter(t=>TYPES[t]).map(t=>[t,TYPES[t].tab||TYPES[t].label,data.resources.filter(r=>r.type===t).length]),['jobs','Jobs',data.jobs.length],['mixes','Mixes',mixTypesOf(data).length],['seal','Seal',sealTypesOf(data).length],['trucks','Trucks',truckCosOf(data).length],['subs','Subcontractors',subCosOf(data).length]]
           .map(([t,label,n])=>html`<button key=${t} role="tab" class="flex-1 !px-1 !text-[12.5px]" aria-pressed=${tab===t} aria-selected=${tab===t} title=${`${label} (${n})`} onClick=${()=>{setTab(t);setConfirmId(null)}}>${label}</button>`)}
       </div>`;
   const headTop=html`<div class="flex items-center justify-between gap-2">
@@ -504,6 +504,10 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
   if(tab==='jobs')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
     <${JobsManager} data=${data} setData=${setData} onImport=${onImport} onMerge=${onMerge}/>
+  </aside>`;
+  if(tab==='subs')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
+    <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
+    <${SubsManager} data=${data} setData=${setData}/>
   </aside>`;
   if(tab==='trucks')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
@@ -1888,7 +1892,7 @@ const recentQuoteChanges=data=>(data.quoteChanges||[]).filter(c=>Date.now()-c.at
 const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.round(m/60);return `${h} hr${h===1?'':'s'} ago`};
 /* ---------- change log: every change to the shared roster becomes a notification ---------- */
 const CHANGE_KEEP=7*DAY_MS;
-const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
+const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['programLocs','Locations'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
 const RES_WORD={crew:'Crew',person:'Staff member',machine:'Machine',aplant:'Plant'};
 /* exactly what changed on one booking, as "Field: before → after" lines */
 function bookingDiff(a,b,p,x,rname,jname,when){
@@ -2158,14 +2162,16 @@ function learnProgramLists(d,b){
   const subs=[],trucks=[];Object.values(b.shiftData||{}).forEach(q=>{(q&&q.subs||[]).forEach(x=>subs.push(x));(q&&q.trucks||[]).forEach(x=>trucks.push(x))});
   if(!subs.length&&!trucks.length)return d;
   const has=(l,v)=>l.some(x=>x.toLowerCase()===v.toLowerCase());
-  let subCos=[...subCosOf(d)],truckCos=[...truckCosOf(d)],svc={...subServicesOf(d)},ch=false;
+  let subCos=[...subCosOf(d)],truckCos=[...truckCosOf(d)],svc={...subServicesOf(d)},locs=[...programLocsOf(d)],ch=false;
   subs.forEach(x=>{const n=(x.name||'').trim();if(!n)return;
     if(!has(subCos,n)){subCos.push(n);ch=true}
     const i=(x.info||'').trim();if(!i)return;const key=Object.keys(svc).find(k=>k.toLowerCase()===n.toLowerCase())||n;
     const cur=svc[key]||[];if(!has(cur,i)){svc[key]=[...cur,i];ch=true}});
-  trucks.forEach(x=>{const n=(x.co||'').trim();if(n&&!has(truckCos,n)){truckCos.push(n);ch=true}});
-  return ch?{...d,subCos,truckCos,subServices:svc}:d;
+  trucks.forEach(x=>{const n=(x.co||'').trim();if(n&&!has(truckCos,n)){truckCos.push(n);ch=true}
+    const l=(x.loc||'').trim();if(l&&l.toLowerCase()!==(b.address||'').trim().toLowerCase()&&!has(locs,l)){locs.push(l);ch=true}});
+  return ch?{...d,subCos,truckCos,subServices:svc,programLocs:locs}:d;
 }
+const programLocsOf=d=>d&&Array.isArray(d.programLocs)?d.programLocs:PROGRAM_LOCATIONS;
 const truckCosOf=d=>d&&Array.isArray(d.truckCos)?d.truckCos:DEFAULT_TRUCKS;
 const subCosOf=d=>d&&Array.isArray(d.subCos)?d.subCos:DEFAULT_SUBS;
 const truckHas=t=>!!t&&!!(t.co||t.driver||t.w||t.time||t.loc);
@@ -2187,6 +2193,14 @@ function TrucksManager({data,setData}){
       hint="Truck companies offered in a booking's Trucks & Subcontractors tab, in this order."
       items=${truckCosOf(data)} setItems=${setter('truckCos')}/>
     <div class="border-t border-line mx-4"></div>
+    <${ListManager} title="Locations" field="progloc" placeholder="e.g. BALD HILLS YARD" data=${data} setData=${setData}
+      hint="Where trucks load or meet, offered in the Location column of the Trucks & Subcontractors tab. The booking's own site address is always offered too."
+      items=${programLocsOf(data)} setItems=${setter('programLocs')}/>
+  </div>`;
+}
+function SubsManager({data,setData}){
+  const setter=key=>(list,extra)=>setData(d=>{const n={...d,[key]:list};return extra?extra(n):n});
+  return html`<div class="flex-1 min-h-0 overflow-y-auto">
     <${ListManager} title="Subcontractors" field="subco" placeholder="e.g. BCM" data=${data} setData=${setData}
       hint="Subcontractors offered in a booking's Trucks & Subcontractors tab, in this order. Click the pencil to rename one or list the services they provide."
       items=${subCosOf(data)} setItems=${setter('subCos')} servicesOf=${t=>subServicesOf(data)[t]||[]}
@@ -2261,7 +2275,7 @@ function ProgramShifts({f,set,data}){
   const copyAll=()=>{const next={...sd};dates.forEach(d=>{if(d===k)return;const o=sd[d]||{};next[d]={...shiftBase(o),lines:linesOnly(o),...prog(q)}});set({shiftData:next})};
   const tl=trucks.filter(truckHas);const totT=tl.reduce((a,t)=>a+truckT(t.w),0);
   const night=f.shift==='night';
-  const locs=[...new Set([...PROGRAM_LOCATIONS,...(f.address?[f.address]:[])])];
+  const locs=[...new Set([...programLocsOf(data),...(f.address?[f.address]:[])])];
   const fs={height:30,fontSize:13};const iconX='w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken';
   const TC='grid gap-2 grid-cols-[22px_1fr_1fr_28px] sm:grid-cols-[22px_1.2fr_1fr_72px_164px_1.1fr_28px] items-center';
   const SC2='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.3fr_1.2fr_164px_28px] items-center';
@@ -3083,7 +3097,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','truckCos','subCos','subServices'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','truckCos','subCos','subServices','programLocs'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
@@ -3156,7 +3170,7 @@ async function pushRows(sb,{upserts,deletes}){
 /* data for a brand-new, empty roster */
 function emptyRoster(){
   return {resources:[{id:'a'+uid(),type:'aplant',name:'Asphalt plant',sub:'Main plant',hue:8,visible:true}],
-    jobs:[],blocks:[],quoteChanges:[],changeLog:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},
+    jobs:[],blocks:[],quoteChanges:[],changeLog:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},programLocs:[...PROGRAM_LOCATIONS],
     sectionOrder:[...DEFAULT_ORDER],orderV:2};
 }
 
