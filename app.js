@@ -662,7 +662,7 @@ function packLanes(items){
 }
 
 /* ---------- board ---------- */
-function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExport,collapsed,toggleSection,notifPrefs}){
+function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExport,collapsed,toggleSection,notifPrefs,only,headLabel}){
   /* ---- drag to reorder sections and rows (by their grip handles) ---- */
   const boxRef=React.useRef(null);
   const [reo,setReo]=useState(null);
@@ -939,13 +939,13 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
   };
   const SEC_LABEL=t=>t==='tonnes'?'Paving tonnes':TYPES[t].label;
 
-  const sections=orderOf(data).map(t=>({t,rows:data.resources.filter(r=>r.type===t&&r.visible)}));
+  const sections=orderOf(data).filter(t=>!only||only.includes(t)).map(t=>({t,rows:data.resources.filter(r=>r.type===t&&r.visible)}));
 
   return html`<div ref=${boxRef} class="scrollbox flex-1 min-h-0" role="region" aria-label="Schedule board">
     <div style=${{minWidth:nameW+N*colMin}} class="relative">
       <div class="flex sticky top-0 z-20 bg-surface border-b border-line">
         <div class="sticky left-0 z-30 bg-surface border-r border-line flex items-end px-4 pb-2 shrink-0" style=${{width:nameW}}>
-          <span class="label">Crews / machines / staff</span>
+          <span class="label">${headLabel||'Crews / machines / staff'}</span>
         </div>
         <div class="flex-1 grid" style=${grid}>
           ${days.map((d,i)=>{
@@ -2093,6 +2093,25 @@ function ChangeLogDialog({data,onClose,onOpen}){
   </div>`;
 }
 
+/* ---------- screens: the left menu ---------- */
+const SCREENS={
+  schedule:{label:'Schedule',title:'Crew & Plant Roster',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
+  staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
+  machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
+};
+const NAV_ICON={
+  schedule:svg(html`<rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M5 9h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`,20),
+  staff:svg(html`<circle cx="8" cy="5.2" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M3 14c.6-2.7 2.6-4.2 5-4.2s4.4 1.5 5 4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,20),
+  machines:svg(html`<path d="M2 11.5V8.5l2-3h4l1.5 3H14v3" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="4.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/><circle cx="11.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/>`,20),
+};
+function NavRail({screen,go}){
+  return html`<nav class="panel shrink-0 w-[68px] h-full flex flex-col gap-1 p-1.5" aria-label="Screens">
+    ${Object.entries(SCREENS).map(([k,s])=>{const on=screen===k;
+      return html`<button key=${k} class=${'flex flex-col items-center gap-1 rounded-lg py-2.5 text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
+        style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
+        ${NAV_ICON[k]}<span>${s.label}</span></button>`})}
+  </nav>`;
+}
 /* ---------- settings menu: dark mode, notifications and (live) account ---------- */
 function SwitchRow({id,label,desc,on,onChange}){
   return html`<label class="flex items-start gap-3 px-2 py-2 rounded-lg hover:bg-sunken cursor-pointer">
@@ -3010,6 +3029,11 @@ function App({boot,live}){
   const toggleResources=()=>{let wide=true;try{wide=window.matchMedia('(min-width: 1024px)').matches}catch(e){}
     if(wide)setPanel(p=>!p);else setDrawer(d=>!d)};
   const [tab,setTab]=useState('crew');
+  /* which screen of the left menu is open (remembered in this browser) */
+  const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return SCREENS[v]?v:'schedule'}catch(e){return 'schedule'}});
+  const goScreen=k=>{setScreen(k);try{localStorage.setItem(KEY+':screen',k)}catch(e){}
+    const t=SCREENS[k].tab;if(t)setTab(t);else if(tab==='person'||tab==='machine')setTab('crew')};
+  const SCR=SCREENS[screen];
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
   const [importing,setImporting]=useState(false);const [merging,setMerging]=useState(false);const [logOpen,setLogOpen]=useState(false);
@@ -3111,6 +3135,7 @@ function App({boot,live}){
   const legend=[['Crews',['job','standby','crewtraining']],['Asphalt plant',['plantmaint','plantreduced']],['Machines',['onjob','service','repair','inspection']],['Staff',['leave','sick','rdo','training']]];
 
   return html`<div class="shell h-full flex gap-4">
+    <${NavRail} screen=${screen} go=${goScreen}/>
     <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel?' lg:block':'')}><${Sidebar} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
@@ -3121,10 +3146,10 @@ function App({boot,live}){
         <button class="btn" onClick=${toggleResources} aria-pressed=${panel} aria-controls="resources-panel"
           title=${panel?'Hide the Resources panel':'Show the Resources panel'}
           style=${panel?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.list} Resources</button>
-        <button class="btn" onClick=${()=>setProgram(true)} title="Daily program PDFs for each job on a day">${Icon.download} Daily program</button>
+        ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setProgram(true)} title="Daily program PDFs for each job on a day">${Icon.download} Daily program</button>`}
         <div class="flex items-center gap-2 min-w-0">
           <span class="inline-flex w-7 h-7 rounded-md items-center justify-center font-display font-bold text-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}}>R</span>
-          <h1 class="font-display text-[20px] font-semibold tracking-tight truncate">Crew & Plant Roster</h1>
+          <h1 class="font-display text-[20px] font-semibold tracking-tight truncate">${SCR.title}</h1>
           ${!live.canEdit&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change anything">View only</span>`}
         </div>
         <div class="flex-1"></div>
@@ -3140,8 +3165,8 @@ function App({boot,live}){
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
-        <button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis('crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>
-        <button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>
+        <button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>
+        ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
         <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${live.role==='admin'?()=>setLogOpen(true):null}/>
       </header>
 
@@ -3153,10 +3178,10 @@ function App({boot,live}){
       </section>
 
       <section class="panel flex-1 min-h-[320px] flex flex-col overflow-hidden">
-        <${Board} data=${data} days=${days} view=${view} onCreate=${onCreate} onEdit=${b=>setEditing(b)} onMove=${onMove} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs}
+        <${Board} data=${data} days=${days} view=${view} onCreate=${onCreate} onEdit=${b=>setEditing(b)} onMove=${onMove} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
           collapsed=${collapsed} toggleSection=${t=>setCollapsed(c=>({...c,[t]:!c[t]}))}/>
         <div class="border-t border-line px-4 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
-          ${legend.map(([g,ks])=>html`<span key=${g} class="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+          ${legend.filter(([g])=>SCR.legend.includes(g)).map(([g,ks])=>html`<span key=${g} class="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
             <span class="font-semibold text-ink">${g}</span>
             ${ks.map(k=>html`<span key=${k} class="inline-flex items-center gap-1.5">
               <span class="inline-block w-5 h-3 rounded-[3px]" style=${blockStyle({kind:k,resourceId:data.resources.find(r=>r.type==='crew')?.id,crewId:data.resources.find(r=>r.type==='crew')?.id},data)}></span>${k==='job'?'Day job (crew colour)':KINDS[k].label}</span>`)}</span>`)}
