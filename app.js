@@ -1995,6 +1995,11 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account}){
 
 function Notifications({data,onOpen,prefs,setPrefs}){
   const SEEN=KEY+':quote-seen';
+  /* deleting a notification only hides it for this person (in this browser); others still see it */
+  const GONE=KEY+':notif-dismissed';
+  const [gone,setGone]=useState(()=>{try{return JSON.parse(localStorage.getItem(GONE)||'{}')||{}}catch(e){return {}}});
+  const saveGone=g=>{const now=Date.now();const kept=Object.fromEntries(Object.entries(g).filter(([,t])=>now-t<CHANGE_KEEP));setGone(kept);try{localStorage.setItem(GONE,JSON.stringify(kept))}catch(e){}};
+  const dismiss=id=>saveGone({...gone,[id]:Date.now()});
   const [open,setOpen]=useState(false);
   const [seen,setSeen]=useState(()=>{try{return Number(localStorage.getItem(SEEN))||0}catch(e){return 0}});
   const [,tick]=useState(0);
@@ -2004,7 +2009,7 @@ function Notifications({data,onOpen,prefs,setPrefs}){
     const out=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};const esc=e=>{if(e.key==='Escape')setOpen(false)};
     document.addEventListener('pointerdown',out);window.addEventListener('keydown',esc);
     return()=>{document.removeEventListener('pointerdown',out);window.removeEventListener('keydown',esc)}},[open]);
-  const list=[...(prefs.quote?recentQuoteChanges(data).map(c=>({...c,_q:true})):[]),...recentChanges(data,prefs)].sort((a,b)=>b.at-a.at).slice(0,150);
+  const list=[...(prefs.quote?recentQuoteChanges(data).map(c=>({...c,_q:true})):[]),...recentChanges(data,prefs)].filter(c=>!gone[c.id]).sort((a,b)=>b.at-a.at).slice(0,150);
   const me=window.__rosterMe||'';
   const allOff=NOTIF_TYPES.every(t=>!prefs[t.id]);
   const unseen=list.filter(c=>c.at>seen).length;
@@ -2020,9 +2025,11 @@ function Notifications({data,onOpen,prefs,setPrefs}){
           <div class="font-display text-[15px] font-semibold">Notifications</div>
           <div class="text-[12px] text-muted">Changes from the last 48 hours</div>
         </div>
+        ${list.length>0&&html`<button class="text-[12px] font-medium text-muted hover:text-ink underline underline-offset-2 shrink-0 mt-0.5"
+          onClick=${()=>{const g={...gone};list.forEach(c=>{g[c.id]=Date.now()});saveGone(g)}}>Clear all</button>`}
       </div>
       ${html`<ul class="max-h-[360px] overflow-y-auto">
-        ${list.length===0&&html`<li class="px-4 py-6 text-center text-[13px] text-muted">${allOff?'Notifications are off. Turn them on in Settings.':'Nothing has changed in the last 48 hours.'}</li>`}
+        ${list.length===0&&html`<li class="px-4 py-6 text-center text-[13px] text-muted">${allOff?'Notifications are off. Turn them on in Settings.':'No notifications.'}</li>`}
         ${list.map(c=>{if(!c._q){const b=c.blockId&&data.blocks.find(x=>x.id===c.blockId);
           return html`<li key=${c.id} class="px-4 py-2.5 border-b border-line last:border-b-0 flex items-start gap-3">
             <span class="w-2 h-2 rounded-full mt-1.5 shrink-0" style=${{background:c.at>seen&&open?'var(--accent)':'var(--line-strong)'}}></span>
@@ -2033,6 +2040,7 @@ function Notifications({data,onOpen,prefs,setPrefs}){
               <div class="text-[11.5px] text-faint">${agoText(c.at)}${c.by?` · ${c.by===me?'you':c.by}`:''}</div>
             </div>
             ${b&&html`<button class="btn shrink-0" style=${{height:28}} onClick=${()=>{setOpen(false);onOpen(b)}}>Open</button>`}
+            <button class="w-7 h-7 shrink-0 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>dismiss(c.id)} aria-label="Delete this notification" title="Delete">${Icon.x}</button>
           </li>`}
           const b=data.blocks.find(x=>x.id===c.bookingId);const j=b&&data.jobs.find(x=>x.id===b.jobId);const crew=b&&data.resources.find(r=>r.id===b.resourceId);
           return html`<li key=${c.id} class="px-4 py-2.5 border-b border-line last:border-b-0 flex items-start gap-3">
@@ -2043,6 +2051,7 @@ function Notifications({data,onOpen,prefs,setPrefs}){
               <div class="text-[11.5px] text-faint">${agoText(c.at)}</div>
             </div>
             ${b?html`<button class="btn shrink-0" style=${{height:28}} onClick=${()=>{setOpen(false);onOpen(b)}}>Open</button>`:html`<span class="text-[11.5px] text-faint shrink-0">Deleted</span>`}
+            <button class="w-7 h-7 shrink-0 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>dismiss(c.id)} aria-label="Delete this notification" title="Delete">${Icon.x}</button>
           </li>`;})}
       </ul>`}
     </div>`}
