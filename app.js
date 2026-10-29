@@ -803,8 +803,8 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
         ${Grip('Drag to move '+r.name,e=>startReo(e,'row',r.id,scopeOf(r)),'lg:opacity-0 group-hover/name:opacity-100')}
         <${Badge} r=${r} size=${28}/>
         <div class="min-w-0">
-          <div class="font-medium text-[13px] truncate flex items-center gap-1.5"><span class="truncate">${r.name}</span>${r.type==='crew'&&r.subbie&&html`<${SubTag}/>`}</div>
-          <div class="text-[11.5px] text-muted truncate">${r.type==='crew'?`${ppl} staff · ${pl} machine${pl===1?'':'s'}`:`${r.sub}${crew?' · '+crew.name:''}`}</div>
+          <div class="font-medium text-[13px] truncate" title=${r.name}>${r.name}</div>
+          <div class="text-[11.5px] text-muted truncate flex items-center gap-1.5">${r.type==='crew'&&r.subbie&&html`<${SubTag}/>`}<span class="truncate">${r.type==='crew'?`${ppl} staff · ${pl} machine${pl===1?'':'s'}`:`${r.sub}${crew?' · '+crew.name:''}`}</span></div>
         </div>
         <button class="ml-auto p-1 rounded text-muted hover:text-ink shrink-0 lg:opacity-0 group-hover/name:opacity-100 focus:opacity-100" onClick=${()=>onRename(r)} aria-label=${'Edit '+r.name} title="Edit name">${Icon.pencil}</button>
       </div>
