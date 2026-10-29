@@ -2196,6 +2196,22 @@ function TrucksManager({data,setData}){
   </div>`;
 }
 
+/* time picker: hour, minutes (5-minute steps) and AM/PM as dropdowns; stores "HH:MM" (24 h) */
+function TimeSelect({id,value,onChange,label,pm}){
+  const m=/^(\d{1,2}):(\d{2})/.exec(value||'');const H=m?+m[1]:null,Mi=m?m[2]:'';
+  const h12=H==null?'':String(H%12||12),ap=H==null?(pm?'PM':'AM'):(H>=12?'PM':'AM');
+  const emit=(h,mi,a)=>{if(!h){onChange('');return}onChange(`${pad((+h%12)+(a==='PM'?12:0))}:${mi||'00'}`)};
+  const mins=[...Array(12)].map((_,i)=>pad(i*5));if(Mi&&!mins.includes(Mi)){mins.push(Mi);mins.sort()}
+  const st={height:30,fontSize:13,paddingLeft:6,paddingRight:2};
+  return html`<span class="flex items-center gap-1 min-w-0" role="group" aria-label=${label}>
+    <select id=${id+'-h'} class="field field-sm mono min-w-0 flex-1" style=${{...st,color:h12?'var(--ink)':'var(--faint)'}} value=${h12} onChange=${e=>emit(e.target.value,Mi||'00',ap)} aria-label=${label+' hour'}>
+      <option value="">--</option>${[12,1,2,3,4,5,6,7,8,9,10,11].map(h=>html`<option key=${h} value=${String(h)} style=${{color:'var(--ink)'}}>${h}</option>`)}</select>
+    <select id=${id+'-m'} class="field field-sm mono min-w-0 flex-1" style=${st} value=${Mi||'00'} disabled=${!h12} onChange=${e=>emit(h12,e.target.value,ap)} aria-label=${label+' minutes'}>
+      ${mins.map(x=>html`<option key=${x} value=${x}>${x}</option>`)}</select>
+    <select id=${id+'-ap'} class="field field-sm mono min-w-0 flex-1" style=${st} value=${ap} disabled=${!h12} onChange=${e=>emit(h12,Mi||'00',e.target.value)} aria-label=${label+' AM or PM'}>
+      <option value="AM">AM</option><option value="PM">PM</option></select>
+  </span>`;
+}
 /* booking editor tab: one shift at a time */
 function ProgramShifts({f,set,data}){
   const dates=shiftDates(f);const sd=f.shiftData||{};
@@ -2235,8 +2251,8 @@ function ProgramShifts({f,set,data}){
   const night=f.shift==='night';
   const locs=[...new Set([...PROGRAM_LOCATIONS,...(f.address?[f.address]:[])])];
   const fs={height:30,fontSize:13};const iconX='w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken';
-  const TC='grid gap-2 grid-cols-[22px_1fr_1fr_28px] sm:grid-cols-[22px_1.3fr_1fr_76px_104px_1.2fr_28px] items-center';
-  const SC2='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.4fr_1.2fr_104px_28px] items-center';
+  const TC='grid gap-2 grid-cols-[22px_1fr_1fr_28px] sm:grid-cols-[22px_1.2fr_1fr_72px_164px_1.1fr_28px] items-center';
+  const SC2='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.3fr_1.2fr_164px_28px] items-center';
   return html`<section class="grid gap-4" aria-labelledby="sec-program">
     <datalist id="dl-truckco">${truckCosOf(data).map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
     <datalist id="dl-subco">${subCosOf(data).map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
@@ -2249,7 +2265,7 @@ function ProgramShifts({f,set,data}){
           ${dates.map((d,x)=>html`<option key=${d} value=${d}>Shift ${x+1} · ${WD[parse(d).getDay()]} ${fmtShort(parse(d))}${progHas(sd[d])?' ✓':''}</option>`)}
         </select></label>
       <label class="grid gap-1"><span class="label">Start time</span>
-        <input id="pg-start" type="time" class="field field-sm mono" style=${{...fs,width:120}} value=${q.start||''} onInput=${e=>setStart(e.target.value)}/></label>
+        <span style=${{width:176}}><${TimeSelect} id="pg-start" label="Start time" value=${q.start||''} pm=${night} onChange=${setStart}/></span></label>
     </div>
     <div class="flex flex-wrap gap-2 -mt-2">
       ${i>0&&html`<button type="button" class="btn btn-ghost text-muted" style=${{height:28}} onClick=${copyPrev}>Copy from shift ${i}</button>`}
@@ -2267,7 +2283,7 @@ function ProgramShifts({f,set,data}){
         <select id=${`pg-t${j}-w`} class="field field-sm mono" style=${{...fs,color:t.w?'var(--ink)':'var(--faint)'}} value=${t.w||''} onChange=${e=>setT(j,{w:e.target.value})} aria-label=${`Truck ${j+1} weight`}>
           <option value="">T</option>${TRUCK_WEIGHTS.map(w=>html`<option key=${w} value=${w} style=${{color:'var(--ink)'}}>${w}</option>`)}
           ${t.w&&!TRUCK_WEIGHTS.includes(t.w)&&html`<option value=${t.w}>${t.w}</option>`}</select>
-        <input id=${`pg-t${j}-time`} type="time" class="field field-sm mono" style=${fs} value=${t.time||''} onInput=${e=>setT(j,{time:e.target.value})} aria-label=${`Truck ${j+1} time`}/>
+        <${TimeSelect} id=${`pg-t${j}-time`} label=${`Truck ${j+1} time`} value=${t.time||''} pm=${night} onChange=${v=>setT(j,{time:v})}/>
         <input id=${`pg-t${j}-loc`} class="field field-sm" style=${fs} list="dl-loc" placeholder="Location" value=${t.loc||''} onInput=${e=>setT(j,{loc:e.target.value})} aria-label=${`Truck ${j+1} location`}/>
         <button type="button" class=${iconX} onClick=${()=>upd({trucks:trucks.filter((_,x)=>x!==j)})} aria-label=${`Remove truck ${j+1}`} title="Remove">${Icon.x}</button>
       </div>`)}
@@ -2284,7 +2300,7 @@ function ProgramShifts({f,set,data}){
         <input id=${`pg-s${j}-n`} class="field field-sm" style=${fs} list="dl-subco" placeholder="Subcontractor" value=${s.name||''} onInput=${e=>setS(j,{name:e.target.value})} aria-label=${`Subcontractor ${j+1}`}/>
         <input id=${`pg-s${j}-i`} class="field field-sm" style=${fs} list=${`dl-svc-${j}`} placeholder=${servicesFor(data,s.name).length?'Pick or type a service':'Type the service'} value=${s.info||''} onInput=${e=>setS(j,{info:e.target.value})} aria-label=${`Subcontractor ${j+1} service`}/>
         <datalist id=${`dl-svc-${j}`}>${servicesFor(data,s.name).map(v=>html`<option key=${v} value=${v}/>`)}</datalist>
-        <input id=${`pg-s${j}-t`} type="time" class="field field-sm mono" style=${fs} value=${s.time||''} onInput=${e=>setS(j,{time:e.target.value})} aria-label=${`Subcontractor ${j+1} start time`}/>
+        <${TimeSelect} id=${`pg-s${j}-t`} label=${`Subcontractor ${j+1} start time`} value=${s.time||''} pm=${night} onChange=${v=>setS(j,{time:v})}/>
         <button type="button" class=${iconX} onClick=${()=>upd({subs:subs.filter((_,x)=>x!==j)})} aria-label=${`Remove subcontractor ${j+1}`} title="Remove">${Icon.x}</button>
       </div>`)}
       <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>upd({subs:[...subs.filter(subHas),{time:q.start||''}]})}>${Icon.plus} Add subcontractor</button></div>
@@ -2391,9 +2407,16 @@ function drawProgram(doc,data,{b,k,crewId}){
   if(lines.length>3){cell(RX,ry2,RW,5,`+ ${lines.length-3} more line${lines.length-3===1?'':'s'} - see the booking`,{border:false,size:6.4,color:[110,110,110]});ry2+=5}
 
   /* right: trucks */
-  ry2+=3;const TCo=[['TRUCKS',24],['DRIVER',18],['WEIGHT',12],['TIME',14],['LOCATION',26]];ry2=head(RX,ry2,RW,TCo);
-  const tr=(q.trucks||[]).filter(truckHas).slice(0,22);
-  const tv=tr.map(t=>[t.co,{t:t.driver,color:AFA_RED,bold:true},t.w,fmtTime(t.time),t.loc?{t:t.loc,bold:true,fill:/site/i.test(t.loc)||t.loc===(b.address||'')?[20,20,20]:AFA_RED,color:[255,255,255]}:'']);
+  ry2+=3;const TCo=[['TRUCKS',27],['DRIVER',16],['WEIGHT',12],['TIME',14],['LOCATION',25]];ry2=head(RX,ry2,RW,TCo);
+  const tr=(q.trucks||[]).filter(truckHas);
+  /* grouped by location (in order of first appearance, times in order within a group), a blank row between groups */
+  const groups=[];tr.forEach(t=>{const key=(t.loc||'').trim().toLowerCase();let g=groups.find(x=>x.key===key);if(!g){g={key,items:[]};groups.push(g)}g.items.push(t)});
+  groups.forEach(g=>g.items.sort((a,c)=>(a.time||'99')<(c.time||'99')?-1:(a.time||'99')>(c.time||'99')?1:0));
+  const LOC_FILLS=[AFA_RED,[64,112,52],[38,84,140],[150,96,20],[96,60,130]];let fi=0;
+  const tv=[];groups.forEach((g,gi)=>{const site=/site/i.test(g.key)||(b.address&&g.key===b.address.trim().toLowerCase());const fill=site?[20,20,20]:LOC_FILLS[(fi++)%LOC_FILLS.length];
+    if(gi)tv.push(['','','','','']);
+    g.items.forEach(t=>tv.push([t.co,{t:t.driver,color:AFA_RED,bold:true},t.w,fmtTime(t.time),t.loc?{t:t.loc,bold:true,fill,color:[255,255,255]}:'']))});
+  if(tv.length>24)tv.length=24;
   while(tv.length<12)tv.push(['','','','','']);tv.forEach(v=>{ry2=row(RX,ry2,TCo,v)});
   const tot=tr.reduce((a,t)=>a+truckT(t.w),0);
   ry2=row(RX,ry2,TCo,['',{t:'Total:',bold:true,align:'right'},{t:tot?`${fmtN(tot)}T`:'',bold:true},'',''],5.4);
