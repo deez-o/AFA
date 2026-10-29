@@ -1378,11 +1378,11 @@ function AsphaltShifts({f,set,data}){
 /* Tabs are a list so more can be added later: give each an id, label, when it applies, and a render function. */
 const BOOKING_TABS=[
   {id:'details',label:'Booking Details',applies:()=>true,render:p=>html`<${BookingDetails} ...${p}/>`},
-  {id:'machines',label:'Machines',applies:f=>f.kind==='job',badge:f=>(f.plantIds||[]).length?`${(f.plantIds||[]).length}`:null,
-    render:p=>html`<${PlantPicker} f=${p.f} set=${p.set} data=${p.data}/>`},
   {id:'quantities',label:(f,d)=>isSealCrew(d.resources.find(r=>r.id===f.resourceId))?'Seal & Quantities':'Asphalt & Quantities',applies:f=>f.kind==='job',
     badge:(f,d)=>{const q=qtyTotals(f);if(isSealCrew(d.resources.find(r=>r.id===f.resourceId)))return q.area?`${fmtN(q.area)} m²`:null;return q.tonnes?`${fmtN(q.tonnes)} t`:null},
     render:p=>html`<${AsphaltShifts} f=${p.f} set=${p.set} data=${p.data}/>`},
+  {id:'machines',label:'Machines',applies:f=>f.kind==='job',badge:f=>(f.plantIds||[]).length?`${(f.plantIds||[]).length}`:null,
+    render:p=>html`<${PlantPicker} f=${p.f} set=${p.set} data=${p.data}/>`},
   {id:'program',label:(f,d)=>isSealCrew(d.resources.find(r=>r.id===f.resourceId))?'Subcontractors':'Trucks & Subcontractors',applies:f=>f.kind==='job',
     badge:(f,d)=>{const seal=isSealCrew(d.resources.find(r=>r.id===f.resourceId));
       const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&(seal?q.subs:q.trucks))||[]).filter(seal?subHas:truckHas).length,0);return n?`${n}`:null},
