@@ -497,7 +497,7 @@ function JobsManager({data,setData,onImport,onMerge}){
 }
 
 /* ---------- sidebar ---------- */
-function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onImport,onMerge,screen,onImportMachines}){
+function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onImport,onMerge,screen,onImportMachines,notify}){
   /* Staff and Machines only show on their own screens; the Schedule screen gets everything else */
   const tabOK=t=>screen==='staff'?t==='person':screen==='machines'?t==='machine':(t!=='person'&&t!=='machine');
   const [q,setQ]=useState('');
@@ -682,7 +682,8 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
     </ul>
     <form class="border-t border-line px-4 py-3 flex flex-col gap-2 bg-sunken" onSubmit=${add}>
       <div class="flex items-center gap-2"><div class="label mr-auto">Add ${TYPES[tab].one}</div>
-        ${tab==='machine'&&onImportMachines&&html`<button type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${onImportMachines}>Import from Excel</button>`}</div>
+        ${tab==='machine'&&onImportMachines&&html`<button type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${onImportMachines}>Import from Excel</button>`}
+        ${tab==='machine'&&data.resources.some(r=>r.type==='machine')&&html`<button type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${()=>exportMachines(data,notify||(()=>{}))}>Export to Excel</button>`}</div>
       <div class="flex gap-2">
         <input id="new-name" class="field" placeholder=${placeholders[tab][0]} value=${f.name} onInput=${e=>setF({...f,name:e.target.value})} aria-label="Name"/>
       </div>
@@ -1086,6 +1087,25 @@ function PlantPicker({f,set,data}){
               ${m.rego&&html`<span class="mono text-[10.5px] text-faint shrink-0">${m.rego}</span>`}
             </label></li>`;})])}
       </ul>`}
+    ${picked.size>0&&(()=>{const sel=machines.filter(m=>picked.has(m.id));const warn=sel.filter(m=>status(m)).length;
+      return html`<div class="rounded-lg border border-line bg-sunken p-2.5 grid gap-2" aria-label="Machines selected for this job">
+        <div class="flex items-center gap-2">
+          <span class="label" style=${{color:'var(--ink)'}}>Selected for this job</span><span class="mono text-[11px] text-faint">${sel.length}</span>
+          ${warn>0&&html`<span class="text-[11.5px] font-medium" style=${{color:'var(--warn)'}}>${warn} need${warn===1?'s':''} checking</span>`}
+          <span class="flex-1"></span>
+          <button type="button" class="text-[12px] font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>set({plantIds:[]})}>Clear all</button>
+        </div>
+        ${groupMachines(sel,data).map(g=>html`<div key=${g.key} class="grid gap-1">
+          <div class="text-[11.5px] font-semibold text-muted">${g.label} <span class="mono text-faint">${g.rows.length}</span></div>
+          <div class="flex flex-wrap gap-1.5">
+            ${g.rows.map(m=>{const st=status(m);return html`<span key=${m.id} class="inline-flex items-center gap-1.5 rounded-md bg-surface border pl-2 pr-1 py-0.5 text-[12px] max-w-full"
+                style=${{borderColor:st?st.tone:'var(--line)'}} title=${[m.name,m.sub,m.rego,st&&st.text].filter(Boolean).join(' · ')}>
+              <span class="font-semibold mono shrink-0">${m.name}</span><span class="text-muted truncate">${m.sub||''}</span>
+              ${st&&html`<span class="shrink-0 inline-flex" style=${{color:st.tone}}>${Icon.alert}</span>`}
+              <button type="button" class="w-5 h-5 shrink-0 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>toggle(m.id)} aria-label=${'Remove '+m.name+' from this job'}>${Icon.x}</button>
+            </span>`})}
+          </div></div>`)}
+      </div>`})()}
   </section>`;
 }
 
@@ -2763,10 +2783,18 @@ function loadSheetJS(){
 /* The fleet list: a heading on its own row starts a category (headings further left are parent groups,
    e.g. "Narangba Transport" › "Trucks"); a machine row has the rego, then the description that starts with the machine #. */
 function parseFleetRows(rows){
-  const out=[];let stack=[];
+  const out=[];let stack=[];let cols=null;
   rows.forEach((row,ri)=>{
     const cells=(row||[]).map((v,c)=>({c,v:String(v??'').replace(/\s+/g,' ').trim()})).filter(x=>x.v);
     if(!cells.length)return;
+    /* a table with headings (e.g. this planner's own export): Category, Machine #, Description, Rego */
+    const low=cells.map(x=>x.v.toLowerCase());
+    if(low.includes('rego')&&low.some(v=>/^(machine\s*#?|machine no\.?|fleet no\.?)$/.test(v))){
+      cols={};cells.forEach(x=>{const v=x.v.toLowerCase();if(v==='rego')cols.rego=x.c;else if(/^(machine|fleet)/.test(v))cols.name=x.c;else if(v==='description')cols.desc=x.c;else if(v==='category')cols.cat=x.c});return}
+    if(cols){const g=c=>c==null?'':String((row||[])[c]??'').replace(/\s+/g,' ').trim();const name=g(cols.name);
+      if(!name||!g(cols.rego)&&!g(cols.desc)){return}
+      out.push({row:ri+1,rego:g(cols.rego).toUpperCase(),code:name.toUpperCase(),name:name.toUpperCase(),desc:g(cols.desc),full:`${name} ${g(cols.desc)}`.trim(),category:g(cols.cat),
+        retired:/no longer in use|retired|\bsold\b|written off/i.test(g(cols.desc))});return}
     if(cells.length===1){const h=cells[0];stack=stack.filter(x=>x.c<h.c);stack.push(h);return}
     const rego=cells[0],desc=cells[cells.length-1];
     const category=stack.filter(x=>x.c<rego.c).map(x=>x.v).join(' – ');
@@ -2776,6 +2804,35 @@ function parseFleetRows(rows){
       retired:/no longer in use|retired|\bsold\b|written off/i.test(desc.v)});
   });
   return out;
+}
+/* ---------- export the machine list (a table that Import from Excel reads back) ---------- */
+async function buildMachinesWorkbook(data){
+  const ExcelJS=await loadExcelJS();const wb=new ExcelJS.Workbook();const ws=wb.addWorksheet('Machines',{views:[{state:'frozen',ySplit:3}]});
+  ws.columns=[{width:30},{width:13},{width:44},{width:12},{width:20},{width:10}];
+  const dark='FF3A3A3A',red='FF9B0A1E',grey='FFF1F1F4',line={style:'thin',color:{argb:'FFBFBFBF'}};
+  ws.mergeCells('A1:F1');const t=ws.getCell('A1');t.value='Machine list';t.font={bold:true,size:14};
+  ws.mergeCells('A2:F2');const st=ws.getCell('A2');const n=new Date();st.value=`Exported ${n.getDate()} ${MONTHS_LONG[n.getMonth()]} ${n.getFullYear()}`;st.font={size:9,color:{argb:'FF777777'}};
+  const h=ws.getRow(3);h.values=['Category','Machine #','Description','Rego','Crew','On board'];
+  h.eachCell(c=>{c.font={bold:true,color:{argb:'FFFFFFFF'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:dark}};c.border={top:line,bottom:line,left:line,right:line};c.alignment={vertical:'middle'}});h.height=18;
+  const machines=data.resources.filter(r=>r.type==='machine');
+  groupMachines(machines,data).forEach(g=>{
+    const gr=ws.addRow([g.label,'','','','','']);ws.mergeCells(`A${gr.number}:F${gr.number}`);
+    gr.getCell(1).font={bold:true,color:{argb:'FFFFFFFF'}};gr.getCell(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:red}};gr.getCell(1).value=`${g.label}  (${g.rows.length})`;
+    g.rows.forEach((m,i)=>{const crew=data.resources.find(c=>c.id===m.crewId);
+      const r=ws.addRow([machCatOf(m)||'',m.name,m.sub||'',m.rego||'',crew?crew.name:'',m.visible===false?'Hidden':'Yes']);
+      r.eachCell({includeEmpty:true},c=>{c.border={top:line,bottom:line,left:line,right:line};if(i%2)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:grey}}});
+      r.getCell(2).font={bold:true};r.getCell(4).font={name:'Consolas'};r.getCell(1).font={color:{argb:'FF777777'}}});
+  });
+  ws.pageSetup={orientation:'portrait',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:.4,right:.4,top:.5,bottom:.5,header:.2,footer:.2},printTitlesRow:'3:3'};
+  const buf=await wb.xlsx.writeBuffer();
+  return new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+async function exportMachines(data,notify){
+  try{const dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null;
+    if(!dl){notify('Saving files isn’t available in this view.');return}
+    const blob=await buildMachinesWorkbook(data);const n=new Date();
+    await dl.save({filename:`Machine list ${pad(n.getDate())}.${pad(n.getMonth()+1)}.${n.getFullYear()}.xlsx`,data:blob});notify('Machine list saved');
+  }catch(e){const c=e&&e.code;notify(c==='declined'?'Download cancelled.':c==='rate_limited'?'A save prompt is already open.':(e&&e.message)||'The machine list could not be exported.')}
 }
 async function readFleetFile(file){
   const XLSX=await loadSheetJS();const buf=await file.arrayBuffer();
@@ -3341,10 +3398,10 @@ function App({boot,live}){
 
   return html`<div class="shell h-full flex gap-4">
     <${NavRail} screen=${screen} go=${goScreen}/>
-    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel?' lg:block':'')}><${Sidebar} screen=${screen} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
+    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
-        <${Sidebar} screen=${screen} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
+        <${Sidebar} screen=${screen} notify=${setToast} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
 
     <main class="flex-1 min-w-0 h-full flex flex-col gap-3">
       <header class="flex flex-wrap items-center gap-x-3 gap-y-2">
