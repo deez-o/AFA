@@ -512,6 +512,9 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
   const list=data.resources.filter(r=>r.type===tab&&(r.name+' '+r.sub).toLowerCase().includes(q.toLowerCase()));
   const crewName=id=>crews.find(c=>c.id===id)?.name;
   /* Machines tab: drag categories into a new order, and machines within their category; saved straight away */
+  /* collapsed machine categories (remembered in this browser) */
+  const [mCol,setMCol]=useState(()=>{try{return JSON.parse(localStorage.getItem(KEY+':res-mcat')||'{}')||{}}catch(e){return {}}});
+  const saveMCol=v=>{setMCol(v);try{localStorage.setItem(KEY+':res-mcat',JSON.stringify(v))}catch(e){}};
   const [mdrag,setMdrag]=useState(null);   /* {kind:'cat'|'mach', id, cat, over, after} */
   const canDragM=tab==='machine'&&!q;
   const mStart=(e,kind,id,cat)=>{if(e.button!==undefined&&e.button!==0)return;e.preventDefault();e.stopPropagation();try{e.currentTarget.setPointerCapture(e.pointerId)}catch(x){}setMdrag({kind,id,cat,over:null,after:false})};
@@ -589,13 +592,20 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
     <ul class="flex-1 min-h-0 overflow-y-auto px-2 py-2">
       <datalist id="work-types">${groupCrews(crews).map(g=>html`<option key=${g.key} value=${g.label}></option>`)}</datalist>
       <datalist id="mach-cats">${machineCatsOf(data).map(c=>html`<option key=${c} value=${c}></option>`)}</datalist>
+      ${tab==='machine'&&!q&&list.length>0&&html`<li class="px-2 pt-1 flex items-center gap-3 text-[12px]">
+        <button type="button" class="font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>{const v={};groupMachines(list,data).forEach(g=>{v[g.key]=true});saveMCol(v)}}>Collapse all</button>
+        <button type="button" class="font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>saveMCol({})}>Expand all</button></li>`}
       ${(tab==='crew'?groupCrews(list).flatMap(g=>g.rows.map((r,i)=>({r,head:i===0?g:null})))
         :tab==='machine'?groupMachines(list,data).flatMap(g=>g.rows.map((r,i)=>({r,head:i===0?g:null})))
         :list.map(r=>({r,head:null}))).map(({r,head})=>{
         const hdr=head&&html`<li key=${'h-'+head.key} class="px-2 pt-3 pb-1 flex items-center gap-2" data-mcat-head=${tab==='machine'&&head.key!=='~'?head.key:undefined}
             style=${tab==='machine'?{boxShadow:mLine('cat',head.key),opacity:mdrag&&mdrag.kind==='cat'&&mdrag.id===head.key?.45:1}:null}>
           ${canDragM&&head.key!=='~'&&mGrip('cat',head.key,null,head.label)}
-          <span class="label" style=${{color:'var(--ink)'}}>${head.label}</span><span class="mono text-[11px] text-faint">${head.rows.length}</span><span class="flex-1 h-px bg-line"></span></li>`;
+          ${tab==='machine'?html`<button type="button" class="flex items-center gap-1.5 min-w-0 text-left" onClick=${()=>saveMCol({...mCol,[head.key]:!mCol[head.key]})} aria-expanded=${!mCol[head.key]} title=${mCol[head.key]?'Show these machines':'Hide these machines'}>
+              <span class="text-muted inline-flex transition-transform shrink-0" style=${{transform:mCol[head.key]&&!q?'rotate(-90deg)':'none'}}>${Icon.chevD}</span>
+              <span class="label truncate" style=${{color:'var(--ink)'}}>${head.label}</span></button>`
+            :html`<span class="label" style=${{color:'var(--ink)'}}>${head.label}</span>`}<span class="mono text-[11px] text-faint">${head.rows.length}</span><span class="flex-1 h-px bg-line"></span></li>`;
+        if(tab==='machine'&&!q&&mCol[machCatOf(r).toLowerCase()||'~']&&renameId!==r.id)return [hdr];   /* category collapsed */
         const s=rowStats(r,data,days);
         let meta;
         if(r.type==='crew'){
