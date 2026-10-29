@@ -206,6 +206,15 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
     if(exists(t)){setMsg(`${t} is already in the list.`);return}
     setItems([...items,t]);setName('');setMsg('')};
   const move=(i,dir)=>{const j=i+dir;if(j<0||j>=items.length)return;const l=[...items];[l[i],l[j]]=[l[j],l[i]];setItems(l)};
+  /* drag to reorder: grab the handle and drop above or below another item (arrow keys on the handle also move it) */
+  const listRef=useRef(null);const [drag,setDrag]=useState(null);   /* {from, before} */
+  const dragAt=y=>{const rows=listRef.current?[...listRef.current.querySelectorAll('[data-li]')]:[];
+    for(let r=0;r<rows.length;r++){const bx=rows[r].getBoundingClientRect();if(y<bx.top+bx.height/2)return r}return rows.length};
+  const dragStart=(e,i)=>{if(e.button!==undefined&&e.button!==0)return;e.preventDefault();try{e.currentTarget.setPointerCapture(e.pointerId)}catch(x){}setDrag({from:i,before:i})};
+  const dragMove=e=>{if(!drag)return;const b=dragAt(e.clientY);if(b!==drag.before)setDrag({...drag,before:b})};
+  const dragEnd=()=>{if(!drag)return;const {from,before}=drag;setDrag(null);const to=before>from?before-1:before;
+    if(to===from)return;const l=[...items];const [x]=l.splice(from,1);l.splice(to,0,x);setItems(l)};
+  const dropLine=i=>drag&&drag.before===i&&drag.before!==drag.from&&drag.before!==drag.from+1;
   const remove=t=>{setItems(items.filter(m=>m!==t),onRemoved?d=>onRemoved(d,t):undefined);setConfirm(null)};
   const rename=e=>{e.preventDefault();const {from}=editing;const to=editing.to.trim();
     if(!to){setMsg('Give it a name.');return}
@@ -221,9 +230,9 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
       <div class="flex items-baseline gap-2"><h3 id=${idp+'title'} class="label" style=${{color:'var(--ink)'}}>${title}</h3><span class="mono text-[11px] text-faint">${items.length}</span><span class="flex-1 h-px bg-line self-center"></span></div>
       <div class="text-[12px] text-muted mt-1">${hint}</div>
     </div>
-    <ul class="px-2 py-1">
+    <ul class="px-2 py-1" ref=${listRef}>
       ${items.map((t,i)=>{const n=usage.get(t)||0;
-        if(editing&&editing.from===t)return html`<li key=${t} class="rounded-lg px-2 py-2 bg-sunken" style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
+        if(editing&&editing.from===t)return html`<li key=${t} data-li="1" class="rounded-lg px-2 py-2 bg-sunken" style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
           <form class="flex flex-col gap-1.5" onSubmit=${rename} onKeyDown=${e=>{if(e.key==='Escape'){e.stopPropagation();setEditingItem(null);setMsg('')}}}>
             <label class="sr-only" for=${idp+'rn-'+i}>New name for ${t}</label>
             <input id=${idp+'rn-'+i} class="field field-sm mono" style=${{height:30,fontSize:13}} value=${editing.to} autoFocus=${true} onInput=${e=>setEditingItem({...editing,to:e.target.value})}/>
@@ -264,11 +273,13 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
               <button type="submit" class="btn btn-primary" style=${{height:28}}>Save</button>
             </div>
           </form></li>`;
-        return html`<li key=${t} class="group rounded-lg px-2 py-1 flex items-center gap-2 hover:bg-sunken">
-          <div class="flex flex-col">
-            <button class=${iconBtn+' !h-4'} onClick=${()=>move(i,-1)} disabled=${i===0} aria-label=${'Move '+t+' up'} title="Move up">${Icon.up}</button>
-            <button class=${iconBtn+' !h-4'} onClick=${()=>move(i,1)} disabled=${i===items.length-1} aria-label=${'Move '+t+' down'} title="Move down">${Icon.down}</button>
-          </div>
+        return html`<li key=${t} data-li="1" class="group rounded-lg px-2 py-1 flex items-center gap-2 hover:bg-sunken"
+            style=${{opacity:drag&&drag.from===i?.45:1,boxShadow:dropLine(i)?'inset 0 2px 0 var(--accent)':i===items.length-1&&dropLine(items.length)?'inset 0 -2px 0 var(--accent)':'none'}}>
+          <span role="button" tabindex="0" class="w-5 h-7 shrink-0 inline-flex items-center justify-center rounded text-faint hover:text-ink hover:bg-surface select-none"
+            style=${{cursor:drag?'grabbing':'grab',touchAction:'none'}} title="Drag to reorder"
+            aria-label=${'Reorder '+t+'. Drag, or use the up and down arrow keys'}
+            onPointerDown=${e=>dragStart(e,i)} onPointerMove=${dragMove} onPointerUp=${dragEnd} onPointerCancel=${()=>setDrag(null)}
+            onKeyDown=${e=>{if(e.key==='ArrowUp'){e.preventDefault();move(i,-1)}else if(e.key==='ArrowDown'){e.preventDefault();move(i,1)}}}>${Icon.grip}</span>
           <div class="min-w-0 flex-1">
             <div class="mono font-semibold text-[13.5px] truncate">${t}</div>
             ${rapOf&&rapOf(t)>0&&html`<div class="text-[11.5px] font-medium" style=${{color:'var(--ok)'}}>${fmtN(rapOf(t))}% RAP</div>`}
