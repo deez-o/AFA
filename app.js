@@ -2036,10 +2036,11 @@ function applyTeamCalImport(d,{bookings,crewMap,customers}){
 /* ---------- merging bookings that were split over a weekend ---------- */
 /* Before Saturday/Sunday could be switched per booking, one job was often entered as several bookings
    (e.g. Wed–Fri, then Mon–Tue). Bookings for the same job, crew and shift whose gap is only weekend days
-   (or no gap at all) are joined into one; a weekend day stays a shift only if one of the old bookings worked it. */
+   (or no gap at all) are joined into one — paving crews only; a weekend day stays a shift only if one of the old bookings worked it. */
 function mergePlan(data){
   const groups=new Map();
-  data.blocks.filter(b=>b.kind==='job'&&b.jobId&&b.start&&b.end).forEach(b=>{
+  const pav=new Set(data.resources.filter(isPavingCrew).map(r=>r.id));   /* paving crews only */
+  data.blocks.filter(b=>b.kind==='job'&&pav.has(b.resourceId)&&b.jobId&&b.start&&b.end).forEach(b=>{
     const k=[b.resourceId,b.jobId,b.shift||'day'].join('|');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(b)});
   const plans=[];
   groups.forEach(list=>{
@@ -2081,12 +2082,12 @@ function MergeSplits({data,setData,onClose,notify}){
       <div class="px-5 pt-5 pb-3 border-b border-line flex items-start gap-3">
         <div class="min-w-0 flex-1">
           <div id="mg-title" class="font-display text-[18px] font-semibold">Merge split bookings</div>
-          <div class="text-[12.5px] text-muted">Bookings for the same job, crew and shift that only have a weekend (or nothing) between them. Weekend days nobody booked are greyed out on the merged booking.</div>
+          <div class="text-[12.5px] text-muted">Paving crew bookings for the same job, crew and shift that only have a weekend (or nothing) between them. Weekend days nobody booked are greyed out on the merged booking.</div>
         </div>
         <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button>
       </div>
       <div class="overflow-y-auto p-3 grid gap-2">
-        ${plans.length===0&&html`<div class="text-[13px] text-muted p-3">Nothing to merge. No job has bookings split over a weekend.</div>`}
+        ${plans.length===0&&html`<div class="text-[13px] text-muted p-3">Nothing to merge. No paving job has bookings split over a weekend.</div>`}
         ${plans.map((r,i)=>{const m=mergeRun(r);const j=data.jobs.find(x=>x.id=== r[0].jobId);const crew=data.resources.find(x=>x.id===r[0].resourceId);
           const wk=[!m.satShift&&'Sat',!m.sunShift&&'Sun'].filter(Boolean);
           return html`<label key=${r[0].id} class="flex items-start gap-3 rounded-lg border border-line px-3 py-2.5 cursor-pointer hover:bg-sunken">
