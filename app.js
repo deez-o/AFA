@@ -286,11 +286,16 @@ function SealManager({data,setData}){
   const setter=key=>(list,extra)=>setData(d=>{const n={...d,[key]:list};return extra?extra(n):n});
   return html`<div class="flex-1 min-h-0 overflow-y-auto">
     <${ListManager} title="Seal types" field="type" placeholder="e.g. 10mm Seal" data=${data} setData=${setData}
-      hint="Seal types offered on Seal crew bookings, in this order. Paving jobs can't pick these. Click the pencil to rename one or set its default binder (binders are listed under Mixes)."
+      hint="Seal types offered on Seal crew bookings, in this order. Paving jobs can't pick these. Click the pencil to rename one or set its default binder."
       items=${sealTypesOf(data)} setItems=${setter('sealTypes')}
-      binderOf=${t=>sealBinderOf(data)[t]||''} binderOptions=${bindersOf(data)}
+      binderOf=${t=>sealBinderOf(data)[t]||''} binderOptions=${sealBindersOf(data)}
       onRenamed=${(d,from,to,ed)=>{const mb={...sealBinderOf(d)};delete mb[from];if(ed&&ed.binder)mb[to]=ed.binder;return {...d,sealBinder:mb}}}
       onRemoved=${(d,t)=>{const mb={...sealBinderOf(d)};delete mb[t];return {...d,sealBinder:mb}}}/>
+    <div class="border-t border-line mx-4"></div>
+    <${ListManager} title="Seal binders" field="binder" placeholder="e.g. C170" data=${data} setData=${setData}
+      hint="Binders offered on Seal crew bookings, in this order. Separate from the asphalt binders under Mixes."
+      items=${sealBindersOf(data)} setItems=${setter('sealBinders')}
+      onRenamed=${(d,from,to)=>({...d,sealBinder:Object.fromEntries(Object.entries(sealBinderOf(d)).map(([k,v])=>[k,v===from?to:v]))})}/>
   </div>`;
 }
 function MixesManager({data,setData}){
@@ -1017,6 +1022,8 @@ const binderForMix=(d,type)=>{const m=mixBinderOf(d);const t=(type||'').trim();
 /* seal products (Resources → Seal): offered on Seal crew bookings instead of asphalt mixes; paving can't pick them */
 const SEAL_TYPES=['Prime','Primerseal','7mm Seal','10mm Seal','14mm Seal'];
 const sealTypesOf=d=>d&&Array.isArray(d.sealTypes)?d.sealTypes:SEAL_TYPES;
+const SEAL_BINDERS=['C170','AMC0','AMC00','S35E','S45R'];
+const sealBindersOf=d=>d&&Array.isArray(d.sealBinders)?d.sealBinders:SEAL_BINDERS;
 const sealBinderOf=d=>d&&d.sealBinder&&typeof d.sealBinder==='object'?d.sealBinder:{};
 const isSealCrew=r=>!!r&&r.type==='crew'&&workKey(r.sub).includes('seal');
 const binderForProduct=(d,crew,type)=>{if(!isSealCrew(crew))return binderForMix(d,type);
@@ -1049,6 +1056,7 @@ function AsphaltShifts({f,set,data}){
   const MIXES=seal?[...new Set([...sealTypesOf(data),...linesTypes(f.shiftData)])]
     :[...new Set([...mixTypesOf(data),...linesTypes(f.shiftData)])].filter(t=>!sealSet.has(t.toLowerCase())||mixTypesOf(data).includes(t));  /* paving can't pick seal products */
   const BF=v=>binderForProduct(data,myCrew,v);
+  const BINDS=seal?sealBindersOf(data):bindersOf(data);
   const tot=qtyTotals(f);
   const sd=f.shiftData||{};
   const night=f.shift==='night';
@@ -1180,8 +1188,8 @@ function AsphaltShifts({f,set,data}){
                       <label class="col-span-2 sm:col-span-1"><span class="sr-only">Shift ${i+1}${n} binder</span>
                         <select id=${`sh-${k}-${j}-b`} class="field field-sm mono" style=${{...ist,color:l.binder?'var(--ink)':'var(--faint)'}} value=${l.binder||''} onChange=${e=>setLine(k,j,{binder:e.target.value})}>
                           <option value="">Binder</option>
-                          ${bindersOf(data).map(b=>html`<option key=${b} value=${b} style=${{color:'var(--ink)'}}>${b}</option>`)}
-                          ${l.binder&&!bindersOf(data).includes(l.binder)&&html`<option value=${l.binder}>${l.binder}</option>`}
+                          ${BINDS.map(b=>html`<option key=${b} value=${b} style=${{color:'var(--ink)'}}>${b}</option>`)}
+                          ${l.binder&&!BINDS.includes(l.binder)&&html`<option value=${l.binder}>${l.binder}</option>`}
                         </select></label>
                       <label><span class="sr-only">Shift ${i+1}${n} tonnes</span>
                         <input id=${`sh-${k}-${j}-t`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist} placeholder="t" value=${l.tonnes??''} onInput=${e=>setLine(k,j,{tonnes:e.target.value})}/></label>
@@ -2495,7 +2503,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
@@ -2568,7 +2576,7 @@ async function pushRows(sb,{upserts,deletes}){
 /* data for a brand-new, empty roster */
 function emptyRoster(){
   return {resources:[{id:'a'+uid(),type:'aplant',name:'Asphalt plant',sub:'Main plant',hue:8,visible:true}],
-    jobs:[],blocks:[],quoteChanges:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},
+    jobs:[],blocks:[],quoteChanges:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],
     sectionOrder:[...DEFAULT_ORDER],orderV:2};
 }
 
