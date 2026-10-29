@@ -1420,9 +1420,9 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
     <${Section} title=${f.kind==='job'?'Job & site':'Details'} id="sec-job">
       ${f.kind==='job'
         ?html`<label class="grid gap-1"><span class="label">Customer</span>
-            <input id="ed-customer" list="customer-list" class="field" placeholder="e.g. CMB, BMD"
-              value=${f._customer??(f.jobId==='__new'?'':(data.jobs.find(j=>j.id===(f.jobId||data.jobs[0]?.id))?.customer||''))} onInput=${e=>set({_customer:e.target.value})}/>
-            <datalist id="customer-list">${[...new Set(data.jobs.map(j=>(j.customer||'').trim()).filter(Boolean))].sort().map(c=>html`<option key=${c} value=${c}></option>`)}</datalist>
+            <${Combo} id="ed-customer" className="field" placeholder="e.g. CMB, BMD" label="Customer"
+              value=${f._customer??(f.jobId==='__new'?'':(data.jobs.find(j=>j.id===(f.jobId||data.jobs[0]?.id))?.customer||''))} onChange=${v=>set({_customer:v})}
+              options=${[...new Set(data.jobs.map(j=>(j.customer||'').trim()).filter(Boolean))].sort()}/>
             <span class="text-[11.5px] text-faint">Saved to the job below, so every booking for that job shows the same customer.</span></label>
           <label class="grid gap-1"><span class="label">Job</span>
             <select id="ed-job" class="field" value=${f.jobId||data.jobs[0]?.id||'__new'} onChange=${e=>{
@@ -1445,12 +1445,12 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label class="grid gap-1"><span class="label">Supervisor</span>
-              <input id="ed-super" class="field" list="dl-staff" placeholder="Name" value=${f.supervisor||''} onInput=${e=>set({supervisor:e.target.value})}/></label>
+              <${Combo} id="ed-super" className="field" label="Supervisor" placeholder="Name" value=${f.supervisor||''} onChange=${v=>set({supervisor:v})} options=${data.resources.filter(r=>r.type==='person').map(p=>p.name)}/></label>
             <label class="grid gap-1"><span class="label">Site contact</span>
               <input id="ed-contact" class="field" placeholder="Name" value=${f.siteContact||''} onInput=${e=>set({siteContact:e.target.value})}/></label>
             <label class="grid gap-1"><span class="label">Contact phone</span>
               <input id="ed-phone" class="field mono" type="tel" placeholder="04xx xxx xxx" value=${f.sitePhone||''} onInput=${e=>set({sitePhone:e.target.value})}/></label>
-            <datalist id="dl-staff">${data.resources.filter(r=>r.type==='person').map(p=>html`<option key=${p.id} value=${p.name}/>`)}</datalist>
+
           </div>
           <label class="grid gap-1"><span class="label">Site address</span>
             <input id="ed-address" class="field" placeholder="Street, suburb, postcode" value=${f.address||''} onInput=${e=>set({address:e.target.value})}/>
@@ -2393,6 +2393,35 @@ function SubsManager({data,setData}){
   </div>`;
 }
 
+/* text box with a dropdown list: type to filter, or press ▾ / the down arrow to see every option,
+   even when the box already has something in it (a plain browser suggestion list hides the others) */
+function Combo({id,value,onChange,options,placeholder,style,className,label,onEnter}){
+  const [open,setOpen]=useState(false);const [all,setAll]=useState(false);const [hi,setHi]=useState(-1);const ref=useRef(null);
+  const v=value||'';const ql=v.trim().toLowerCase();
+  const opts=[...new Set((options||[]).map(o=>String(o||'').trim()).filter(Boolean))];
+  const shown=all||!ql?opts:opts.filter(o=>o.toLowerCase().includes(ql));
+  useEffect(()=>{if(!open)return;const out=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};
+    document.addEventListener('pointerdown',out);return()=>document.removeEventListener('pointerdown',out)},[open]);
+  const pick=o=>{onChange(o);setOpen(false);setAll(false);setHi(-1)};
+  const showAll=()=>{setOpen(true);setAll(true);setHi(Math.max(0,opts.indexOf(v)))};
+  const key=e=>{
+    if(e.key==='ArrowDown'){e.preventDefault();if(!open){showAll();return}setHi(h=>Math.min(shown.length-1,h+1))}
+    else if(e.key==='ArrowUp'){if(open){e.preventDefault();setHi(h=>Math.max(0,h-1))}}
+    else if(e.key==='Enter'){if(open&&hi>=0&&shown[hi]){e.preventDefault();pick(shown[hi])}else if(onEnter){e.preventDefault();setOpen(false);onEnter()}}
+    else if(e.key==='Escape'){if(open){e.preventDefault();e.stopPropagation();setOpen(false)}}
+    else if(e.key==='Tab')setOpen(false)};
+  return html`<div class="relative min-w-0" ref=${ref}>
+    <input id=${id} class=${(className||'field field-sm')} style=${{...(style||{}),paddingRight:opts.length?28:undefined}} placeholder=${placeholder} value=${v} autoComplete="off"
+      role="combobox" aria-expanded=${open} aria-autocomplete="list" aria-label=${label}
+      onInput=${e=>{onChange(e.target.value);setOpen(true);setAll(false);setHi(-1)}} onKeyDown=${key}/>
+    ${opts.length>0&&html`<button type="button" tabindex="-1" class="absolute right-0 top-0 bottom-0 w-7 inline-flex items-center justify-center text-muted hover:text-ink"
+      onPointerDown=${e=>e.preventDefault()} onClick=${()=>{if(open&&all)setOpen(false);else showAll()}} aria-label=${'Show all '+(label||'options')}>${Icon.chevD}</button>`}
+    ${open&&shown.length>0&&html`<ul class="panel absolute left-0 right-0 top-full mt-1 z-40 py-1 max-h-[240px] overflow-y-auto" style=${{minWidth:160}} role="listbox">
+      ${shown.map((o,i)=>html`<li key=${o} role="option" aria-selected=${o===v} class="px-2.5 py-1.5 text-[13px] cursor-pointer truncate"
+        style=${{background:i===hi?'var(--accent-soft)':o===v?'var(--sunken)':'transparent',fontWeight:o===v?600:400}}
+        onPointerDown=${e=>{e.preventDefault();pick(o)}} onPointerEnter=${()=>setHi(i)}>${o}</li>`)}</ul>`}
+  </div>`;
+}
 /* time picker: hour, minutes (5-minute steps) and AM/PM as dropdowns; stores "HH:MM" (24 h) */
 function TimeSelect({id,value,onChange,label,pm}){
   const m=/^(\d{1,2}):(\d{2})/.exec(value||'');const H=m?+m[1]:null,Mi=m?m[2]:'';
@@ -2476,9 +2505,6 @@ function ProgramShifts({f,set,data,part}){
   const TC='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.2fr_1fr_72px_190px_1.1fr_28px] items-center';
   const SC2='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.3fr_1.2fr_164px_28px] items-center';
   return html`<section class="grid gap-4" aria-labelledby="sec-program">
-    <datalist id="dl-truckco">${truckCosOf(data).map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
-    <datalist id="dl-subco">${subCosOf(data).map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
-    <datalist id="dl-loc">${locs.map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
     <div class="flex flex-wrap items-end gap-3">
       <div class="mr-auto"><h3 id="sec-program" class="font-display text-[15px] font-semibold">${part==='trucks'?'Trucks':'Subcontractors'}</h3>
         <div class="text-[12px] text-muted">${part==='trucks'?'Goes on the daily program for each shift. Trucks and locations typed in by hand are added to the lists when you save.':'Goes on the daily program for each shift, with the shift comments. Subcontractors and services typed in by hand are added to the lists when you save.'}</div></div>
@@ -2504,9 +2530,9 @@ function ProgramShifts({f,set,data,part}){
       <div class="text-[12px] text-muted -mt-1">Trucks are grouped by location. Each location has a first truck time and a gap: its trucks follow on in order. Pick a time on a truck to set it by hand. Drag a location by its ⋮⋮ handle to change the order they appear on the daily program.</div>
       ${(()=>{const groups=[];realTrucks.forEach((t,j)=>{const kk=lkey(t);let g=groups.find(x=>x.key===kk);if(!g){g={key:kk,label:(t.loc||'').trim(),items:[]};groups.push(g)}g.items.push({t,j})});
         return groups.map(g=>{const tT=g.items.reduce((a,{t})=>a+truckT(t.w),0);const sw=g.label?locColorOf(data,g.key===(f.address||'').trim().toLowerCase()?'SITE':g.label):'var(--line-strong)';
-          return html`<div key=${'g-'+g.key} data-locbox=${g.key} class="rounded-lg border border-line overflow-hidden"
+          return html`<div key=${'g-'+g.key} data-locbox=${g.key} class="rounded-lg border border-line"
             style=${{opacity:ldrag&&ldrag.key===g.key?.5:1,boxShadow:ldrag&&ldrag.over===g.key&&ldrag.key!==g.key?(ldrag.after?'0 3px 0 var(--accent)':'0 -3px 0 var(--accent)'):'none'}}>
-            <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-2.5 py-2 bg-sunken border-b border-line">
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-2.5 py-2 bg-sunken border-b border-line rounded-t-lg">
               ${groups.length>1&&html`<span role="button" tabindex="-1" class="w-5 h-6 -ml-1 shrink-0 inline-flex items-center justify-center rounded text-faint hover:text-ink hover:bg-surface select-none"
                 style=${{cursor:ldrag?'grabbing':'grab',touchAction:'none'}} title="Drag to change the order of the locations (the daily program follows this order)" aria-label=${'Drag '+(g.label||'no location')}
                 onPointerDown=${e=>lStart(e,g.key)} onPointerMove=${lMove} onPointerUp=${lEnd} onPointerCancel=${()=>setLdrag(null)}>${Icon.grip}</span>`}
@@ -2523,14 +2549,14 @@ function ProgramShifts({f,set,data,part}){
             <div class="px-2.5 py-2 grid gap-1.5">
               <div class=${'hidden sm:grid '+TC}><span class="label">Truck</span><span class="label">Driver</span><span class="label">Weight</span><span class="label">Time</span><span class="label">Location</span><span></span></div>
               ${g.items.map(({t,j})=>html`<div key=${j} class=${TC}>
-                <input id=${`pg-t${j}-co`} class="field field-sm" style=${fs} list="dl-truckco" placeholder="Truck" value=${t.co||''} onInput=${e=>setT(j,{co:e.target.value})} aria-label=${`Truck ${j+1} company`}/>
+                <${Combo} id=${`pg-t${j}-co`} style=${fs} placeholder="Truck" value=${t.co||''} onChange=${v=>setT(j,{co:v})} label=${`Truck ${j+1} company`} options=${truckCosOf(data)}/>
                 <input id=${`pg-t${j}-dr`} class="field field-sm" style=${fs} placeholder="Driver" value=${t.driver||''} onInput=${e=>setT(j,{driver:e.target.value})} aria-label=${`Truck ${j+1} driver`}/>
                 <select id=${`pg-t${j}-w`} class="field field-sm mono" style=${{...fs,color:t.w?'var(--ink)':'var(--faint)'}} value=${t.w||''} onChange=${e=>setT(j,{w:e.target.value})} aria-label=${`Truck ${j+1} weight`}>
                   <option value="">T</option>${TRUCK_WEIGHTS.map(w=>html`<option key=${w} value=${w} style=${{color:'var(--ink)'}}>${w}</option>`)}
                   ${t.w&&!TRUCK_WEIGHTS.includes(t.w)&&html`<option value=${t.w}>${t.w}</option>`}</select>
                 <span class="flex items-center gap-1 min-w-0"><span class="flex-1 min-w-0"><${TimeSelect} id=${`pg-t${j}-time`} label=${`Truck ${j+1} time`} value=${t.time||''} pm=${night} onChange=${v=>setT(j,{time:v})}/></span>
                   ${t.manual?html`<button type="button" class="w-6 h-6 shrink-0 inline-flex items-center justify-center rounded text-[13px] text-muted hover:text-ink hover:bg-sunken" onClick=${()=>autoTime(j)} title="Set by hand. Click to go back to the location's timing" aria-label=${`Truck ${j+1}: go back to automatic time`}>↺</button>`:html`<span class="w-6 shrink-0 text-[10px] text-faint text-center" title="Timed from the location">auto</span>`}</span>
-                <input id=${`pg-t${j}-loc`} class="field field-sm" style=${fs} list="dl-loc" placeholder="Location" value=${t.loc||''} onInput=${e=>setT(j,{loc:e.target.value})} aria-label=${`Truck ${j+1} location`}/>
+                <${Combo} id=${`pg-t${j}-loc`} style=${fs} placeholder="Location" value=${t.loc||''} onChange=${v=>setT(j,{loc:v})} label=${`Truck ${j+1} location`} options=${locs}/>
                 <button type="button" class=${iconX} onClick=${()=>removeTruck(j)} aria-label=${`Remove truck ${j+1}`} title="Remove">${Icon.x}</button>
               </div>`)}
               <div class="flex flex-wrap gap-3 pt-0.5">
@@ -2541,8 +2567,7 @@ function ProgramShifts({f,set,data,part}){
           </div>`})})()}
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-[12px] text-muted">${realTrucks.length?'Add trucks at another location':'Add trucks at'}</span>
-        <input id="pg-newloc" class="field field-sm" style=${{...fs,width:200}} list="dl-loc" placeholder="Location, e.g. SCA" value=${newLoc} onInput=${e=>setNewLoc(e.target.value)} aria-label="Location for new trucks"
-          onKeyDown=${e=>{if(e.key==='Enter'){e.preventDefault();addNewLoc()}}}/>
+        <span style=${{width:210}}><${Combo} id="pg-newloc" style=${fs} placeholder="Location, e.g. SCA" value=${newLoc} onChange=${setNewLoc} label="Location for new trucks" options=${locs} onEnter=${addNewLoc}/></span>
         <button type="button" class="btn" style=${{height:30}} disabled=${!newLoc.trim()} onClick=${addNewLoc}>${Icon.plus} Add</button>
       </div>
     </div>`}
@@ -2551,9 +2576,8 @@ function ProgramShifts({f,set,data,part}){
       <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Subcontractors</span><span class="flex-1 h-px bg-line self-center"></span></div>
       <div class=${'hidden sm:grid '+SC2}><span class="label">Subcontractor</span><span class="label">Service</span><span class="label">Start time</span><span></span></div>
       ${subs.map((s,j)=>html`<div key=${j} class=${SC2}>
-        <input id=${`pg-s${j}-n`} class="field field-sm" style=${fs} list="dl-subco" placeholder="Subcontractor" value=${s.name||''} onInput=${e=>setS(j,{name:e.target.value})} aria-label=${`Subcontractor ${j+1}`}/>
-        <input id=${`pg-s${j}-i`} class="field field-sm" style=${fs} list=${`dl-svc-${j}`} placeholder=${servicesFor(data,s.name).length?'Pick or type a service':'Type the service'} value=${s.info||''} onInput=${e=>setS(j,{info:e.target.value})} aria-label=${`Subcontractor ${j+1} service`}/>
-        <datalist id=${`dl-svc-${j}`}>${servicesFor(data,s.name).map(v=>html`<option key=${v} value=${v}/>`)}</datalist>
+        <${Combo} id=${`pg-s${j}-n`} style=${fs} placeholder="Subcontractor" value=${s.name||''} onChange=${v=>setS(j,{name:v})} label=${`Subcontractor ${j+1}`} options=${subCosOf(data)}/>
+        <${Combo} id=${`pg-s${j}-i`} style=${fs} placeholder=${servicesFor(data,s.name).length?'Pick or type a service':'Type the service'} value=${s.info||''} onChange=${v=>setS(j,{info:v})} label=${`Subcontractor ${j+1} service`} options=${servicesFor(data,s.name)}/>
         <${TimeSelect} id=${`pg-s${j}-t`} label=${`Subcontractor ${j+1} start time`} value=${s.time||''} pm=${night} onChange=${v=>setS(j,{time:v})}/>
         <button type="button" class=${iconX} onClick=${()=>upd({subs:subs.filter((_,x)=>x!==j)})} aria-label=${`Remove subcontractor ${j+1}`} title="Remove">${Icon.x}</button>
       </div>`)}
