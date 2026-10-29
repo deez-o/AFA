@@ -13,7 +13,7 @@ const isWeekend=d=>d.getDay()===0||d.getDay()===6;
    (older bookings only have the single weekendShifts switch, which covers both days) */
 const satOn=b=>b.satShift!==undefined?!!b.satShift:!!b.weekendShifts;
 const sunOn=b=>b.sunShift!==undefined?!!b.sunShift:!!b.weekendShifts;
-const worksOn=(b,d)=>d.getDay()===6?satOn(b):d.getDay()===0?sunOn(b):true;
+const worksOn=(b,d)=>b.offDays&&b.offDays.includes(iso(d))?false:d.getDay()===6?satOn(b):d.getDay()===0?sunOn(b):true;
 const TODAY=(()=>{const t=new Date();t.setHours(12,0,0,0);return t})();
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const WD=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -1026,7 +1026,8 @@ function AsphaltShifts({f,set,data}){
   const shown=k=>{const ls=linesOf(sd[k]);return ls.length?ls:[BLANK_LINE]};
   const put=(k,lines)=>set({shiftData:{...sd,[k]:{...shiftBase(sd[k]),lines}}});
   const setCrew=(k,id)=>{const q={...shiftBase(sd[k]),lines:linesOf(sd[k])};if(id)q.crewId=id;else delete q.crewId;set({shiftData:{...sd,[k]:q}})};
-  const otherCrews=data.resources.filter(r=>r.type==='crew'&&r.id!==f.resourceId);
+  const ownCrew=data.resources.find(r=>r.id===f.resourceId);
+  const otherCrews=data.resources.filter(r=>r.type==='crew'&&r.id!==f.resourceId&&(!ownCrew||workKey(r.sub)===workKey(ownCrew.sub)));  /* same section only */
   const setExbin=(k,v)=>{const q={...shiftBase(sd[k]),lines:linesOf(sd[k])};if(v)q.exbin=v;else delete q.exbin;set({shiftData:{...sd,[k]:q}})};
   const crewRes=(data?.resources||[]).find(r=>r.id===f.resourceId);
   const plantDown=k=>usesPlant(crewRes)?plantMaintOn(data,data.blocks,k,f.shift||'day'):[];
@@ -1059,6 +1060,11 @@ function AsphaltShifts({f,set,data}){
           <input id="ed-sun" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${sunOn(f)} onChange=${e=>set({sunShift:e.target.checked,satShift:satOn(f)})}/>
           Sunday</label></span>
     </div>
+    ${(f.offDays||[]).filter(k=>k>=f.start&&k<=f.end).length>0&&html`<div class="flex flex-wrap items-center gap-1.5 -mt-1 text-[12px]">
+      <span class="text-muted">Days off:</span>
+      ${(f.offDays||[]).filter(k=>k>=f.start&&k<=f.end).map(k=>html`<button key=${k} type="button" class="inline-flex items-center gap-1 rounded-md border border-line bg-sunken px-1.5 py-0.5 hover:text-ink"
+        title="Make this day a shift again" onClick=${()=>{const o=(f.offDays||[]).filter(x=>x!==k);set({offDays:o.length?o:undefined})}}>${WD[parse(k).getDay()]} ${fmtShort(parse(k))} <span aria-hidden="true">×</span><span class="sr-only">make a shift again</span></button>`)}
+    </div>`}
 
     <div class="rounded-xl border border-line bg-sunken p-3 grid gap-2.5">
       <div class="grid grid-cols-2 gap-3">
@@ -2058,7 +2064,7 @@ function applyTeamCalImport(d,{bookings,crewMap,customers}){
 /* ---------- merging bookings that were split over a weekend ---------- */
 /* Before Saturday/Sunday could be switched per booking, one job was often entered as several bookings
    (e.g. Wed–Fri, then Mon–Tue). Bookings for the same job, crew and shift whose gap is only weekend days
-   (or no gap at all) are joined into one — paving crews only; a weekend day stays a shift only if one of the old bookings worked it. */
+   (or no gap at all; a gap may be Fri–Sun) are joined into one — paving crews only; gap weekdays become days off; a weekend day stays a shift only if one of the old bookings worked it. */
 function mergePlan(data){
   const groups=new Map();
   const pav=new Set(data.resources.filter(isPavingCrew).map(r=>r.id));   /* paving crews only */
@@ -2070,7 +2076,7 @@ function mergePlan(data){
     let run=[list[0]],endMax=list[0].end;
     const flush=()=>{if(run.length>1)plans.push(run)};
     for(let i=1;i<list.length;i++){const b=list[i];let ok=true;
-      for(let d=addDays(parse(endMax),1);iso(d)<b.start;d=addDays(d,1))if(!isWeekend(d)){ok=false;break}
+      for(let d=addDays(parse(endMax),1);iso(d)<b.start;d=addDays(d,1))if(!isWeekend(d)&&d.getDay()!==5){ok=false;break}
       if(ok){run.push(b);if(b.end>endMax)endMax=b.end}else{flush();run=[b];endMax=b.end}}
     flush()});
   return plans.sort((a,b)=>a[0].start<b[0].start?-1:1);
@@ -2086,6 +2092,11 @@ function mergeRun(run){
     plantIds:[...new Set(run.flatMap(b=>b.plantIds||[]))],address:pick('address'),quoteNo:pick('quoteNo'),projectNo:pick('projectNo'),notes};
   if(Object.keys(sd).length)out.shiftData=sd;else delete out.shiftData;
   if(keys.length)out.importKeys=keys;
+  /* weekdays in a gap that no booking covered become days off; earlier days off stay */
+  const covered=k=>run.some(b=>k>=b.start&&k<=b.end&&worksOn(b,parse(k)));
+  const off=new Set(run.flatMap(b=>b.offDays||[]));
+  for(let d=parse(start);iso(d)<=end;d=addDays(d,1)){const k=iso(d);if(!isWeekend(d)&&!covered(k))off.add(k)}
+  if(off.size)out.offDays=[...off].sort();else delete out.offDays;
   return out;
 }
 function MergeSplits({data,setData,onClose,notify}){
@@ -2104,20 +2115,20 @@ function MergeSplits({data,setData,onClose,notify}){
       <div class="px-5 pt-5 pb-3 border-b border-line flex items-start gap-3">
         <div class="min-w-0 flex-1">
           <div id="mg-title" class="font-display text-[18px] font-semibold">Merge split bookings</div>
-          <div class="text-[12.5px] text-muted">Paving crew bookings for the same job, crew and shift that only have a weekend (or nothing) between them. Weekend days nobody booked are greyed out on the merged booking.</div>
+          <div class="text-[12.5px] text-muted">Paving crew bookings for the same job, crew and shift with only Friday–Sunday (or nothing) between them. Gap days nobody booked are greyed out.</div>
         </div>
         <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button>
       </div>
       <div class="overflow-y-auto p-3 grid gap-2">
         ${plans.length===0&&html`<div class="text-[13px] text-muted p-3">Nothing to merge. No paving job has bookings split over a weekend.</div>`}
         ${plans.map((r,i)=>{const m=mergeRun(r);const j=data.jobs.find(x=>x.id=== r[0].jobId);const crew=data.resources.find(x=>x.id===r[0].resourceId);
-          const wk=[!m.satShift&&'Sat',!m.sunShift&&'Sun'].filter(Boolean);
+          const wk=[!m.satShift&&'Sat',!m.sunShift&&'Sun'].filter(Boolean);const offs=(m.offDays||[]).map(k=>`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`);
           return html`<label key=${r[0].id} class="flex items-start gap-3 rounded-lg border border-line px-3 py-2.5 cursor-pointer hover:bg-sunken">
             <input type="checkbox" class="w-4 h-4 mt-0.5" style=${{accentColor:'var(--accent)'}} checked=${on[i]} onChange=${e=>setOn(o=>o.map((v,k)=>k===i?e.target.checked:v))}/>
             <span class="min-w-0 grid gap-0.5">
               <span class="text-[13px] font-medium truncate">${jobLabel(j)}</span>
               <span class="text-[12px] text-muted">${crew?crew.name:''}${r[0].shift==='night'?' · night':''} · ${r.map(rng).join('  +  ')}</span>
-              <span class="text-[12px]">→ <span class="font-medium">${rng(m)}</span>${wk.length?html`<span class="text-muted"> · ${wk.join(' & ')} greyed out</span>`:''}</span>
+              <span class="text-[12px]">→ <span class="font-medium">${rng(m)}</span>${wk.length?html`<span class="text-muted"> · ${wk.join(' & ')} greyed out</span>`:''}${offs.length?html`<span class="text-muted"> · day off ${offs.join(', ')}</span>`:''}</span>
             </span></label>`})}
       </div>
       <div class="px-5 py-3 border-t border-line flex items-center gap-2">
@@ -2360,7 +2371,8 @@ function App({boot,live}){
   const onMove=b0=>{
     const prev=data.blocks.find(x=>x.id===b0.id);
     const dx=prev?diffDays(parse(prev.start),parse(b0.start)):0;
-    const b=b0.shiftData&&dx?{...b0,shiftData:rekeyShifts(b0.shiftData,dx)}:b0;
+    let b=b0.shiftData&&dx?{...b0,shiftData:rekeyShifts(b0.shiftData,dx)}:b0;
+    if(dx&&b.offDays)b={...b,offDays:b.offDays.map(k=>iso(addDays(parse(k),dx)))};
     setData(d=>({...d,blocks:d.blocks.map(x=>x.id===b.id?b:x)}));
     const who=data.resources.find(r=>r.id===b.resourceId)?.name;
     setToast(`Moved${prev&&prev.resourceId!==b.resourceId?' to '+who:''} · ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`);
