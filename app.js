@@ -1053,9 +1053,9 @@ const binderForProduct=(d,crew,type)=>{if(!isSealCrew(crew))return binderForMix(
 /* a mix is its asphalt type plus binder, e.g. "AC14 · C320" */
 const mixLabel=l=>((l.type||'').trim()||'No type')+(l.binder?' · '+l.binder:'');
 const linesOf=q=>!q?[]:Array.isArray(q.lines)?q.lines:[q];
-const lineHas=l=>l&&((l.type||'').trim()||l.binder||filledNum(l.tonnes)||filledNum(l.area)||filledNum(l.depth));
+const lineHas=l=>l&&((l.type||'').trim()||l.binder||filledNum(l.tonnes)||filledNum(l.area)||filledNum(l.depth)||(l.stone||'').trim()||filledNum(l.spray)||filledNum(l.spread));
 const hasQty=q=>linesOf(q).some(lineHas);
-const cleanLine=l=>({type:(l.type||'').trim(),binder:l.binder||'',...(l.virgin?{virgin:true}:{}),tonnes:filledNum(l.tonnes)?num(l.tonnes):'',area:filledNum(l.area)?num(l.area):'',depth:filledNum(l.depth)?num(l.depth):''});
+const cleanLine=l=>({type:(l.type||'').trim(),binder:l.binder||'',...(l.virgin?{virgin:true}:{}),tonnes:filledNum(l.tonnes)?num(l.tonnes):'',area:filledNum(l.area)?num(l.area):'',depth:filledNum(l.depth)?num(l.depth):'',...((l.stone||'').trim()?{stone:l.stone.trim()}:{}),...(filledNum(l.spray)?{spray:num(l.spray)}:{}),...(filledNum(l.spread)?{spread:num(l.spread)}:{})});
 const fmtN=n=>n.toLocaleString('en-AU',{maximumFractionDigits:1});
 function qtyTotals(b){
   const dates=shiftDates(b);const sd=b.shiftData||{};
@@ -1071,7 +1071,7 @@ function qtyTotals(b){
 const rekeyShifts=(sd,dx)=>sd&&dx?Object.fromEntries(Object.entries(sd).map(([k,v])=>[iso(addDays(parse(k),dx)),v])):sd;
 
 const COLS='grid-cols-[1fr_1fr_1fr_28px] sm:grid-cols-[1fr_92px_80px_88px_76px_28px]';
-const SEAL_COLS='grid-cols-[1fr_1fr_28px] sm:grid-cols-[1fr_110px_100px_28px]';  /* seal: type, binder, area */
+const SEAL_COLS='grid-cols-[1fr_1fr_28px] sm:grid-cols-[1fr_92px_84px_76px_76px_80px_28px]';  /* seal: type, binder, stone, area, spray rate, spread rate */
 function AsphaltShifts({f,set,data}){
   /* list = company mixes + any new ones typed in this booking (so other lines can pick them straight away) */
   const myCrew=data.resources.find(r=>r.id===f.resourceId);const seal=isSealCrew(myCrew);
@@ -1151,7 +1151,7 @@ function AsphaltShifts({f,set,data}){
           <div class="max-h-[340px] overflow-y-auto">
             <div class="hidden sm:grid grid-cols-[118px_1fr] gap-2 px-2.5 py-1.5 bg-sunken border-b border-line sticky top-0 z-[1]">
               <span class="label">Shift</span>
-              <div class=${'grid gap-2 '+CO}><span class="label">${seal?'Seal type':'Asphalt type'}</span><span class="label">Binder</span>${!seal&&html`<span class="label">Tonnes</span>`}<span class="label">Area m²</span>${!seal&&html`<span class="label">Depth mm</span>`}<span></span></div>
+              <div class=${'grid gap-2 '+CO}><span class="label">${seal?'Seal type':'Asphalt type'}</span><span class="label">Binder</span>${seal&&html`<span class="label">Stone</span>`}${!seal&&html`<span class="label">Tonnes</span>`}<span class="label">Area m²</span>${!seal&&html`<span class="label">Depth mm</span>`}${seal&&html`<span class="label" title="Bitumen spray rate, litres per m²">Spray L/m²</span><span class="label" title="Stone spread rate, m² per m³">Spread m²/m³</span>`}<span></span></div>
             </div>
             ${tot.dates.map((k,i)=>{
               const ls=shown(k);const d=parse(k);
@@ -1215,10 +1215,16 @@ function AsphaltShifts({f,set,data}){
                           ${BINDS.map(b=>html`<option key=${b} value=${b} style=${{color:'var(--ink)'}}>${b}</option>`)}
                           ${l.binder&&!BINDS.includes(l.binder)&&html`<option value=${l.binder}>${l.binder}</option>`}
                         </select></label>
+                      ${seal&&html`<label><span class="sr-only">Shift ${i+1}${n} stone</span>
+                        <input id=${`sh-${k}-${j}-st`} class="field field-sm" style=${ist} placeholder="Stone" value=${l.stone||''} onInput=${e=>setLine(k,j,{stone:e.target.value})}/></label>`}
                       ${!seal&&html`<label><span class="sr-only">Shift ${i+1}${n} tonnes</span>
                         <input id=${`sh-${k}-${j}-t`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist} placeholder="t" value=${l.tonnes??''} onInput=${e=>setLine(k,j,{tonnes:e.target.value})}/></label>`}
                       <label><span class="sr-only">Shift ${i+1}${n} area in square metres</span>
                         <input id=${`sh-${k}-${j}-a`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist} placeholder="m²" value=${l.area??''} onInput=${e=>setLine(k,j,{area:e.target.value})}/></label>
+                      ${seal&&html`<label><span class="sr-only">Shift ${i+1}${n} bitumen spray rate in litres per square metre</span>
+                        <input id=${`sh-${k}-${j}-sp`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist} placeholder="L/m²" title="Bitumen spray rate (L/m²)" value=${l.spray??''} onInput=${e=>setLine(k,j,{spray:e.target.value})}/></label>
+                      <label><span class="sr-only">Shift ${i+1}${n} stone spread rate in square metres per cubic metre</span>
+                        <input id=${`sh-${k}-${j}-sr`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist} placeholder="m²/m³" title="Stone spread rate (m²/m³)" value=${l.spread??''} onInput=${e=>setLine(k,j,{spread:e.target.value})}/></label>`}
                       ${!seal&&html`<label><span class="sr-only">Shift ${i+1}${n} depth in millimetres</span>
                         <input id=${`sh-${k}-${j}-d`} type="number" inputmode="decimal" min="0" step="any" class=${inp} style=${ist}
                           placeholder=${h!=null?`${h} mm`:'mm'} title=${h!=null?`Works out at about ${h} mm from the tonnes and area (2.4 t/m³)`:'Compacted depth in mm'}
@@ -1248,8 +1254,9 @@ const BOOKING_TABS=[
   {id:'quantities',label:(f,d)=>isSealCrew(d.resources.find(r=>r.id===f.resourceId))?'Plant, Seal & Quantities':'Plant, Asphalt & Quantities',applies:f=>f.kind==='job',
     badge:(f,d)=>{const q=qtyTotals(f);if(isSealCrew(d.resources.find(r=>r.id===f.resourceId)))return q.area?`${fmtN(q.area)} m²`:null;return q.tonnes?`${fmtN(q.tonnes)} t`:null},
     render:p=>html`<div class="grid gap-6"><${PlantPicker} f=${p.f} set=${p.set} data=${p.data}/><div class="h-px bg-line"></div><${AsphaltShifts} f=${p.f} set=${p.set} data=${p.data}/></div>`},
-  {id:'program',label:'Trucks & Subcontractors',applies:f=>f.kind==='job',
-    badge:f=>{const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&q.trucks)||[]).filter(truckHas).length,0);return n?`${n}`:null},
+  {id:'program',label:(f,d)=>isSealCrew(d.resources.find(r=>r.id===f.resourceId))?'Subcontractors':'Trucks & Subcontractors',applies:f=>f.kind==='job',
+    badge:(f,d)=>{const seal=isSealCrew(d.resources.find(r=>r.id===f.resourceId));
+      const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&(seal?q.subs:q.trucks))||[]).filter(seal?subHas:truckHas).length,0);return n?`${n}`:null},
     render:p=>html`<${ProgramShifts} f=${p.f} set=${p.set} data=${p.data}/>`},
 ];
 
@@ -1924,7 +1931,7 @@ function bookingDiff(a,b,p,x,rname,jname,when){
   oa.filter(k=>!ob.includes(k)).forEach(k=>L.push(`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: now a shift`));
   /* quantities, shift by shift */
   const sa=p.shiftData||{},sb=x.shiftData||{};
-  const lineTxt=l=>[(l.type||'').trim(),l.binder,l.virgin?'virgin':'',num(l.tonnes)?`${fmtN(num(l.tonnes))} t`:'',num(l.area)?`${fmtN(num(l.area))} m²`:'',num(l.depth)?`${fmtN(num(l.depth))} mm`:''].filter(Boolean).join(' ');
+  const lineTxt=l=>[(l.type||'').trim(),l.binder,l.virgin?'virgin':'',num(l.tonnes)?`${fmtN(num(l.tonnes))} t`:'',num(l.area)?`${fmtN(num(l.area))} m²`:'',num(l.depth)?`${fmtN(num(l.depth))} mm`:'',(l.stone||'').trim()?`stone ${l.stone.trim()}`:'',num(l.spray)?`spray ${fmtN(num(l.spray))} L/m²`:'',num(l.spread)?`spread ${fmtN(num(l.spread))} m²/m³`:''].filter(Boolean).join(' ');
   const qTxt=q=>linesOf(q).filter(lineHas).map(lineTxt).join(' + ');
   [...new Set([...Object.keys(sa),...Object.keys(sb)])].sort().forEach(k=>{const qa=sa[k],qb=sb[k];if(same(qa,qb))return;
     const day=`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`;
@@ -2304,6 +2311,7 @@ function ProgramShifts({f,set,data}){
   const copyAll=()=>{const next={...sd};dates.forEach(d=>{if(d===k)return;const o=sd[d]||{};next[d]={...shiftBase(o),lines:linesOnly(o),...prog(q)}});set({shiftData:next})};
   const tl=trucks.filter(truckHas);const totT=tl.reduce((a,t)=>a+truckT(t.w),0);
   const night=f.shift==='night';
+  const sealJob=isSealCrew(data.resources.find(r=>r.id===f.resourceId));   /* seal jobs: subcontractors only, no trucks */
   const locs=[...new Set([...programLocsOf(data),...(f.address?[f.address]:[])])];
   const fs={height:30,fontSize:13};const iconX='w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken';
   const TC='grid gap-2 grid-cols-[22px_1fr_1fr_28px] sm:grid-cols-[22px_1.2fr_1fr_72px_164px_1.1fr_28px] items-center';
@@ -2313,7 +2321,7 @@ function ProgramShifts({f,set,data}){
     <datalist id="dl-subco">${subCosOf(data).map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
     <datalist id="dl-loc">${locs.map(t=>html`<option key=${t} value=${t}/>`)}</datalist>
     <div class="flex flex-wrap items-end gap-3">
-      <div class="mr-auto"><h3 id="sec-program" class="font-display text-[15px] font-semibold">Trucks & subcontractors</h3>
+      <div class="mr-auto"><h3 id="sec-program" class="font-display text-[15px] font-semibold">${sealJob?'Subcontractors':'Trucks & subcontractors'}</h3>
         <div class="text-[12px] text-muted">Goes on the daily program for each shift. Plant onsite comes from the mobile plant on this booking. Trucks, subcontractors and services typed in by hand are added to the lists when you save.</div></div>
       <label class="grid gap-1"><span class="label">Shift</span>
         <select id="pg-shift" class="field field-sm" style=${{...fs,width:'auto'}} value=${k} onChange=${e=>setSel(e.target.value)}>
@@ -2327,7 +2335,7 @@ function ProgramShifts({f,set,data}){
       ${dates.length>1&&html`<button type="button" class="btn btn-ghost text-muted" style=${{height:28}} onClick=${copyAll} title="Replace the trucks, subcontractors, start time and comments on every other shift with this shift's">Copy this shift to all shifts</button>`}
     </div>
 
-    <div class="grid gap-1.5">
+    ${!sealJob&&html`<div class="grid gap-1.5">
       <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Trucks</span><span class="text-[12px] text-muted tnum">${tl.length} · ${fmtN(totT)}T</span><span class="flex-1 h-px bg-line self-center"></span></div>
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted">
         <span>${paceOf(trucks)>=0?html`Trucks after the <span class="font-semibold text-ink">interval start</span> truck (◉) are spaced every`:html`Every truck starts with the first truck. Tick ◉ on the truck that <span class="font-semibold text-ink">starts the interval</span>; trucks after it are spaced every`}</span>
@@ -2352,7 +2360,7 @@ function ProgramShifts({f,set,data}){
         <button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>{const l=trucks.filter(truckHas);upd({trucks:[...l,{time:truckDefault(l,l.length)}]})}}>${Icon.plus} Add truck</button>
         ${truckHas(trucks[trucks.length-1])&&html`<button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>{const {pace,...last}=trucks[trucks.length-1];upd({trucks:[...trucks,{...last,driver:'',time:truckDefault(trucks,trucks.length)}]})}}>${Icon.plus} Same truck again</button>`}
       </div>
-    </div>
+    </div>`}
 
     <div class="grid gap-1.5">
       <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Subcontractors</span><span class="flex-1 h-px bg-line self-center"></span></div>
@@ -2388,10 +2396,11 @@ function programEntries(data,k){
     .sort((x,y)=>(order.get(x.crewId)??999)-(order.get(y.crewId)??999)||(x.b.shift==='night')-(y.b.shift==='night'));
 }
 const PLANT_GROUPS=[['Pavers',/paver/i],['Steel rollers',/steel|tandem|drum|smooth/i],['Multi rollers',/multi|pneumatic|tyre|tire|rubber/i],['Bobcat',/bobcat|skid|loader|posi/i]];
-function plantGroups(machines){
-  const g=PLANT_GROUPS.map(([l])=>({label:l,items:[]}));const extra={label:'Additional',items:[]};
-  machines.forEach(m=>{const t=`${m.name} ${m.sub||''}`;const i=PLANT_GROUPS.findIndex(([,re])=>re.test(t));
-    (i>=0?g[i]:(/roller/i.test(t)?g[1]:extra)).items.push(m)});
+const SEAL_PLANT_GROUPS=[['Sprayer',/spray/i],['Roller',/roller/i],['Broom',/broom|sweep/i],['Bobcat',/bobcat|skid|loader|posi/i]];
+function plantGroups(machines,seal){
+  const G=seal?SEAL_PLANT_GROUPS:PLANT_GROUPS;const g=G.map(([l])=>({label:l,items:[]}));const extra={label:'Additional',items:[]};
+  machines.forEach(m=>{const t=`${m.name} ${m.sub||''}`;const i=G.findIndex(([,re])=>re.test(t));
+    (i>=0?g[i]:(!seal&&/roller/i.test(t)?g[1]:extra)).items.push(m)});
   return [...g,extra];
 }
 const AFA_RED=[155,10,30],AFA_DARK=[58,58,58],AFA_GRID=[160,160,160];
@@ -2443,7 +2452,7 @@ function drawProgram(doc,data,{b,k,crewId}){
   /* left: plant onsite */
   ly+=3;ly=head(LX,ly,LW,[['PLANT ONSITE',LW]]);
   const machines=(b.plantIds||[]).map(id=>data.resources.find(r=>r.id===id)).filter(Boolean);
-  plantGroups(machines).forEach(g=>{const its=g.items.length?g.items:[null];
+  plantGroups(machines,seal).forEach(g=>{const its=g.items.length?g.items:[null];
     for(let s=0;s<its.length;s+=4){const v=[{t:s?'':g.label+':',bold:true,align:'left',size:6.6}];
       for(let c=0;c<4;c++){const m=its[s+c];v.push(m?{t:g.label==='Additional'&&m.sub?`${m.name} ${m.sub}`:m.name,bold:true,size:6.6}:'')}
       ly=row(LX,ly,[['',24],['',17.5],['',17.5],['',17.5],['',17.5]],v)}});
@@ -2459,7 +2468,7 @@ function drawProgram(doc,data,{b,k,crewId}){
   const rapOf=t=>num(((data.mixRap)||{})[(t||'').trim()]);
   const supplier=q.exbin?(q.exbin.supplier||'EXBIN'):'AFA';
   const matRows=seal
-    ?[['Job location:',null],['SUPPLIER :',()=>supplier],['SEAL TYPE :',l=>l.type],['BINDER :',l=>l.binder],['APPROX AREA (M2) :',l=>num(l.area)?fmtN(num(l.area)):'']]
+    ?[['Job location:',null],['SUPPLIER :',()=>supplier],['SEAL TYPE :',l=>l.type],['BINDER :',l=>l.binder],['STONE :',l=>l.stone||''],['APPROX AREA (M2) :',l=>num(l.area)?fmtN(num(l.area)):'']]
     :[['Job location:',null],['SUPPLIER :',()=>supplier],['MIX :',l=>{const r=rapOf(l.type);return (l.type||'')+(r&&!l.virgin?` ${fmtN(r)}% RAP`:'')}],['BINDER :',l=>l.binder],
       ['APPROX TONNAGE :',l=>num(l.tonnes)?fmtN(num(l.tonnes)):''],['APPROX AREA (M2) :',l=>num(l.area)?fmtN(num(l.area)):''],['DEPTH (mm) :',l=>num(l.depth)?fmtN(num(l.depth)):'']];
   matRows.forEach(([l,fn])=>{
@@ -2467,8 +2476,12 @@ function drawProgram(doc,data,{b,k,crewId}){
     ry2=row(RX,ry2,vc,[{t:l,align:'right',size:6.6},...[0,1,2].map(i=>L3[i]?{t:fn(L3[i]),bold:true,...(l==='SUPPLIER :'?{fill:AFA_RED,color:[255,255,255]}:{})}:'')])});
   if(lines.length>3){cell(RX,ry2,RW,5,`+ ${lines.length-3} more line${lines.length-3===1?'':'s'} - see the booking`,{border:false,size:6.4,color:[110,110,110]});ry2+=5}
 
+  /* right (seal): spray & spread rates per product, instead of trucks */
+  if(seal){ry2+=3;const RC=[['PRODUCT',20],['BITUMEN',15],['SPRAY L/M2',18],['STONE',18],['SPREAD M2/M3',23]];ry2=head(RX,ry2,RW,RC);
+    const rv=lines.map(l=>[{t:l.type,bold:true},l.binder||'',{t:num(l.spray)?fmtN(num(l.spray)):'',bold:true,color:AFA_RED},l.stone||'',{t:num(l.spread)?fmtN(num(l.spread)):'',bold:true,color:AFA_RED}]);
+    while(rv.length<6)rv.push(['','','','','']);rv.slice(0,12).forEach(v=>{ry2=row(RX,ry2,RC,v)})}
   /* right: trucks */
-  ry2+=3;const TCo=[['TRUCKS',27],['DRIVER',16],['WEIGHT',12],['TIME',14],['LOCATION',25]];ry2=head(RX,ry2,RW,TCo);
+  if(!seal){ry2+=3;const TCo=[['TRUCKS',27],['DRIVER',16],['WEIGHT',12],['TIME',14],['LOCATION',25]];ry2=head(RX,ry2,RW,TCo);
   const tr=(q.trucks||[]).filter(truckHas);
   /* grouped by location (in order of first appearance, times in order within a group), a blank row between groups */
   const groups=[];tr.forEach(t=>{const key=(t.loc||'').trim().toLowerCase();let g=groups.find(x=>x.key===key);if(!g){g={key,items:[]};groups.push(g)}g.items.push(t)});
@@ -2486,7 +2499,7 @@ function drawProgram(doc,data,{b,k,crewId}){
   if(tv.length>24)tv.length=24;
   while(tv.length<12)tv.push(['','','','','']);tv.forEach(v=>{ry2=row(RX,ry2,TCo,v)});
   const tot=tr.reduce((a,t)=>a+truckT(t.w),0);
-  ry2=row(RX,ry2,TCo,['',{t:'Total:',bold:true,align:'right'},{t:tot?`${fmtN(tot)}T`:'',bold:true},'',''],5.4);
+  ry2=row(RX,ry2,TCo,['',{t:'Total:',bold:true,align:'right'},{t:tot?`${fmtN(tot)}T`:'',bold:true},'',''],5.4);}
 
   /* comments + footer */
   let y=Math.max(ly,ry2)+4;
@@ -2548,12 +2561,14 @@ function DailyProgramDialog({data,onClose,notify}){
         ${entries.length===0&&html`<div class="text-[13px] text-muted p-3 text-center">No crew jobs on this day.</div>`}
         ${entries.map(e=>{const j=data.jobs.find(x=>x.id===e.b.jobId);const crew=data.resources.find(r=>r.id===e.crewId);const q=(e.b.shiftData||{})[e.k]||{};
           const tr=(q.trucks||[]).filter(truckHas).length,sb=(q.subs||[]).filter(subHas).length,pl=(e.b.plantIds||[]).length;
+          const sealE=isSealCrew(crew)||isSealCrew(data.resources.find(r=>r.id===e.b.resourceId));
           return html`<label key=${key(e)} class="flex items-start gap-3 rounded-lg border border-line px-3 py-2.5 cursor-pointer hover:bg-sunken">
             <input type="checkbox" class="w-4 h-4 mt-0.5" style=${{accentColor:'var(--accent)'}} checked=${!off[key(e)]} onChange=${ev=>setOff(o=>({...o,[key(e)]:!ev.target.checked}))}/>
             <span class="min-w-0 grid gap-0.5">
               <span class="text-[13px] font-medium truncate">${jobLabel(j)}</span>
               <span class="text-[12px] text-muted">${crew?crew.name:''}${e.b.shift==='night'?' · night':' · day'}${e.crewId!==e.b.resourceId?' · covering':''}</span>
-              <span class=${'text-[12px] '+(tr?'text-muted':'')} style=${tr?{}:{color:'var(--warn)'}}>${pl} plant · ${tr} truck${tr===1?'':'s'} · ${sb} subcontractor${sb===1?'':'s'}${tr?'':' (no trucks yet)'}</span>
+              ${sealE?html`<span class="text-[12px] text-muted">${pl} plant · ${sb} subcontractor${sb===1?'':'s'} · seal</span>`
+                :html`<span class=${'text-[12px] '+(tr?'text-muted':'')} style=${tr?{}:{color:'var(--warn)'}}>${pl} plant · ${tr} truck${tr===1?'':'s'} · ${sb} subcontractor${sb===1?'':'s'}${tr?'':' (no trucks yet)'}</span>`}
             </span></label>`})}
       </div>
       ${err&&html`<div class="px-5 pb-2 text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
