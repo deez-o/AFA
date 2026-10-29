@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Crew & Plant Roster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+html,body{margin:0}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+/* Layout: app shell — resource panel (crews / staff / plant) on the left, resources-by-days roster board on the right, grouped into sections */
+:root{
+  --bg:#ECEDEF; --surface:#FFFFFF; --sunken:#F4F4F6; --line:#DBDDE2; --line-strong:#C3C7CF;
+  --ink:#16181D; --muted:#5E636E; --faint:#8C919B;
+  --accent:#E0670F; --accent-ink:#FFFFFF; --accent-soft:#FDEBDB;
+  --weekend:#F1F1F4; --ok:#2F855A; --warn:#B7791F; --bad:#C53030; --night:#D93A2E; --night-ink:#FFFFFF; --night-edge:#8E1B13;
+  --blk-l:91%; --blk-fg-l:25%; --blk-edge-l:47%; --hatch-l:86%;
+  --shadow:0 1px 2px rgba(20,22,28,.06),0 8px 24px rgba(20,22,28,.06);
+  --f-display:"Schibsted Grotesk",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E0F12; --surface:#16181D; --sunken:#1B1E24; --line:#292C34; --line-strong:#373B45;
+  --ink:#E8E9ED; --muted:#9CA0AA; --faint:#6F737D;
+  --accent:#F5873A; --accent-ink:#1B0D05; --accent-soft:#2D1C10;
+  --weekend:#121418; --ok:#5CC08A; --warn:#E0A84A; --bad:#F07171; --night:#C93A2E; --night-ink:#FFFFFF; --night-edge:#FF8A7A;
+  --blk-l:23%; --blk-fg-l:87%; --blk-edge-l:62%; --hatch-l:19%;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0E0F12; --surface:#16181D; --sunken:#1B1E24; --line:#292C34; --line-strong:#373B45;
+  --ink:#E8E9ED; --muted:#9CA0AA; --faint:#6F737D;
+  --accent:#F5873A; --accent-ink:#1B0D05; --accent-soft:#2D1C10;
+  --weekend:#121418; --ok:#5CC08A; --warn:#E0A84A; --bad:#F07171; --night:#C93A2E; --night-ink:#FFFFFF; --night-edge:#FF8A7A;
+  --blk-l:23%; --blk-fg-l:87%; --blk-edge-l:62%; --hatch-l:19%;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
+#root{height:100%}
+.font-display{font-family:var(--f-display)}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.tnum{font-variant-numeric:tabular-nums}
+.label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.shell{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:500;font-size:13px;cursor:pointer;transition:background .12s,border-color .12s}
+.btn:hover{border-color:var(--line-strong);background:var(--sunken)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn-primary:hover{background:var(--accent);border-color:var(--accent);filter:brightness(1.06)}
+.btn-ghost{border-color:transparent;background:transparent}
+.seg{display:inline-flex;padding:3px;border-radius:9px;background:var(--sunken);border:1px solid var(--line)}
+.seg button{height:26px;padding:0 10px;border-radius:6px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border:0;background:transparent;white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.field{width:100%;height:34px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit}
+.field-sm{height:26px;padding:0 6px;font-size:12px;border-radius:6px}
+.field:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+.blk{position:absolute;height:28px;border-radius:6px;display:flex;align-items:center;gap:6px;padding:0 8px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;cursor:grab;transition:transform .1s,box-shadow .1s;user-select:none;touch-action:none}
+.blk.dragging{cursor:grabbing;z-index:6;transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.22),0 0 0 2px var(--accent);transition:none}
+body.is-dragging,body.is-dragging *{cursor:grabbing!important;user-select:none}
+.droprow{box-shadow:inset 0 0 0 2px var(--accent)}
+.grip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:26px;color:var(--faint);cursor:grab;touch-action:none;border-radius:4px;flex-shrink:0}
+.grip:hover{color:var(--ink);background:var(--sunken)}
+.reo-line{position:absolute;left:0;right:0;height:3px;background:var(--accent);z-index:25;pointer-events:none;border-radius:2px}
+.blk:hover{transform:translateY(-1px);box-shadow:0 3px 10px rgba(0,0,0,.12);z-index:3}
+.blk .t{overflow:hidden;text-overflow:ellipsis}
+.flag{position:absolute;height:16px;display:flex;align-items:center;justify-content:center;gap:3px;font-size:10.5px;font-weight:600;border-radius:4px;white-space:nowrap;overflow:hidden;pointer-events:auto;font-family:var(--f-mono)}
+.dayarea{touch-action:pan-x pan-y;cursor:crosshair}
+.scrollbox{overflow:auto;overscroll-behavior:contain}
+.scrollbox::-webkit-scrollbar{height:10px;width:10px}
+.scrollbox::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:8px;border:2px solid var(--surface)}
+.backdrop{background:rgba(10,12,16,.45)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+@keyframes pop{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}
+.pop{animation:pop .16s ease-out}
+</style>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+tailwind.config={theme:{extend:{colors:{
+  bg:'var(--bg)',surface:'var(--surface)',sunken:'var(--sunken)',line:'var(--line)',
+  ink:'var(--ink)',muted:'var(--muted)',faint:'var(--faint)',accent:'var(--accent)',
+  'accent-soft':'var(--accent-soft)',weekend:'var(--weekend)'}}}};
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.97.0"></script>
+</head>
+<body>
+<div id="root"></div>
+<script src="/app.js"></script>
+</body>
+</html>
