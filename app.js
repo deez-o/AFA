@@ -193,7 +193,7 @@ function rowStats(r,data,days){
 
 /* ---------- mixes & binders manager (Resources panel → Mixes tab) ---------- */
 /* One editable list: reorder, rename (also updates booking lines that use it), remove, add. */
-function ListManager({title,hint,items,setItems,field,placeholder,data,setData,onRenamed,onRemoved,rapOf,binderOf,binderOptions,servicesOf,colorOf,onColor}){
+function ListManager({title,hint,items,setItems,field,placeholder,data,setData,onRenamed,onRemoved,rapOf,binderOf,binderOptions,servicesOf,colorOf,onColor,truckOf}){
   const [name,setName]=useState('');
   const [editing,setEditingItem]=useState(null); /* {from,to} */
   const [confirm,setConfirm]=useState(null);
@@ -245,6 +245,13 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
                 ${editing.binder&&!binderOptions.includes(editing.binder)&&html`<option value=${editing.binder}>${editing.binder}</option>`}
               </select></label>
               <span class="text-[11px] text-faint -mt-1">Filled in automatically when this mix is picked on a shift.</span>`}
+            ${truckOf&&html`<div class="grid grid-cols-[1fr_96px] gap-2">
+              <label class="grid gap-1 text-[12.5px]"><span class="text-muted">Default driver</span>
+                <input id=${idp+'drv-'+i} class="field field-sm" style=${{height:30,fontSize:13}} placeholder="Driver" value=${editing.driver||''} onInput=${e=>setEditingItem({...editing,driver:e.target.value})}/></label>
+              <label class="grid gap-1 text-[12.5px]"><span class="text-muted">Default weight</span>
+                <select id=${idp+'w-'+i} class="field field-sm mono" style=${{height:30,fontSize:13}} value=${editing.w||''} onChange=${e=>setEditingItem({...editing,w:e.target.value})}>
+                  <option value="">None</option>${TRUCK_WEIGHTS.map(w=>html`<option key=${w} value=${w}>${w}</option>`)}</select></label>
+              <span class="col-span-2 text-[11px] text-faint -mt-1">Filled in when this truck is picked in a booking.</span></div>`}
             ${servicesOf&&html`<label class="grid gap-1 text-[12.5px]"><span class="text-muted">Services they provide (one per line)</span>
               <textarea id=${idp+'svc-'+i} class="field field-sm" style=${{height:'auto',minHeight:72,padding:'6px 8px',fontSize:13,resize:'vertical'}} rows="3"
                 placeholder=${'e.g. Shuttle buggy\nx 3 labourers\nBobcat hire'} value=${editing.services||''} onInput=${e=>setEditingItem({...editing,services:e.target.value})}></textarea></label>`}
@@ -262,6 +269,7 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
           <div class="min-w-0 flex-1">
             <div class="mono font-semibold text-[13.5px] truncate">${t}</div>
             ${rapOf&&rapOf(t)>0&&html`<div class="text-[11.5px] font-medium" style=${{color:'var(--ok)'}}>${fmtN(rapOf(t))}% RAP</div>`}
+            ${truckOf&&(truckOf(t).driver||truckOf(t).w)&&html`<div class="text-[11.5px] text-muted truncate">${[truckOf(t).driver,truckOf(t).w].filter(Boolean).join(' · ')}</div>`}
             ${servicesOf&&servicesOf(t).length>0&&html`<div class="text-[11.5px] text-muted truncate" title=${servicesOf(t).join(', ')}>${servicesOf(t).join(' · ')}</div>`}
           </div>
           ${colorOf&&html`<label class="w-7 h-7 shrink-0 inline-flex items-center justify-center rounded hover:bg-surface cursor-pointer" title="Colour on the daily program PDF">
@@ -273,7 +281,7 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
                   <button class="text-[11px] font-semibold px-2 py-0.5 rounded" style=${{background:'hsl(352 70% var(--blk-l))',color:'hsl(352 60% var(--blk-fg-l))'}} onClick=${()=>remove(t)}>Remove</button>
                   <button class="text-[11px] text-muted px-1.5" onClick=${()=>setConfirm(null)}>Keep</button></div></div>`
             :html`<div class="flex items-center gap-0.5 lg:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                <button class=${iconBtn} onClick=${()=>{const rp=rapOf?rapOf(t):0;setEditingItem({from:t,to:t,hasRap:rp>0,rap:rp>0?String(rp):'',binder:binderOf?binderOf(t):'',services:servicesOf?servicesOf(t).join('\n'):''});setConfirm(null);setMsg('')}} aria-label=${'Edit '+t} title="Edit">${Icon.pencil}</button>
+                <button class=${iconBtn} onClick=${()=>{const rp=rapOf?rapOf(t):0;setEditingItem({from:t,to:t,hasRap:rp>0,rap:rp>0?String(rp):'',binder:binderOf?binderOf(t):'',services:servicesOf?servicesOf(t).join('\n'):'',driver:truckOf?truckOf(t).driver||'':'',w:truckOf?truckOf(t).w||'':''});setConfirm(null);setMsg('')}} aria-label=${'Edit '+t} title="Edit">${Icon.pencil}</button>
                 <button class=${iconBtn} onClick=${()=>{setConfirm(t);setEditingItem(null)}} aria-label=${'Remove '+t} title="Remove from the list">${Icon.x}</button></div>`}
         </li>`;})}
       ${items.length===0&&html`<li class="px-3 py-4 text-center text-muted text-[13px]">Nothing in the list yet. Add one below.</li>`}
@@ -1894,7 +1902,7 @@ const recentQuoteChanges=data=>(data.quoteChanges||[]).filter(c=>Date.now()-c.at
 const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.round(m/60);return `${h} hr${h===1?'':'s'} ago`};
 /* ---------- change log: every change to the shared roster becomes a notification ---------- */
 const CHANGE_KEEP=7*DAY_MS;
-const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['programLocs','Locations'],['locColors','Location colours'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
+const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['programLocs','Locations'],['locColors','Location colours'],['truckDefs','Truck defaults'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
 const RES_WORD={crew:'Crew',person:'Staff member',machine:'Machine',aplant:'Plant'};
 /* exactly what changed on one booking, as "Field: before → after" lines */
 function bookingDiff(a,b,p,x,rname,jname,when){
@@ -2181,6 +2189,8 @@ const locColorOf=(d,name)=>{const m=locColorsOf(d);const n=String(name||'').trim
   const i=programLocsOf(d).findIndex(x=>x.toLowerCase()===n);return LOC_PALETTE[(i<0?0:i)%LOC_PALETTE.length]};
 const hexRgb=h=>{const m=/^#?([0-9a-f]{6})$/i.exec(h||'');if(!m)return [20,20,20];const v=parseInt(m[1],16);return [v>>16&255,v>>8&255,v&255]};
 const programLocsOf=d=>d&&Array.isArray(d.programLocs)?d.programLocs:PROGRAM_LOCATIONS;
+const truckDefsOf=d=>d&&d.truckDefs&&typeof d.truckDefs==='object'?d.truckDefs:{};
+const truckDefOf=(d,name)=>{const m=truckDefsOf(d);const n=String(name||'').trim().toLowerCase();const k=Object.keys(m).find(x=>x.toLowerCase()===n);return k?m[k]:{}};
 const truckCosOf=d=>d&&Array.isArray(d.truckCos)?d.truckCos:DEFAULT_TRUCKS;
 const subCosOf=d=>d&&Array.isArray(d.subCos)?d.subCos:DEFAULT_SUBS;
 const truckHas=t=>!!t&&!!(t.co||t.driver||t.w||t.time||t.loc);
@@ -2199,8 +2209,11 @@ function TrucksManager({data,setData}){
   const setter=key=>(list,extra)=>setData(d=>{const n={...d,[key]:list};return extra?extra(n):n});
   return html`<div class="flex-1 min-h-0 overflow-y-auto">
     <${ListManager} title="Trucks" field="truckco" placeholder="e.g. BIG DAVES" data=${data} setData=${setData}
-      hint="Truck companies offered in a booking's Trucks & Subcontractors tab, in this order."
-      items=${truckCosOf(data)} setItems=${setter('truckCos')}/>
+      hint="Truck companies offered in a booking's Trucks & Subcontractors tab, in this order. Click the pencil to rename one or set its default driver and weight."
+      items=${truckCosOf(data)} setItems=${setter('truckCos')} truckOf=${t=>truckDefOf(data,t)}
+      onRenamed=${(d,from,to,ed)=>{const m={...truckDefsOf(d)};const prev=m[from]||{};delete m[from];
+        const v=ed&&('driver' in ed||'w' in ed)?{driver:(ed.driver||'').trim(),w:ed.w||''}:prev;if(v.driver||v.w)m[to]=v;return {...d,truckDefs:m}}}
+      onRemoved=${(d,t)=>{const m={...truckDefsOf(d)};delete m[t];return {...d,truckDefs:m}}}/>
     <div class="border-t border-line mx-4"></div>
     <${ListManager} title="Locations" field="progloc" placeholder="e.g. BALD HILLS YARD" data=${data} setData=${setData}
       hint="Where trucks load or meet, offered in the Location column of the Trucks & Subcontractors tab. The booking's own site address is always offered too and uses SITE's colour. Click a swatch to pick the colour it's highlighted in on the daily program."
@@ -2265,6 +2278,10 @@ function ProgramShifts({f,set,data}){
     if(p>=0){const npT=(list[p]&&list[p].time)||'';if(opT!==npT)follow(list,p,opT,npT)}
     return list};
   const setT=(j,p)=>{const list=trucks.map(t=>({...t}));const t={...list[j],...p};
+    /* picking a truck fills its default driver and weight (unless they were typed in) */
+    if('co' in p){const nd=truckDefOf(data,p.co),od=truckDefOf(data,list[j].co);
+      if(nd.driver&&(!t.driver||t.driver===od.driver))t.driver=nd.driver;else if(!nd.driver&&t.driver&&t.driver===od.driver)t.driver='';
+      if(nd.w&&(!t.w||t.w===od.w))t.w=nd.w;else if(!nd.w&&t.w&&t.w===od.w)t.w=''}
     if(!('time' in p)&&!t.time&&truckHas(t))t.time=truckDefault(list,j);list[j]=t;
     upd({trucks:'time' in p?cascade(trucks,list):list})};
   const setPace=j=>{const list=trucks.map((t,x)=>{const {pace,...r}=t;return x===j?{...r,pace:true}:r});
@@ -3115,7 +3132,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','truckCos','subCos','subServices','programLocs','locColors'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','truckCos','subCos','subServices','programLocs','locColors','truckDefs'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
