@@ -290,7 +290,7 @@ function MixesManager({data,setData}){
 
 /* ---------- jobs manager (Resources panel → Jobs tab) ---------- */
 const JOB_HUES=[205,152,268,330,185,48,100,20,240,300];
-function JobsManager({data,setData,onImport}){
+function JobsManager({data,setData,onImport,onMerge}){
   const [q,setQ]=useState('');
   const [f,setF]=useState({name:'',customer:'',address:''});
   const [edit,setEdit]=useState(null); /* {id,name,customer,address} */
@@ -364,6 +364,7 @@ function JobsManager({data,setData,onImport}){
         <button type="button" class="flex-1" aria-pressed=${view==='completed'} onClick=${()=>{setView('completed');setEdit(null);setConfirm(null)}}>Completed <span class="mono text-[11px] text-faint">${nDone}</span></button>
       </div>
       ${onImport&&html`<button type="button" class="btn w-full justify-center" onClick=${onImport}>${Icon.download} Import from TeamCal</button>`}
+      ${onMerge&&html`<button type="button" class="btn w-full justify-center" onClick=${onMerge}>Merge split bookings</button>`}
       <label for="job-search" class="sr-only">Search jobs</label>
       <input id="job-search" class="field" placeholder="Search job, customer or address" value=${q} onInput=${e=>setQ(e.target.value)}/>
     </div>
@@ -432,7 +433,7 @@ function JobsManager({data,setData,onImport}){
 }
 
 /* ---------- sidebar ---------- */
-function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onImport}){
+function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onImport,onMerge}){
   const [q,setQ]=useState('');
   const [f,setF]=useState({name:'',sub:'',crewId:''});
   const [confirmId,setConfirmId]=useState(null);
@@ -468,7 +469,7 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
       </div>`;
   if(tab==='jobs')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
-    <${JobsManager} data=${data} setData=${setData} onImport=${onImport}/>
+    <${JobsManager} data=${data} setData=${setData} onImport=${onImport} onMerge=${onMerge}/>
   </aside>`;
   if(tab==='mixes')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
@@ -2018,7 +2019,7 @@ function applyTeamCalImport(d,{bookings,crewMap,customers}){
     else if(proj&&!j.projectNo){j={...j,projectNo:proj};jobs=jobs.map(x=>x.id===j.id?j:x)}
     jobFor[key]=j.id;
   });
-  const have=new Set(blocks.map(b=>b.importKey).filter(Boolean));
+  const have=new Set(blocks.flatMap(b=>[b.importKey,...(b.importKeys||[])]).filter(Boolean));
   bookings.forEach(b=>{if(have.has(b.importKey)||!crewId[b.crewName])return;
     blocks.push({id:uid(),resourceId:crewId[b.crewName],kind:'job',title:'',start:b.start,end:b.end,shift:'day',
       jobId:jobFor[tcJobKey(b)],address:b.site,plantIds:[],...(b.quoteNo?{quoteNo:b.quoteNo}:{}),...(b.projectNo?{projectNo:b.projectNo}:{}),
@@ -2032,6 +2033,78 @@ function applyTeamCalImport(d,{bookings,crewMap,customers}){
   return {data:{...d,resources,jobs,blocks,mixTypes:mixes,binders},added,newCrews,newJobs};
 }
 
+/* ---------- merging bookings that were split over a weekend ---------- */
+/* Before Saturday/Sunday could be switched per booking, one job was often entered as several bookings
+   (e.g. Wed–Fri, then Mon–Tue). Bookings for the same job, crew and shift whose gap is only weekend days
+   (or no gap at all) are joined into one; a weekend day stays a shift only if one of the old bookings worked it. */
+function mergePlan(data){
+  const groups=new Map();
+  data.blocks.filter(b=>b.kind==='job'&&b.jobId&&b.start&&b.end).forEach(b=>{
+    const k=[b.resourceId,b.jobId,b.shift||'day'].join('|');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(b)});
+  const plans=[];
+  groups.forEach(list=>{
+    list.sort((a,b)=>a.start<b.start?-1:a.start>b.start?1:0);
+    let run=[list[0]],endMax=list[0].end;
+    const flush=()=>{if(run.length>1)plans.push(run)};
+    for(let i=1;i<list.length;i++){const b=list[i];let ok=true;
+      for(let d=addDays(parse(endMax),1);iso(d)<b.start;d=addDays(d,1))if(!isWeekend(d)){ok=false;break}
+      if(ok){run.push(b);if(b.end>endMax)endMax=b.end}else{flush();run=[b];endMax=b.end}}
+    flush()});
+  return plans.sort((a,b)=>a[0].start<b[0].start?-1:1);
+}
+function mergeRun(run){
+  const start=run.map(b=>b.start).sort()[0],end=run.map(b=>b.end).sort().slice(-1)[0];
+  const works=(b,dow)=>{for(let d=parse(b.start);iso(d)<=b.end;d=addDays(d,1))if(d.getDay()===dow&&worksOn(b,d))return true;return false};
+  const sd={};run.forEach(b=>Object.entries(b.shiftData||{}).forEach(([k,v])=>{if(!sd[k])sd[k]=v}));
+  const pick=f=>run.map(b=>b[f]).find(v=>v&&String(v).trim())||'';
+  const notes=[...new Set(run.map(b=>(b.notes||'').trim()).filter(Boolean))].join('\n');
+  const keys=[...new Set(run.flatMap(b=>[b.importKey,...(b.importKeys||[])]).filter(Boolean))];
+  const out={...run[0],start,end,satShift:run.some(b=>works(b,6)),sunShift:run.some(b=>works(b,0)),
+    plantIds:[...new Set(run.flatMap(b=>b.plantIds||[]))],address:pick('address'),quoteNo:pick('quoteNo'),projectNo:pick('projectNo'),notes};
+  if(Object.keys(sd).length)out.shiftData=sd;else delete out.shiftData;
+  if(keys.length)out.importKeys=keys;
+  return out;
+}
+function MergeSplits({data,setData,onClose,notify}){
+  const plans=useMemo(()=>mergePlan(data),[]);
+  const [on,setOn]=useState(()=>plans.map(()=>true));
+  useEffect(()=>{const h=e=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
+  const rng=b=>b.start===b.end?`${WD[parse(b.start).getDay()]} ${fmtShort(parse(b.start))}`:`${WD[parse(b.start).getDay()]} ${fmtShort(parse(b.start))} – ${WD[parse(b.end).getDay()]} ${fmtShort(parse(b.end))}`;
+  const n=on.filter(Boolean).length;
+  const run=()=>{const chosen=plans.filter((_,i)=>on[i]);
+    setData(d=>{const drop=new Set(chosen.flatMap(r=>r.map(b=>b.id)));
+      const merged=new Map(chosen.map(r=>[r[0].id,mergeRun(r.map(b=>d.blocks.find(x=>x.id===b.id)||b))]));
+      return {...d,blocks:d.blocks.flatMap(b=>merged.has(b.id)?[merged.get(b.id)]:drop.has(b.id)?[]:[b])}});
+    setTimeout(()=>notify(`Merged into ${chosen.length} booking${chosen.length===1?'':'s'}`),0);onClose()};
+  return html`<div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div class="panel pop w-full max-w-[640px] flex flex-col max-h-full overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="mg-title">
+      <div class="px-5 pt-5 pb-3 border-b border-line flex items-start gap-3">
+        <div class="min-w-0 flex-1">
+          <div id="mg-title" class="font-display text-[18px] font-semibold">Merge split bookings</div>
+          <div class="text-[12.5px] text-muted">Bookings for the same job, crew and shift that only have a weekend (or nothing) between them. Weekend days nobody booked are greyed out on the merged booking.</div>
+        </div>
+        <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button>
+      </div>
+      <div class="overflow-y-auto p-3 grid gap-2">
+        ${plans.length===0&&html`<div class="text-[13px] text-muted p-3">Nothing to merge. No job has bookings split over a weekend.</div>`}
+        ${plans.map((r,i)=>{const m=mergeRun(r);const j=data.jobs.find(x=>x.id=== r[0].jobId);const crew=data.resources.find(x=>x.id===r[0].resourceId);
+          const wk=[!m.satShift&&'Sat',!m.sunShift&&'Sun'].filter(Boolean);
+          return html`<label key=${r[0].id} class="flex items-start gap-3 rounded-lg border border-line px-3 py-2.5 cursor-pointer hover:bg-sunken">
+            <input type="checkbox" class="w-4 h-4 mt-0.5" style=${{accentColor:'var(--accent)'}} checked=${on[i]} onChange=${e=>setOn(o=>o.map((v,k)=>k===i?e.target.checked:v))}/>
+            <span class="min-w-0 grid gap-0.5">
+              <span class="text-[13px] font-medium truncate">${jobLabel(j)}</span>
+              <span class="text-[12px] text-muted">${crew?crew.name:''}${r[0].shift==='night'?' · night':''} · ${r.map(rng).join('  +  ')}</span>
+              <span class="text-[12px]">→ <span class="font-medium">${rng(m)}</span>${wk.length?html`<span class="text-muted"> · ${wk.join(' & ')} greyed out</span>`:''}</span>
+            </span></label>`})}
+      </div>
+      <div class="px-5 py-3 border-t border-line flex items-center gap-2">
+        <span class="text-[12px] text-muted mr-auto">Quantities, plant and notes from every part are kept.</span>
+        <button type="button" class="btn" onClick=${onClose}>Cancel</button>
+        <button type="button" class="btn btn-primary" disabled=${!n} onClick=${run}>Merge ${n}</button>
+      </div>
+    </div>
+  </div>`;
+}
 function TeamCalImport({data,setData,onClose,notify}){
   const [step,setStep]=useState('pick');const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
   const [parsed,setParsed]=useState([]);const [crewMap,setCrewMap]=useState({});const [customers,setCustomers]=useState({});
@@ -2045,7 +2118,7 @@ function TeamCalImport({data,setData,onClose,notify}){
         cm[n]=ex?{use:ex.id,name:ex.name,sub:ex.sub}:{use:'new',name:tcPretty(n),sub:tcWorkType(n)}});
       setParsed(bk);setCrewMap(cm);setCustomers({});setStep('review');
     }catch(x){setErr(x.message||'Couldn’t read that file.')}finally{setBusy(false);e.target.value=''}};
-  const have=new Set(data.blocks.map(b=>b.importKey).filter(Boolean));
+  const have=new Set(data.blocks.flatMap(b=>[b.importKey,...(b.importKeys||[])]).filter(Boolean));
   const fresh=parsed.filter(b=>!have.has(b.importKey));
   const groups=[];fresh.forEach(b=>{const k=tcJobKey(b);let g=groups.find(x=>x.key===k);if(!g){g={key:k,site:b.site,customer:b.customer,projectNo:'',n:0,t:0};groups.push(g)}
     g.n++;g.t+=b.tonnes;if(b.projectNo&&!g.projectNo)g.projectNo=b.projectNo});
@@ -2186,7 +2259,7 @@ function App({boot,live}){
   const [tab,setTab]=useState('crew');
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
-  const [importing,setImporting]=useState(false);
+  const [importing,setImporting]=useState(false);const [merging,setMerging]=useState(false);
   const [forecast,setForecast]=useState(false);
   const [changePw,setChangePw]=useState(false);
   const [notifPrefs,setNotifPrefs]=useState(loadNotifPrefs);
@@ -2279,10 +2352,10 @@ function App({boot,live}){
   const legend=[['Crews',['job','standby','crewtraining']],['Asphalt plant',['plantmaint','plantreduced']],['Machines',['onjob','service','repair','inspection']],['Staff',['leave','sick','rdo','training']]];
 
   return html`<div class="shell h-full flex gap-4">
-    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel?' lg:block':'')}><${Sidebar} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)}/></div>
+    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel?' lg:block':'')}><${Sidebar} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
-        <${Sidebar} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
+        <${Sidebar} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
 
     <main class="flex-1 min-w-0 h-full flex flex-col gap-3">
       <header class="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -2338,6 +2411,7 @@ function App({boot,live}){
     ${changePw&&html`<${SetPassword} sb=${live.sb} onDone=${()=>{setChangePw(false);setToast('Password changed')}} onCancel=${()=>setChangePw(false)}/>`}
     ${forecast&&html`<${ForecastDialog} data=${data} onClose=${()=>setForecast(false)} notify=${setToast}/>`}
     ${importing&&html`<${TeamCalImport} data=${data} setData=${setData} onClose=${()=>setImporting(false)} notify=${setToast}/>`}
+    ${merging&&html`<${MergeSplits} data=${data} setData=${setData} onClose=${()=>setMerging(false)} notify=${setToast}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)}/>`}
     ${toast&&html`<div class="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-[13px] font-medium pop" role="status"
