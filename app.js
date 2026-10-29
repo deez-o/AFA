@@ -1869,6 +1869,35 @@ const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now
 const CHANGE_KEEP=7*DAY_MS;
 const LIST_SETTINGS=[['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders']];
 const RES_WORD={crew:'Crew',person:'Staff member',machine:'Machine',aplant:'Plant'};
+/* exactly what changed on one booking, as "Field: before → after" lines */
+function bookingDiff(a,b,p,x,rname,jname,when){
+  const L=[];const same=(u,v)=>JSON.stringify(u)===JSON.stringify(v);
+  const cut=t=>{t=String(t||'').replace(/\s+/g,' ').trim();return t.length>60?t.slice(0,60)+'…':t};
+  const ch=(label,u,v)=>L.push(`${label}: ${u===''||u==null?'(none)':u} → ${v===''||v==null?'(none)':v}`);
+  if(p.kind!==x.kind)ch('Type',KINDS[p.kind]?.label||p.kind,KINDS[x.kind]?.label||x.kind);
+  if(p.resourceId!==x.resourceId)ch('Crew',rname(a,p.resourceId),rname(b,x.resourceId));
+  if(p.start!==x.start||p.end!==x.end)ch('Dates',when(p),when(x));
+  if((p.shift||'day')!==(x.shift||'day'))ch('Shift',p.shift==='night'?'Night':'Day',x.shift==='night'?'Night':'Day');
+  if(p.jobId!==x.jobId)ch('Job',jname(a,p.jobId),jname(b,x.jobId));
+  [['address','Site address'],['projectNo','Project number'],['quoteNo','Quote number'],['title','Label'],['maintShift','Maintenance shift'],['notes','Notes']]
+    .forEach(([f,l])=>{if((p[f]||'')!==(x[f]||''))ch(l,cut(p[f]),cut(x[f]))});
+  const pa=p.plantIds||[],pb=x.plantIds||[];
+  const add=pb.filter(i=>!pa.includes(i)).map(i=>rname(b,i)),rem=pa.filter(i=>!pb.includes(i)).map(i=>rname(a,i));
+  if(add.length)L.push(`Mobile plant added: ${add.join(', ')}`);if(rem.length)L.push(`Mobile plant removed: ${rem.join(', ')}`);
+  [['Friday',friOn],['Saturday',satOn],['Sunday',sunOn]].forEach(([l,fn])=>{if(fn(p)!==fn(x))ch(l,fn(p)?'shift':'off',fn(x)?'shift':'off')});
+  const oa=p.offDays||[],ob=x.offDays||[];ob.filter(k=>!oa.includes(k)).forEach(k=>L.push(`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: now a day off`));
+  oa.filter(k=>!ob.includes(k)).forEach(k=>L.push(`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: now a shift`));
+  /* quantities, shift by shift */
+  const sa=p.shiftData||{},sb=x.shiftData||{};
+  const lineTxt=l=>[(l.type||'').trim(),l.binder,l.virgin?'virgin':'',num(l.tonnes)?`${fmtN(num(l.tonnes))} t`:'',num(l.area)?`${fmtN(num(l.area))} m²`:'',num(l.depth)?`${fmtN(num(l.depth))} mm`:''].filter(Boolean).join(' ');
+  const qTxt=q=>linesOf(q).filter(lineHas).map(lineTxt).join(' + ');
+  [...new Set([...Object.keys(sa),...Object.keys(sb)])].sort().forEach(k=>{const qa=sa[k],qb=sb[k];if(same(qa,qb))return;
+    const day=`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`;
+    const ta=qTxt(qa),tb=qTxt(qb);if(ta!==tb)ch(day,ta,tb);
+    const ea=qa&&qa.exbin?qa.exbin.supplier||'yes':'',eb=qb&&qb.exbin?qb.exbin.supplier||'yes':'';if(ea!==eb)ch(`${day} exbin`,ea,eb);
+    const ca=qa&&qa.crewId?rname(a,qa.crewId):'',cb=qb&&qb.crewId?rname(b,qb.crewId):'';if(ca!==cb)ch(`${day} done by`,ca||rname(a,p.resourceId),cb||rname(b,x.resourceId))});
+  return L.length>14?[...L.slice(0,13),`…and ${L.length-13} more`]:L;
+}
 function describeChanges(a,b){
   const out=[];const same=(x,y)=>JSON.stringify(x)===JSON.stringify(y);
   const rname=(d,id)=>d.resources.find(r=>r.id===id)?.name||'';
@@ -1881,17 +1910,7 @@ function describeChanges(a,b){
       if(!p){out.push({type:'booking',text:`Booking added: ${what(b,x)}`,sub:`${rname(b,x.resourceId)} · ${when(x)}`,blockId:x.id});return}
       if(p===x||same(p,x))return;
       if((p.quoteNo||'')!==(x.quoteNo||'')&&same({...p,quoteNo:''},{...x,quoteNo:''}))return;  /* quote-only changes have their own notification */
-      const parts=[];
-      if(p.resourceId!==x.resourceId)parts.push(`moved from ${rname(a,p.resourceId)}`);
-      if(p.start!==x.start||p.end!==x.end)parts.push(`was ${when(p)}`);
-      if((p.shift||'day')!==(x.shift||'day'))parts.push(x.shift==='night'?'now night works':'now day works');
-      if(p.jobId!==x.jobId)parts.push(`job was ${jname(a,p.jobId)||'another job'}`);
-      if(!same(p.shiftData||{},x.shiftData||{}))parts.push('quantities');
-      if(!same(p.plantIds||[],x.plantIds||[]))parts.push('mobile plant');
-      [['address','site address'],['notes','notes'],['projectNo','project number'],['title','label'],['maintShift','shift']].forEach(([f,l])=>{if((p[f]||'')!==(x[f]||''))parts.push(l)});
-      if(['friShift','satShift','sunShift','weekendShifts','offDays'].some(f=>!same(p[f],x[f])))parts.push('weekend shifts');
-      if(p.kind!==x.kind)parts.push('type');
-      out.push({type:'booking',text:`Booking changed: ${what(b,x)}`,sub:`${rname(b,x.resourceId)} · ${when(x)}${parts.length?` · ${parts.join(', ')}`:''}`,blockId:x.id})});
+      out.push({type:'booking',text:`Booking changed: ${what(b,x)}`,sub:`${rname(b,x.resourceId)} · ${when(x)}`,details:bookingDiff(a,b,p,x,rname,jname,when),blockId:x.id})});
     a.blocks.forEach(p=>{if(!bm.has(p.id))out.push({type:'booking',text:`Booking deleted: ${what(a,p)}`,sub:`${rname(a,p.resourceId)} · ${when(p)}`})});
   }
   if(a.jobs!==b.jobs){
@@ -2010,6 +2029,7 @@ function Notifications({data,onOpen,prefs,setPrefs}){
             <div class="min-w-0 flex-1">
               <div class="text-[13px]">${c.text}</div>
               ${c.sub&&html`<div class="text-[12px] text-muted">${c.sub}</div>`}
+              ${c.details&&c.details.length>0&&html`<ul class="mt-1 grid gap-0.5 text-[12px] leading-snug">${c.details.map((t,i)=>html`<li key=${i} class="flex gap-1.5"><span class="text-faint shrink-0">•</span><span class="min-w-0 break-words">${t}</span></li>`)}</ul>`}
               <div class="text-[11.5px] text-faint">${agoText(c.at)}${c.by?` · ${c.by===me?'you':c.by}`:''}</div>
             </div>
             ${b&&html`<button class="btn shrink-0" style=${{height:28}} onClick=${()=>{setOpen(false);onOpen(b)}}>Open</button>`}
