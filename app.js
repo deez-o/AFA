@@ -745,7 +745,7 @@ function packLanes(items){
 }
 
 /* ---------- board ---------- */
-function Board({data,days,view,onCreate,onEdit,onMove,onResize,onRename,onReorder,onExport,collapsed,toggleSection,notifPrefs,only,headLabel}){
+function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,onRename,onReorder,onExport,collapsed,toggleSection,notifPrefs,only,headLabel}){
   /* ---- drag to reorder sections and rows (by their grip handles) ---- */
   const boxRef=React.useRef(null);
   const [reo,setReo]=useState(null);
@@ -784,12 +784,12 @@ function Board({data,days,view,onCreate,onEdit,onMove,onResize,onRename,onReorde
     if(reo.target===id)return {style:null,line:html`<div class="reo-line" style=${reo.after?{bottom:-2}:{top:-2}}></div>`};
     return {style:null,line:null};
   };
-  const Grip=(label,onDown,extra='')=>html`<span class=${'grip '+extra} role="button" tabindex="-1" aria-label=${label} title="Drag to reorder"
+  const Grip=(label,onDown,extra='')=>readOnly?null:html`<span class=${'grip '+extra} role="button" tabindex="-1" aria-label=${label} title="Drag to reorder"
     onPointerDown=${onDown} onClick=${e=>{e.preventDefault();e.stopPropagation()}}>${Icon.grip}</span>`;
   window.__rosterData=data;
   const N=days.length;
-  const colMin=view===7?120:view===14?68:view===60?26:40;
-  const nameW=view===7?210:180;
+  const colMin=view===3?54:view===7?(narrow?64:120):view===14?68:view===60?26:40;
+  const nameW=narrow?(readOnly?104:118):view===7?210:180;
   const rangeStart=days[0];
   const todayIdx=diffDays(rangeStart,TODAY);
   const [sel,setSel]=useState(null);
@@ -894,7 +894,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onResize,onRename,onReorde
           <div class="font-medium text-[13px] truncate flex items-center gap-1.5" title=${r.name}><span class="truncate">${r.name}</span>${r.type==='machine'&&data.alerts&&data.alerts[r.id]&&data.alerts[r.id].restricted&&html`<span class="shrink-0 text-[9.5px] font-bold uppercase tracking-wide px-1 rounded leading-[14px]" style=${{background:'hsl(0 72% 47%)',color:'#fff'}} title=${'Restricted: do not use. '+(data.alerts[r.id].restriction||'')}>Restricted</span>`}</div>
           <div class="text-[11.5px] text-muted truncate flex items-center gap-1.5">${r.type==='crew'&&r.subbie&&html`<${SubTag}/>`}<span class="truncate">${r.type==='crew'?`${ppl} staff · ${pl} machine${pl===1?'':'s'}`:`${r.sub}${crew?' · '+crew.name:''}`}</span></div>
         </div>
-        <button class="ml-auto p-1 rounded text-muted hover:text-ink shrink-0 lg:opacity-0 group-hover/name:opacity-100 focus:opacity-100" onClick=${()=>onRename(r)} aria-label=${'Edit '+r.name} title="Edit name">${Icon.pencil}</button>
+        ${!readOnly&&html`<button class="ml-auto p-1 rounded text-muted hover:text-ink shrink-0 lg:opacity-0 group-hover/name:opacity-100 focus:opacity-100" onClick=${()=>onRename(r)} aria-label=${'Edit '+r.name} title="Edit name">${Icon.pencil}</button>`}
       </div>
       <div class="dayarea relative flex-1" style=${{height:h}}
            onPointerDown=${e=>down(e,r)} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${()=>setSel(null)}
@@ -967,7 +967,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onResize,onRename,onReorde
         onClick=${()=>toggleSection(ck)} aria-expanded=${!collapsed[ck]}>
         <span class="text-muted inline-flex transition-transform" style=${{transform:collapsed[ck]?'rotate(-90deg)':'none'}}>${Icon.chevD}</span>
         <span class="text-[12.5px] font-semibold truncate">${g.label}</span>
-        <span class="mono text-[11px] text-faint shrink-0">${g.rows.length} ${noun}${g.rows.length===1?'':'s'}</span>
+        ${!narrow&&html`<span class="mono text-[11px] text-faint shrink-0">${g.rows.length} ${noun}${g.rows.length===1?'':'s'}</span>`}
       </button>
       <div class="flex-1 grid" style=${grid}>
         ${days.map((d,i)=>html`<div key=${i} style=${{background:isWeekend(d)?'var(--weekend)':'transparent'}}></div>`)}
@@ -1048,8 +1048,8 @@ function Board({data,days,view,onCreate,onEdit,onMove,onResize,onRename,onReorde
             const showMonth=view===7||i===0||d.getDate()===1;
             return html`<div key=${i} class="py-2 text-center border-r border-line last:border-r-0" style=${{background:colBg(d)}}>
               <div class="text-[10.5px] uppercase tracking-wide h-[14px]" style=${{color:t?'var(--accent)':'var(--faint)',fontWeight:showMonth&&view!==7?600:500}}>
-                ${view===7?`${WD[d.getDay()]} · ${MON[d.getMonth()]}`:(showMonth?MON[d.getMonth()]:(view===14?WD[d.getDay()]:WD[d.getDay()][0]))}</div>
-              <div class=${'mono mt-0.5 '+(view===7?'text-[18px]':view===14?'text-[15px]':view===60?'text-[11.5px]':'text-[13px]')} style=${{color:t?'var(--accent)':isWeekend(d)?'var(--faint)':'var(--ink)',fontWeight:t?600:500}}>
+                ${view===3||(narrow&&view===7)?WD[d.getDay()]:view===7?`${WD[d.getDay()]} · ${MON[d.getMonth()]}`:(showMonth?MON[d.getMonth()]:(view===14?WD[d.getDay()]:WD[d.getDay()][0]))}</div>
+              <div class=${'mono mt-0.5 '+(view===7||view===3?'text-[18px]':view===14?'text-[15px]':view===60?'text-[11.5px]':'text-[13px]')} style=${{color:t?'var(--accent)':isWeekend(d)?'var(--faint)':'var(--ink)',fontWeight:t?600:500}}>
                 ${t?html`<span class="inline-flex items-center justify-center rounded-full" style=${{background:'var(--accent)',color:'var(--accent-ink)',minWidth:view===7?30:view===60?20:24,height:view===7?30:view===60?20:24,padding:'0 4px'}}>${d.getDate()}</span>`:d.getDate()}
               </div>
             </div>`;})}
@@ -2712,7 +2712,7 @@ const NAV_ICON={
 };
 function NavRail({screen,go,isAdmin,role,data,badge={}}){
   const btn=([k,s])=>{const on=screen===k;
-    return html`<button key=${k} class=${'flex flex-col items-center gap-1 rounded-lg py-2.5 text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
+    return html`<button key=${k} class=${'flex flex-col items-center gap-0.5 sm:gap-1 rounded-lg py-2 sm:py-2.5 text-[9.5px] sm:text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
       style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
       <span class="relative inline-flex">${NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${s.label}</span>${role==='admin'&&s.preview&&previewOf(data).includes(k)&&html`<span class="-mt-0.5 text-[8.5px] font-bold uppercase tracking-wide px-1 rounded leading-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}} title="Only you can see this while it is in progress">Preview</span>`}</button>`};
   const all=Object.entries(SCREENS).filter(([k])=>screenOK(k,role,data));
@@ -2720,7 +2720,7 @@ function NavRail({screen,go,isAdmin,role,data,badge={}}){
   /* bottom of the bar: features still in progress (admin only, until released), then Ideas */
   const low=([k,s])=>s.bottom||(s.preview&&previewOf(data).includes(k));
   const order=([k,s])=>s.bottom?1:0;
-  return html`<nav class="panel shrink-0 w-[68px] h-full flex flex-col gap-1 p-1.5" aria-label="Screens">
+  return html`<nav class="panel shrink-0 w-[50px] sm:w-[68px] h-full flex flex-col gap-1 p-1 sm:p-1.5" aria-label="Screens">
     ${all.filter(e=>!low(e)).map(btn)}
     <div class="flex-1"></div>
     ${all.filter(low).sort((a,b)=>order(a)-order(b)).map(btn)}
@@ -4796,11 +4796,11 @@ function LeaveDialog({data,setData,onClose,notify,personId}){
   return html`<${SDialog} title="Add leave" sub="Shows on the leave calendar, and on the schedule as staff away" onClose=${onClose}
     foot=${html`${err&&err!=='clash'&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="lv-save" type="button" class="btn btn-primary" onClick=${save}>${clashB?'Add anyway':'Add leave'}</button>`}>
     <div class="grid sm:grid-cols-2 gap-3">
-      <div class="sm:col-span-2"><${SFld} label="Who"><select id="lv-person" class="field" value=${f.resourceId} onChange=${e=>{setF({...f,resourceId:e.target.value});setErr('')}}><option value="">Choose…</option>${people.map(p=>html`<option key=${p.id} value=${p.id}>${p.name}${p.sub?' · '+p.sub:''}</option>`)}</select><//></div>
-      <div class="sm:col-span-2"><${SFld} label="Type"><div class="seg w-max flex-wrap">${LEAVE_KINDS.map(k=>html`<button key=${k} id=${'lv-k-'+k} type="button" aria-pressed=${f.kind===k} onClick=${()=>setF({...f,kind:k})}>${KINDS[k].label}</button>`)}</div><//></div>
-      <${SFld} label="From"><input id="lv-from" type="date" class="field mono" value=${f.start} onChange=${e=>{const v=e.target.value;setF({...f,start:v,end:f.end<v?v:f.end});setErr('')}}/><//>
-      <${SFld} label="To (last day away)"><input id="lv-to" type="date" class="field mono" value=${f.end} min=${f.start} onChange=${e=>{setF({...f,end:e.target.value});setErr('')}}/><//>
-      <div class="sm:col-span-2"><${SFld} label="Note (optional)"><input id="lv-note" class="field" placeholder="e.g. Back Monday, first aid course" value=${f.title} onInput=${e=>setF({...f,title:e.target.value})}/><//></div>
+      <div class="sm:col-span-2"><${SFld} label="Who"><select id="lv-person" class="field" value=${f.resourceId} onChange=${e=>{setF(x=>({...x,resourceId:e.target.value}));setErr('')}}><option value="">Choose…</option>${people.map(p=>html`<option key=${p.id} value=${p.id}>${p.name}${p.sub?' · '+p.sub:''}</option>`)}</select><//></div>
+      <div class="sm:col-span-2 grid gap-1 min-w-0"><span class="label">Type</span><div class="seg w-max flex-wrap" role="group" aria-label="Type">${LEAVE_KINDS.map(k=>html`<button key=${k} id=${'lv-k-'+k} type="button" aria-pressed=${f.kind===k} onClick=${()=>setF(x=>({...x,kind:k}))}>${KINDS[k].label}</button>`)}</div></div>
+      <${SFld} label="From"><input id="lv-from" type="date" class="field mono" value=${f.start} onChange=${e=>{const v=e.target.value;setF(x=>({...x,start:v,end:f.end<v?v:f.end}));setErr('')}}/><//>
+      <${SFld} label="To (last day away)"><input id="lv-to" type="date" class="field mono" value=${f.end} min=${f.start} onChange=${e=>{setF(x=>({...x,end:e.target.value}));setErr('')}}/><//>
+      <div class="sm:col-span-2"><${SFld} label="Note (optional)"><input id="lv-note" class="field" placeholder="e.g. Back Monday, first aid course" value=${f.title} onInput=${e=>setF(x=>({...x,title:e.target.value}))}/><//></div>
       ${clashB&&html`<div class="sm:col-span-2 text-[12.5px] rounded-md px-2.5 py-2" style=${{background:'hsl(38 90% var(--blk-l))'}}>They already have ${KINDS[clashB.kind].label.toLowerCase()} booked ${leaveRange(clashB)}. Add this as well?</div>`}
     </div><//>`;
 }
@@ -4985,8 +4985,13 @@ function App({boot,live}){
     }).subscribe();
     return()=>{live.sb.removeChannel(ch)};
   },[]);
-  const [view,setView]=useState(()=>{try{const v=Number(localStorage.getItem(KEY+':view'));return [7,14,30,60].includes(v)?v:7}catch(e){return 7}});
-  const [anchor,setAnchor]=useState(()=>mondayOf(TODAY));
+  /* phones: a narrower layout, and a 3-day view that starts today */
+  const [narrow,setNarrow]=useState(()=>{try{return window.matchMedia('(max-width: 639px)').matches}catch(e){return false}});
+  useEffect(()=>{let m;try{m=window.matchMedia('(max-width: 639px)')}catch(e){return}const h=()=>setNarrow(m.matches);try{m.addEventListener('change',h)}catch(e){m.addListener&&m.addListener(h)}return()=>{try{m.removeEventListener('change',h)}catch(e){}}},[]);
+  const todayNoon=()=>{const d=new Date(TODAY);d.setHours(12,0,0,0);return d};
+  const [view,setView]=useState(()=>{let n=false;try{n=window.matchMedia('(max-width: 639px)').matches}catch(e){}if(n)return 3;try{const v=Number(localStorage.getItem(KEY+':view'));return [7,14,30,60].includes(v)?v:7}catch(e){return 7}});
+  const [anchor,setAnchor]=useState(()=>view===3?todayNoon():mondayOf(TODAY));
+  useEffect(()=>{if(narrow&&![3,7].includes(view)){setView(3);setAnchor(todayNoon())}else if(!narrow&&view===3){setView(7);setAnchor(mondayOf(TODAY))}},[narrow]);
   const [editing,setEditing]=useState(null);
   const [drawer,setDrawer]=useState(false);
   const [panel,setPanel]=useState(false);   /* the Settings panel starts closed every time FraserFlow opens */
@@ -5022,7 +5027,9 @@ function App({boot,live}){
   useEffect(()=>{const t=SCREENS[screen].tab;if(t&&tab!==t)setTab(t);else if(!t&&(tab==='person'||tab==='machine'))setTab('crew')},[screen,tab]);
   useEffect(()=>{if(!screenOK(screen,live.role,data)){if(screen==='machines'&&screenOK('fleet',live.role,data)){setFleetTab('cal');goScreen('fleet')}else goScreen(homeScreen(live.role,data))}},[screen,data.previewOnly,data.previewKnown]);
   const openFleetAsset=screenOK('fleet',live.role,data)?id=>{setFleetAsset({id,n:Date.now()});if(fleetTab==='cal')setFleetTab('dash');goScreen('fleet')}:null;
-  const SCR=fleetCal?{...SCREENS.machines,title:SCREENS.fleet.title}:SCREENS[screen];
+  const sup=live.role==='supervisor';   /* supervisors: the crews' schedule, nothing to change, no extras */
+  const SCR0=fleetCal?{...SCREENS.machines,title:SCREENS.fleet.title}:SCREENS[screen];
+  const SCR=sup&&screen==='schedule'?{...SCR0,only:['crew'],legend:['Crews'],head:'Crews'}:SCR0;
   useEffect(()=>{document.title='FraserFlow - '+SCR.title},[screen]);
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
@@ -5051,10 +5058,11 @@ function App({boot,live}){
     if(view===60){const s0=monthStart(anchor),e=new Date(s0.getFullYear(),s0.getMonth()+2,0,12);return Array.from({length:diffDays(s0,e)+1},(_,i)=>addDays(s0,i))}
     return Array.from({length:view},(_,i)=>addDays(anchor,i))},[anchor,view]);
   const N=days.length;
-  const step=view===30?28:view;
+  const step=view===30?28:view===3?3:view;
   const move=dir=>setAnchor(a=>{if(view===60){const s0=monthStart(a);return new Date(s0.getFullYear(),s0.getMonth()+dir,1,12)}return addDays(a,dir*step)});
-  const atToday=view===60?monthStart(anchor).getTime()===monthStart(TODAY).getTime():diffDays(mondayOf(TODAY),anchor)===0;
-  const pickView=v=>{setView(v);if(v!==60)setAnchor(a=>view===60&&monthStart(a).getTime()===monthStart(TODAY).getTime()?mondayOf(TODAY):mondayOf(a))};
+  const atToday=view===60?monthStart(anchor).getTime()===monthStart(TODAY).getTime():view===3?diffDays(TODAY,anchor)===0:diffDays(mondayOf(TODAY),anchor)===0;
+  const pickView=v=>{setView(v);if(v===3){setAnchor(todayNoon());return}if(v!==60)setAnchor(a=>view===60&&monthStart(a).getTime()===monthStart(TODAY).getTime()?mondayOf(TODAY):mondayOf(a))};
+  const goToday=()=>setAnchor(view===3?todayNoon():mondayOf(TODAY));
   const onThisRange=TODAY>=days[0]&&TODAY<=days[N-1];
 
   const vis=t=>data.resources.filter(r=>r.type===t&&r.visible);
@@ -5140,7 +5148,7 @@ function App({boot,live}){
 
   const legend=[['Crews',['job','standby','crewtraining']],['Asphalt plant',['plantmaint','plantreduced']],['Machines',['onjob','service','repair','inspection']],['Staff',['leave','sick','rdo','training']]];
 
-  return html`<div class="shell h-full flex gap-4">
+  return html`<div class="shell h-full flex gap-2 sm:gap-4">
     <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} data=${data} badge=${{ideas:(data.suggestions||[]).length}}/>
     <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='staff'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onMaint=${openFleetAsset} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
@@ -5150,35 +5158,36 @@ function App({boot,live}){
     <main class="flex-1 min-w-0 h-full flex flex-col gap-3">
       <header class="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div class="flex items-center gap-2.5 shrink-0 pr-3 border-r border-line" title="Alex Fraser Group · Building greener roads">
-          <img src=${BRAND_OVAL} alt="Alex Fraser Group" class="block h-[50px] w-auto select-none" draggable="false"/>
+          <img src=${BRAND_OVAL} alt="Alex Fraser Group" class="block h-[38px] sm:h-[50px] w-auto select-none" draggable="false"/>
           <img src=${BRAND_TAG} alt="Building greener roads" class="brand-tag hidden xl:block h-[30px] w-auto select-none" draggable="false"/>
         </div>
-        ${screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='staff'&&live.role!=='prestart'&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
+        ${screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='staff'&&live.role!=='prestart'&&!sup&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
           title=${on?'Hide Settings':'Crews, plant, mixes, seal, trucks and subcontractors'}
           style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.gear} Settings</button>`)(panel&&tab!=='jobs')}
         ${screen==='schedule'&&html`<${ExportsMenu} items=${[{id:'exp-program',label:'Daily program',desc:'PDF for each job working on a day',run:()=>setProgram(true)},
           ...(data.resources.some(r=>r.type==='crew'&&r.subbie)?[{id:'exp-subworks',label:'Subbie works',desc:'Upcoming works for a subcontractor crew',run:()=>setSubWorksOpen(true)}]:[])]}/>`}
         <div class="flex items-center gap-2 min-w-0">
-          <h1 class="font-display font-semibold tracking-tight truncate text-[22px] leading-none">Fraser<span style=${{color:'var(--accent)'}}>Flow</span><span class="text-faint font-normal"> - </span>${SCR.title}</h1>
-          ${!live.canEdit&&screen!=='prestarts'&&screen!=='qa'&&(screen!=='fleet'||fleetCal)&&!peopleView&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change the schedule">View only</span>`}
+          <h1 class="font-display font-semibold tracking-tight truncate text-[18px] sm:text-[22px] leading-none">Fraser<span style=${{color:'var(--accent)'}}>Flow</span><span class="text-faint font-normal"> - </span>${SCR.title}</h1>
+          ${!live.canEdit&&!sup&&screen!=='prestarts'&&screen!=='qa'&&(screen!=='fleet'||fleetCal)&&!peopleView&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change the schedule">View only</span>`}
         </div>
         <div class="flex-1"></div>
         ${boardScreen&&html`<div class="seg" role="group" aria-label="View length">
+          ${narrow&&html`<button id="view-3" aria-pressed=${view===3} onClick=${()=>pickView(3)}>3 days</button>`}
           <button aria-pressed=${view===7} onClick=${()=>pickView(7)}>Week</button>
-          <button aria-pressed=${view===14} onClick=${()=>pickView(14)}>14 days</button>
+          ${!narrow&&html`<button aria-pressed=${view===14} onClick=${()=>pickView(14)}>14 days</button>
           <button aria-pressed=${view===30} onClick=${()=>pickView(30)}>30 days</button>
-          <button aria-pressed=${view===60} onClick=${()=>pickView(60)}>2 months</button>
+          <button aria-pressed=${view===60} onClick=${()=>pickView(60)}>2 months</button>`}
         </div>
         <div class="flex items-center gap-1">
           <button class="btn px-2" onClick=${()=>move(-1)} aria-label=${view===60?'Previous month':'Previous'}>${Icon.chevL}</button>
-          <button class="btn" onClick=${()=>setAnchor(mondayOf(TODAY))} disabled=${atToday}>Today</button>
+          <button class="btn" onClick=${goToday} disabled=${atToday}>Today</button>
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>`}
-        ${live.role!=='prestart'&&html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
-        ${live.role!=='prestart'&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} onMaint=${openFleetAsset} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
+        ${live.role!=='prestart'&&!sup&&html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
+        ${live.role!=='prestart'&&!sup&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} onMaint=${openFleetAsset} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
         ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary" disabled=${!live.canEdit} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Add leave</button>`}
-        ${boardScreen&&screen!=='staff'&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'||screen==='fleet'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
-        ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
+        ${boardScreen&&screen!=='staff'&&!sup&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'||screen==='fleet'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
+        ${screen==='schedule'&&!sup&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
         <${SettingsMenu} simple=${live.role==='prestart'} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
       </header>
 
@@ -5200,7 +5209,7 @@ function App({boot,live}){
         <${Stat} k="Machines down today" v=${downToday.length} sub=${downToday.length?downToday.map(m=>m.name).join(', '):'all available'} tone=${downToday.length?'var(--bad)':null}/>
         <${Stat} k="Free today" v=${Math.max(0,ms.length-on.length-downToday.length)} sub="not booked or down"/>
         <${Stat} k="Showing" v=${html`<span class="text-[16px]">${fmtRange(days[0],days[N-1])}</span>`} sub=""/>
-      </section>`})():html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+      </section>`})():sup?null:html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
         <${Stat} k="Crews on jobs today" v=${`${crewsOnJob.length}/${vis('crew').length}`} sub=${`${util}% of crew-days booked`}/>
         <${Stat} k="Machines down today" v=${downToday.length} sub=${downToday.length?downToday.map(m=>m.name).join(', '):'all available'} tone=${downToday.length?'var(--bad)':null}/>
         <${Stat} k="Staff away today" v=${awayToday.length} sub=${awayToday.length?awayToday.map(m=>m.name.split(' ')[0]).join(', '):'full strength'} tone=${awayToday.length?'var(--warn)':null}/>
@@ -5208,9 +5217,9 @@ function App({boot,live}){
       </section>`}
 
       <section class="panel flex-1 min-h-[320px] flex flex-col overflow-hidden">
-        <${Board} data=${data} days=${days} view=${view} onCreate=${onCreate} onEdit=${b=>setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
+        <${Board} data=${data} days=${days} view=${view} narrow=${narrow} readOnly=${!live.canEdit} onCreate=${onCreate} onEdit=${b=>setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
           collapsed=${collapsed} toggleSection=${t=>setCollapsed(c=>({...c,[t]:!c[t]}))}/>
-        <div class="border-t border-line px-4 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
+        <div class="border-t border-line px-4 py-2.5 hidden sm:flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
           ${legend.filter(([g])=>SCR.legend.includes(g)).map(([g,ks])=>html`<span key=${g} class="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
             <span class="font-semibold text-ink">${g}</span>
             ${ks.map(k=>html`<span key=${k} class="inline-flex items-center gap-1.5">
