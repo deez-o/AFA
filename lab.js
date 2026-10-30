@@ -112,8 +112,8 @@ function LabScreen({data,live,notify}){
 }
 
 function UploadDialog({sb,up,onClose,onDone}){
-  const [k,setK]=useState('');const [file,setFile]=useState(null);const [note,setNote]=useState('');const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
-  const save=async()=>{setErr('');if(!file){setErr('Choose the report file.');return}if(file.size>25*1024*1024){setErr('That file is over 25 MB.');return}
+  const shiftsU=[...new Set(up.shifts)].sort().reverse();const [k,setK]=useState(up.k||shiftsU[0]||'');   /* reports are per shift */const [file,setFile]=useState(null);const [note,setNote]=useState('');const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const save=async()=>{setErr('');if(!k){setErr('Pick the shift.');return}if(!file){setErr('Choose the report file.');return}if(file.size>25*1024*1024){setErr('That file is over 25 MB.');return}
     if(!OK_TYPE.test(file.type||'')){setErr('Add a PDF, a picture, or an Excel, CSV or Word file.');return}
     setBusy(true);try{const safe=file.name.replace(/[^\w.\- ]+/g,'_').slice(-80);const path=`jobs/${up.job.id}/${Date.now()}-${safe}`;
       const {error}=await sb.storage.from(BUCKET).upload(path,file,{contentType:file.type,upsert:false});if(error)throw error;
@@ -123,7 +123,7 @@ function UploadDialog({sb,up,onClose,onDone}){
   return html`<${Modal} title=${'Upload '+(up.kind==='ncr'?'an NCR':'a '+kindLabel(up.kind).toLowerCase())} sub=${jobLabel(up.job)} onClose=${onClose}
     foot=${html`${err&&html`<span id="lab-up-err" class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="lab-up-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Uploading…':'Upload'}</button>`}>
     <div class="grid gap-3">
-      <${Fld} label="For"><select id="lab-up-shift" class="field" style=${fs} value=${k} onChange=${e=>setK(e.target.value)}><option value="">The whole job</option>${[...new Set(up.shifts)].map(d=>html`<option key=${d} value=${d}>Shift ${WD[parse(d).getDay()]} ${fmtShort(parse(d))}</option>`)}</select><//>
+      <${Fld} label="Shift"><select id="lab-up-shift" class="field" style=${fs} value=${k} onChange=${e=>setK(e.target.value)}>${shiftsU.map(d=>html`<option key=${d} value=${d}>Shift ${WD[parse(d).getDay()]} ${fmtShort(parse(d))}</option>`)}</select><//>
       <${Fld} label="Report (PDF, picture, Excel, CSV or Word, up to 25 MB)"><input id="lab-up-file" type="file" accept=${ACCEPT} class="field" style=${{...fs,paddingTop:5}} onChange=${e=>setFile(e.target.files&&e.target.files[0]||null)}/><//>
       <${Fld} label="Note (optional)"><input id="lab-up-note" class="field" style=${fs} placeholder=${up.kind==='core'?'e.g. Density results':up.kind==='ncr'?'e.g. NCR number, what it’s about':'e.g. Binder content, grading'} value=${note} onInput=${e=>setNote(e.target.value)}/><//>
     </div><//>`;
