@@ -90,7 +90,7 @@ function LabScreen({data,live,notify}){
         ${isOpen&&html`<div class="border-t border-line px-4 py-3 grid gap-3">
           <div class="flex flex-wrap gap-2">
             <button type="button" class="btn lab-qa-all" disabled=${!allSub.length||!!busy} onClick=${()=>pdfs(allSub,o.j.id)}>${Icon.download} ${busy===o.j.id?'Making PDFs…':`Download QA (${allSub.length} pack${allSub.length===1?'':'s'})`}</button>
-            ${canUp&&!setupMsg&&KINDS.map(([kk,l])=>html`<button key=${kk} type="button" class=${'btn lab-upload lab-upload-'+kk} onClick=${()=>setUp({job:o.j,shifts:o.shifts.map(s=>s.e.k),kind:kk,n:Date.now()})}>${Icon.plus} ${({asphalt:'Upload Asphalt Report',core:'Upload Core Report',ncr:'Upload NCR'})[kk]}</button>`)}</div>
+            ${canUp&&!setupMsg&&KINDS.map(([kk,l])=>html`<button key=${kk} type="button" class=${'btn btn-primary lab-upload lab-upload-'+kk} onClick=${()=>setUp({job:o.j,shifts:o.shifts.map(s=>s.e.k),kind:kk,n:Date.now()})}>${Icon.plus} ${({asphalt:'Upload Asphalt Report',core:'Upload Core Report',ncr:'Upload NCR'})[kk]}</button>`)}</div>
           <div class="overflow-x-auto"><table class="w-full text-[12.5px] min-w-[720px]">
             <thead><tr class="text-left">${['Shift','Crew','Planned','Laid (QA)','Area m² (QA)','Loads','QA',''].map((h,i)=>html`<th key=${i} class=${'label font-normal py-1.5 pr-3 whitespace-nowrap'+(i>=2&&i<=5?' text-right':'')}>${h}</th>`)}</tr></thead>
             <tbody>${o.shifts.map(s=>{const sr=reportsFor(o.j.id,s.e.k);const draft=s.packs.length&&!s.sub.length;
