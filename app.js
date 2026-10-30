@@ -1454,17 +1454,18 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
       ${f.kind==='job'
         ?html`<label class="grid gap-1"><span class="label">Customer</span>
             <${Combo} id="ed-customer" className="field" placeholder="e.g. CMB, BMD" label="Customer"
-              value=${f._customer??(f.jobId==='__new'?'':(data.jobs.find(j=>j.id===(f.jobId||data.jobs[0]?.id))?.customer||''))} onChange=${v=>set({_customer:v})}
+              value=${f._customer??(f.jobId==='__new'?'':(data.jobs.find(j=>j.id===(f.jobId===''?'':(f.jobId||data.jobs[0]?.id)))?.customer||''))} onChange=${v=>set({_customer:v})}
               options=${[...new Set(data.jobs.map(j=>(j.customer||'').trim()).filter(Boolean))].sort()}/>
             <span class="text-[11.5px] text-faint">Saved to the job below, so every booking for that job shows the same customer.</span></label>
           <label class="grid gap-1"><span class="label">Job</span>
-            <select id="ed-job" class="field" value=${f.jobId||data.jobs[0]?.id||'__new'} onChange=${e=>{
+            <select id="ed-job" class="field" style=${f.jobId===''?{color:'var(--faint)'}:null} value=${f.jobId===''?'':(f.jobId||data.jobs[0]?.id||'__new')} onChange=${e=>{
                 const v=e.target.value;
                 if(v==='__new'){set({jobId:'__new',_newJobName:'',_customer:f._customer??'',address:''});return}
-                const old=data.jobs.find(j=>j.id===(f.jobId||data.jobs[0]?.id)),nj=data.jobs.find(j=>j.id===v);
+                const old=data.jobs.find(j=>j.id===(f.jobId===''?'':(f.jobId||data.jobs[0]?.id))),nj=data.jobs.find(j=>j.id===v);
                 set({jobId:v,_customer:undefined,address:(!f.address||f.address===old?.address)?(nj?.address||''):f.address})}}>
-              ${data.jobs.filter(j=>!j.completed||j.id===f.jobId).map(j=>html`<option key=${j.id} value=${j.id}>${j.name}${j.completed?' (completed)':''}</option>`)}
-              <option value="__new">+ New job…</option>
+              ${f.jobId===''&&html`<option value="" disabled>Choose a job…</option>`}
+              <option value="__new" style=${{color:'var(--ink)'}}>+ New job…</option>
+              ${data.jobs.filter(j=>!j.completed||j.id===f.jobId).map(j=>html`<option key=${j.id} value=${j.id} style=${{color:'var(--ink)'}}>${j.name}${j.completed?' (completed)':''}</option>`)}
             </select></label>
           ${f.jobId==='__new'&&html`<label class="grid gap-1"><span class="label">New job name</span>
             <input id="ed-new-job" class="field" placeholder="e.g. Duntroon St resheet" value=${f._newJobName||''} autoFocus=${true} onInput=${e=>set({_newJobName:e.target.value})}/>
@@ -1550,8 +1551,9 @@ function Editor({initial,data,onSave,onDelete,onClose}){
   /* new crew job bookings: these must be filled in before the booking can be added */
   const [tried,setTried]=useState(false);
   const missing=(()=>{if(!isNew||f.kind!=='job')return [];const m=[];const crewR=data.resources.find(r=>r.id===f.resourceId);
-    const cust=(f._customer??(f.jobId==='__new'?'':(data.jobs.find(j=>j.id===(f.jobId||data.jobs[0]?.id))?.customer||''))).trim();
+    const cust=(f._customer??(f.jobId==='__new'?'':(data.jobs.find(j=>j.id===(f.jobId===''?'':(f.jobId||data.jobs[0]?.id)))?.customer||''))).trim();
     if(!crewR||crewR.type!=='crew')m.push({id:'ed-res',label:'Crew',tab:'details'});
+    if(!f.jobId)m.push({id:'ed-job',label:'Job',tab:'details'});
     if(!cust)m.push({id:'ed-customer',label:'Customer',tab:'details'});
     if(!(f.quoteNo||'').trim())m.push({id:'ed-quote',label:'Quote number',tab:'details'});
     if(!(f.address||'').trim())m.push({id:'ed-address',label:'Site address',tab:'details'});
@@ -1615,7 +1617,7 @@ function Editor({initial,data,onSave,onDelete,onClose}){
             onClick=${()=>setTab(t.id)}>${typeof t.label==='function'?t.label(f,data):t.label}${tried&&missing.some(m=>m.tab===t.id)&&html`<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full align-middle" style=${{background:'var(--bad)'}} aria-label="needs filling in"></span>`}${t.badge&&t.badge(f,data)&&html`<span class="ml-1.5 mono text-[11px] px-1.5 py-0.5 rounded bg-sunken text-muted">${t.badge(f,data)}</span>`}</button>`)}
         </div>
       </div>
-      ${isNew&&f.kind==='job'&&html`<style>${['ed-res','ed-customer','ed-quote','ed-address','ed-start','ed-end'].map(i=>`label:has(#${i}) > .label::after`).join(',')}{content:' *';color:var(--bad)}
+      ${isNew&&f.kind==='job'&&html`<style>${['ed-res','ed-customer','ed-job','ed-quote','ed-address','ed-start','ed-end'].map(i=>`label:has(#${i}) > .label::after`).join(',')}{content:' *';color:var(--bad)}
         .label:has(+ #ed-shift)::after{content:' *';color:var(--bad)}
         ${tried?missing.map(m=>`#${m.id}`).join(',')+'{border-color:var(--bad)!important;box-shadow:0 0 0 1px var(--bad)!important}':''}</style>`}
       <div class="flex-1 min-h-0 overflow-y-auto px-5 py-5" role="tabpanel" id=${'panel-'+active.id} aria-labelledby=${'tab-'+active.id}>
@@ -3443,8 +3445,7 @@ function App({boot,live}){
 
   const onCreate=({resourceId,start,end})=>{
     const t=data.resources.find(r=>r.id===resourceId)?.type||'crew';
-    const fj=data.jobs.find(j=>!j.completed);
-    setEditing({resourceId,start,end,kind:TYPES[t].def,jobId:fj?.id||'__new',title:'',address:fj?.address||'',plantIds:[]});   /* shift is picked in the booking (required) */
+    setEditing({resourceId,start,end,kind:TYPES[t].def,jobId:data.jobs.length?'':'__new',title:'',address:'',plantIds:[]});   /* no job picked: choose one or make a new one */   /* shift is picked in the booking (required) */
   };
   const onSave=(b,newMixes=[],jobPatch=null,newJob=null)=>{setData(d=>{const exists=d.blocks.some(x=>x.id===b.id);
     if(newJob)d={...d,jobs:[...d.jobs,newJob]};
