@@ -1,0 +1,545 @@
+/* =====================================================================
+   FraserFlow: Fleet & Maintenance (Phase 2: core maintenance)
+   Loaded only when the Fleet screen opens. Uses the app's own helpers
+   (html, hooks, Icon, Combo, date helpers) and the Supabase tables made by
+   supabase/maintenance.sql. The roster's machines are the asset list; every
+   record here points at a machine by its id. No costs or prices anywhere.
+   ===================================================================== */
+(function(){
+const MT=['asset_profiles','meter_readings','service_plans','service_records','work_orders'];
+const WO_STATUS={open:'Open',scheduled:'Scheduled',in_progress:'In progress',awaiting_parts:'Awaiting parts',completed:'Completed',closed:'Verified & closed',cancelled:'Cancelled'};
+const WO_OPEN=s=>!['completed','closed','cancelled'].includes(s);
+const WO_TYPE={service:'Scheduled service',defect:'Defect repair',breakdown:'Breakdown',request:'Maintenance request'};
+const PRI={low:'Low',medium:'Medium',high:'High',urgent:'Urgent'};
+const PRI_COL={low:'var(--muted)',medium:'hsl(212 60% 45%)',high:'hsl(30 90% 42%)',urgent:'hsl(0 72% 47%)'};
+const ST={ok:['Operational','hsl(145 55% 36%)'],due:['Maintenance due','hsl(30 90% 46%)'],service:['Being serviced','hsl(212 75% 48%)'],out:['Out of service','hsl(0 72% 47%)']};
+const PLAN_ST={ok:['OK','hsl(145 55% 36%)'],soon:['Due soon','hsl(30 90% 46%)'],overdue:['Overdue','hsl(0 72% 47%)'],nobase:['No service recorded','var(--muted)']};
+const fs={height:32,fontSize:13};
+const n0=v=>v===''||v==null?null:+v;
+const dayDiff=(a,b)=>Math.round((parse(b)-parse(a))/864e5);
+const fmtD=k=>k?`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`:'';
+const fmtTs=t=>t?new Date(t).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}):'';
+const woNo=w=>'WO '+w.number;
+const localDay=ts=>ts?iso(new Date(ts)):'';   /* a database time as a local (Brisbane) date */
+const errMsg=e=>(e&&(e.message||e.error_description))||String(e);
+
+/* load every maintenance table (paged past Supabase's 1,000-row limit) and keep it live */
+async function fetchAll(sb,t){const out=[];for(let from=0;;from+=1000){const {data,error}=await sb.from(t).select('*').range(from,from+999);if(error)throw error;out.push(...(data||[]));if(!data||data.length<1000)break}return out}
+function useMaint(sb){
+  const [db,setDb]=useState(null);const [err,setErr]=useState('');
+  const load=async()=>{try{const r=await Promise.all(MT.map(t=>fetchAll(sb,t)));const o={};MT.forEach((t,i)=>o[t]=r[i]);setDb(o);setErr('')}catch(e){setErr(errMsg(e))}};
+  useEffect(()=>{load();let t=null;let ch=null;
+    try{ch=sb.channel('maint-'+uid());MT.forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,350)}));ch.subscribe()}catch(e){}
+    return()=>{clearTimeout(t);try{if(ch)sb.removeChannel(ch)}catch(e){}}},[]);
+  return {db,err,reload:load};
+}
+
+/* ---------- the maintenance picture of the fleet, worked out from the records ---------- */
+function buildModel(data,db){
+  const today=iso(TODAY);
+  const prof=new Map(db.asset_profiles.map(p=>[p.asset_id,p]));
+  const meters=new Map();
+  [...db.meter_readings].sort((a,b)=>a.read_at<b.read_at?-1:a.read_at>b.read_at?1:(a.created_at<b.created_at?-1:1))
+    .forEach(r=>{const m=meters.get(r.asset_id)||{};m[r.kind]={value:+r.value,at:r.read_at};meters.set(r.asset_id,m)});
+  const recs=[...db.service_records].sort((a,b)=>a.done_on<b.done_on?1:a.done_on>b.done_on?-1:(a.created_at<b.created_at?1:-1));
+  const machines=data.resources.filter(r=>r.type==='machine');
+  const meterType=m=>{const p=prof.get(m.id);if(p&&p.meter_type)return p.meter_type;return /truck/i.test([machCatOf(m),m.name,m.sub].join(' '))?'both':'hours'};
+  const plansFor=m=>db.service_plans.filter(p=>p.active&&(p.asset_id===m.id||(p.category&&p.category.trim().toLowerCase()===machCatOf(m).toLowerCase())));
+  const planStatus=(m,p)=>{const mt=meterType(m);const last=recs.find(r=>r.asset_id===m.id&&r.plan_id===p.id);
+    if(!last)return {state:'nobase',parts:[],last:null};
+    const cur=meters.get(m.id)||{};const parts=[];
+    if(p.every_hours&&mt!=='km'&&last.hours!=null){const due=+last.hours+ +p.every_hours;const left=cur.hours?due-cur.hours.value:null;
+      parts.push({k:'hours',due,left,warn:+p.warn_hours,dueTxt:`${fmtN(due)} h`,leftTxt:left==null?'no hours reading':left<=0?`${fmtN(-left)} h overdue`:`${fmtN(left)} h to go`})}
+    if(p.every_km&&mt!=='hours'&&last.km!=null){const due=+last.km+ +p.every_km;const left=cur.km?due-cur.km.value:null;
+      parts.push({k:'km',due,left,warn:+p.warn_km,dueTxt:`${fmtN(due)} km`,leftTxt:left==null?'no km reading':left<=0?`${fmtN(-left)} km overdue`:`${fmtN(left)} km to go`})}
+    if(p.every_days){const dueK=iso(addDays(parse(last.done_on),+p.every_days));const left=dayDiff(today,dueK);
+      parts.push({k:'days',due:dueK,left,warn:+p.warn_days,dueTxt:fmtD(dueK),leftTxt:left<=0?(left===0?'due today':`${-left} days overdue`):`${left} days to go`})}
+    if(!parts.length)return {state:'nobase',parts,last};
+    const over=parts.filter(x=>x.left!=null&&x.left<=0),soon=parts.filter(x=>x.left!=null&&x.left>0&&x.left<=x.warn);
+    const state=over.length?'overdue':soon.length?'soon':'ok';
+    /* the trigger that comes first: anything overdue, else the one closest to its warning point */
+    const first=[...parts].filter(x=>x.left!=null).sort((a,b)=>(a.left/Math.max(a.warn,1))-(b.left/Math.max(b.warn,1)))[0]||parts[0];
+    return {state,parts,last,first}};
+  const assets=machines.map(m=>{const p=prof.get(m.id)||null;const plans=plansFor(m).map(pl=>({plan:pl,...planStatus(m,pl)}));
+    const wos=db.work_orders.filter(w=>w.asset_id===m.id);const open=wos.filter(w=>WO_OPEN(w.status));
+    const downNow=data.blocks.some(b=>b.resourceId===m.id&&KINDS[b.kind]&&KINDS[b.kind].down&&b.start<=today&&b.end>=today);
+    const out=open.some(w=>w.wo_type==='breakdown'&&w.safe_to_operate===false);
+    const serv=open.some(w=>w.status==='in_progress')||downNow;
+    const due=plans.some(x=>x.state==='overdue'||x.state==='soon');
+    const status=out?'out':serv?'service':due?'due':'ok';
+    const next=plans.filter(x=>x.first).sort((a,b)=>({overdue:0,soon:1,ok:2}[a.state]-{overdue:0,soon:1,ok:2}[b.state])||((a.first.left/Math.max(a.first.warn,1))-(b.first.left/Math.max(b.first.warn,1))))[0]||null;
+    const crew=m.crewId?data.resources.find(r=>r.id===m.crewId):null;
+    return {m,p,mt:meterType(m),cur:meters.get(m.id)||{},plans,wos,open,status,next,crew,retired:!!(p&&p.retired),
+      overdue:plans.filter(x=>x.state==='overdue').length,soon:plans.filter(x=>x.state==='soon').length,last:recs.find(r=>r.asset_id===m.id)||null}});
+  return {assets,byId:new Map(assets.map(a=>[a.m.id,a])),recs,meters,today}
+}
+const stDot=(s,size=10)=>html`<span class="inline-block rounded-full shrink-0" style=${{width:size,height:size,background:ST[s][1]}} title=${ST[s][0]}></span>`;
+const stChip=s=>html`<span class="inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap" style=${{color:ST[s][1],background:'var(--sunken)',boxShadow:`inset 0 0 0 1px ${ST[s][1]}`}}>${stDot(s,7)} ${ST[s][0]}</span>`;
+const planChip=s=>html`<span class="text-[11px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap" style=${{color:PLAN_ST[s][1],background:'var(--sunken)',boxShadow:`inset 0 0 0 1px ${PLAN_ST[s][1]}`}}>${PLAN_ST[s][0]}</span>`;
+const woChip=s=>html`<span class="text-[11px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap" style=${{background:s==='closed'?'hsl(145 50% var(--blk-l))':s==='cancelled'?'var(--sunken)':s==='completed'?'hsl(145 50% var(--blk-l))':s==='in_progress'?'hsl(212 80% var(--blk-l))':s==='awaiting_parts'?'hsl(38 85% var(--blk-l))':'var(--accent-soft)',color:s==='cancelled'?'var(--muted)':'var(--ink)'}}>${WO_STATUS[s]}</span>`;
+const meterTxt=a=>[a.mt!=='km'&&(a.cur.hours?`${fmtN(a.cur.hours.value)} h`:'– h'),a.mt!=='hours'&&(a.cur.km?`${fmtN(a.cur.km.value)} km`:'– km')].filter(Boolean).join(' · ');
+
+/* small building blocks */
+function Modal({title,sub,onClose,children,foot,wide,noEsc}){
+  const escRef=useRef(noEsc);escRef.current=noEsc;
+  useEffect(()=>{const h=e=>{if(e.key==='Escape'&&!e.defaultPrevented&&!escRef.current){onClose()}};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);   /* an open dropdown takes Escape first */
+  return html`<div class="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div class=${'panel pop w-full flex flex-col max-h-full overflow-hidden '+(wide?'max-w-[980px] sm:h-[90vh]':'max-w-[560px]')} role="dialog" aria-modal="true" aria-labelledby="mx-title">
+      <div class="px-5 pt-5 pb-3 border-b border-line flex items-start gap-3"><div class="min-w-0 flex-1"><div id="mx-title" class="font-display text-[18px] font-semibold">${title}</div>${sub&&html`<div class="text-[12.5px] text-muted">${sub}</div>`}</div>
+        <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button></div>
+      <div class="flex-1 min-h-0 overflow-y-auto px-5 py-4">${children}</div>
+      ${foot&&html`<div class="px-5 py-3 border-t border-line bg-sunken flex flex-wrap items-center gap-2">${foot}</div>`}
+    </div></div>`;
+}
+const Fld=({label,children,span})=>html`<label class=${'grid gap-1 min-w-0'+(span?' sm:col-span-2':'')}><span class="label">${label}</span>${children}</label>`;
+function PartsEditor({parts,onChange,disabled}){
+  const rows=parts&&parts.length?parts:[];
+  return html`<div class="grid gap-1.5">
+    ${rows.map((p,i)=>html`<div key=${i} class="grid grid-cols-[1fr_80px_28px] gap-2 items-center">
+      <input class="field field-sm" style=${{height:30,fontSize:13}} placeholder="Part or material, e.g. Oil filter" value=${p.part||''} disabled=${disabled} aria-label="Part" onInput=${e=>onChange(rows.map((x,k)=>k===i?{...x,part:e.target.value}:x))}/>
+      <input class="field field-sm mono" style=${{height:30,fontSize:13}} placeholder="Qty" value=${p.qty??''} disabled=${disabled} aria-label="Quantity" onInput=${e=>onChange(rows.map((x,k)=>k===i?{...x,qty:e.target.value}:x))}/>
+      <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" disabled=${disabled} onClick=${()=>onChange(rows.filter((_,k)=>k!==i))} aria-label="Remove part">${Icon.x}</button></div>`)}
+    ${!disabled&&html`<button type="button" class="justify-self-start text-[12px] font-medium inline-flex items-center gap-1 text-muted hover:text-ink" onClick=${()=>onChange([...rows,{part:'',qty:''}])}>${Icon.plus} Add a part</button>`}
+  </div>`;
+}
+const cleanParts=ps=>(ps||[]).filter(p=>(p.part||'').trim()).map(p=>({part:p.part.trim(),qty:(String(p.qty??'').trim())||'1'}));
+const partsTxt=ps=>(ps||[]).map(p=>`${p.qty&&p.qty!=='1'?p.qty+' × ':''}${p.part}`).join(', ');
+
+/* ---------- dialogs ---------- */
+function ServiceDialog({ctx,a,plan,baseline,onClose}){
+  const {sb,notify,reload,staff}=ctx;
+  const [f,setF]=useState({done_on:iso(TODAY),hours:a.mt!=='km'&&a.cur.hours?String(a.cur.hours.value):'',km:a.mt!=='hours'&&a.cur.km?String(a.cur.km.value):'',mechanic:'',work_done:'',notes:'',parts:[],service_type:plan?plan.name:''});
+  const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const save=async()=>{setErr('');if(!f.service_type.trim()){setErr('Say what service was done.');return}if(!f.done_on){setErr('Pick the date it was done.');return}
+    setBusy(true);const {error}=await sb.from('service_records').insert({asset_id:a.m.id,plan_id:plan?plan.id:null,service_type:f.service_type.trim(),done_on:f.done_on,hours:n0(f.hours),km:n0(f.km),
+      mechanic:f.mechanic.trim()||null,work_done:f.work_done.trim()||null,notes:f.notes.trim()||null,parts:cleanParts(f.parts),baseline:!!baseline});
+    setBusy(false);if(error){setErr(errMsg(error));return}notify(baseline?'Last service recorded':'Service recorded');reload();onClose()};
+  return html`<${Modal} title=${baseline?'Last service before FraserFlow':'Record a service'} sub=${`${a.m.name} · ${a.m.sub||''}`} onClose=${onClose}
+    foot=${html`${err&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="sv-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Saving…':'Save service'}</button>`}>
+    ${baseline&&html`<p class="text-[12.5px] text-muted mb-3">Enter when this service was last done, and at what hours or km. FraserFlow works out when the next one is due from here.</p>`}
+    <div class="grid sm:grid-cols-2 gap-3">
+      <${Fld} label="Service" span=${true}><${Combo} id="sv-type" className="field" style=${fs} label="Service" value=${f.service_type} onChange=${v=>setF({...f,service_type:v})} options=${ctx.plans.map(p=>p.name)}/><//>
+      <${Fld} label="Date done"><input id="sv-date" type="date" class="field mono" style=${fs} value=${f.done_on} max=${iso(TODAY)} onChange=${e=>setF({...f,done_on:e.target.value})}/><//>
+      ${!baseline&&html`<${Fld} label="Mechanic or contractor"><${Combo} id="sv-mech" className="field" style=${fs} label="Mechanic" value=${f.mechanic} onChange=${v=>setF({...f,mechanic:v})} options=${staff}/><//>`}
+      ${a.mt!=='km'&&html`<${Fld} label="Engine hours at service"><input id="sv-hours" type="number" min="0" step="any" class="field mono" style=${fs} value=${f.hours} onInput=${e=>setF({...f,hours:e.target.value})}/><//>`}
+      ${a.mt!=='hours'&&html`<${Fld} label="Odometer km at service"><input id="sv-km" type="number" min="0" step="any" class="field mono" style=${fs} value=${f.km} onInput=${e=>setF({...f,km:e.target.value})}/><//>`}
+      ${!baseline&&html`<${Fld} label="Work completed" span=${true}><textarea id="sv-work" class="field" style=${{height:'auto',minHeight:70,padding:'8px 10px',fontSize:13}} rows="3" value=${f.work_done} onInput=${e=>setF({...f,work_done:e.target.value})}></textarea><//>
+        <div class="sm:col-span-2 grid gap-1"><span class="label">Parts replaced or used</span><${PartsEditor} parts=${f.parts} onChange=${v=>setF({...f,parts:v})}/></div>
+        <${Fld} label="Notes" span=${true}><input class="field" style=${fs} value=${f.notes} onInput=${e=>setF({...f,notes:e.target.value})}/><//>`}
+    </div><//>`;
+}
+
+function ReadingDialog({ctx,a,onClose}){
+  const {sb,notify,reload,perms}=ctx;
+  const [f,setF]=useState({kind:a.mt==='km'?'km':'hours',value:'',read_at:iso(TODAY),source:'manual',note:''});const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const save=async()=>{setErr('');if(f.value===''){setErr('Enter the reading.');return}setBusy(true);
+    const ts=f.read_at===iso(TODAY)?new Date().toISOString():new Date(f.read_at+'T12:00:00').toISOString();
+    const {error}=await sb.from('meter_readings').insert({asset_id:a.m.id,kind:f.kind,value:+f.value,read_at:ts,source:f.source,note:f.note.trim()||null});
+    setBusy(false);if(error){setErr(errMsg(error));return}notify('Reading saved');reload();onClose()};
+  const cur=a.cur[f.kind];
+  return html`<${Modal} title="Add a meter reading" sub=${`${a.m.name} · now ${meterTxt(a)}`} onClose=${onClose}
+    foot=${html`${err&&html`<span id="rd-err" class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="rd-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>Save reading</button>`}>
+    <div class="grid sm:grid-cols-2 gap-3">
+      ${a.mt==='both'&&html`<${Fld} label="Meter"><div class="seg w-max"><button type="button" aria-pressed=${f.kind==='hours'} onClick=${()=>setF({...f,kind:'hours'})}>Engine hours</button><button type="button" aria-pressed=${f.kind==='km'} onClick=${()=>setF({...f,kind:'km'})}>Odometer km</button></div><//>`}
+      <${Fld} label=${f.kind==='hours'?'Engine hours':'Odometer km'}><input id="rd-value" type="number" min="0" step="any" class="field mono" style=${fs} value=${f.value} autoFocus=${true} onInput=${e=>setF({...f,value:e.target.value})}/><//>
+      <${Fld} label="Date read"><input type="date" class="field mono" style=${fs} value=${f.read_at} max=${iso(TODAY)} onChange=${e=>setF({...f,read_at:e.target.value})}/><//>
+      ${perms.mgr&&html`<${Fld} label="Type"><select class="field" style=${fs} value=${f.source} onChange=${e=>setF({...f,source:e.target.value})}>
+          <option value="manual">Normal reading</option><option value="correction">Correction (fixes a wrong reading)</option><option value="replacement">Meter replaced (starts again)</option></select><//>`}
+      <${Fld} label="Note"><input class="field" style=${fs} value=${f.note} onInput=${e=>setF({...f,note:e.target.value})}/><//>
+    </div>
+    <p class="text-[12px] text-muted mt-3">${cur?`Last ${f.kind==='hours'?'hours':'km'} reading: ${fmtN(cur.value)} on ${fmtTs(cur.at)}. `:''}A reading can’t be lower than the one before it${perms.mgr?' unless it is a correction or a new meter':'. If a reading was wrong, ask an administrator to correct it'}.</p><//>`;
+}
+
+function ProfileDialog({ctx,a,onClose}){
+  const {sb,notify,reload}=ctx;const p=a.p||{};
+  const [f,setF]=useState({make:p.make||'',model:p.model||'',year:p.year?String(p.year):'',serial:p.serial||'',meter_type:a.mt,retired:!!p.retired,notes:p.notes||''});const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const save=async()=>{setErr('');setBusy(true);const row={asset_id:a.m.id,make:f.make.trim()||null,model:f.model.trim()||null,year:f.year?+f.year:null,serial:f.serial.trim()||null,meter_type:f.meter_type,retired:f.retired,notes:f.notes.trim()||null};
+    const {error}=a.p?await sb.from('asset_profiles').update(row).eq('asset_id',a.m.id):await sb.from('asset_profiles').insert(row);
+    setBusy(false);if(error){setErr(errMsg(error));return}notify('Machine details saved');reload();onClose()};
+  return html`<${Modal} title="Machine details" sub=${`${a.m.name} · ${a.m.sub||''}${a.m.rego?' · '+a.m.rego:''}`} onClose=${onClose}
+    foot=${html`${err&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="pf-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>Save</button>`}>
+    <p class="text-[12px] text-muted mb-3">Fleet number, description, category and rego come from Settings › Machines and aren’t changed here.</p>
+    <div class="grid sm:grid-cols-2 gap-3">
+      <${Fld} label="Make"><input id="pf-make" class="field" style=${fs} placeholder="e.g. Dynapac" value=${f.make} onInput=${e=>setF({...f,make:e.target.value})}/><//>
+      <${Fld} label="Model"><input class="field" style=${fs} placeholder="e.g. CC1200" value=${f.model} onInput=${e=>setF({...f,model:e.target.value})}/><//>
+      <${Fld} label="Year"><input type="number" min="1950" max="2100" class="field mono" style=${fs} value=${f.year} onInput=${e=>setF({...f,year:e.target.value})}/><//>
+      <${Fld} label="Serial number"><input class="field mono" style=${fs} value=${f.serial} onInput=${e=>setF({...f,serial:e.target.value})}/><//>
+      <${Fld} label="Meters"><select id="pf-meter" class="field" style=${fs} value=${f.meter_type} onChange=${e=>setF({...f,meter_type:e.target.value})}>
+        <option value="hours">Engine hours</option><option value="km">Kilometres</option><option value="both">Hours and kilometres</option></select><//>
+      <${Fld} label="Notes"><input class="field" style=${fs} value=${f.notes} onInput=${e=>setF({...f,notes:e.target.value})}/><//>
+      <label class="inline-flex items-center gap-2 text-[13px] cursor-pointer sm:col-span-2"><input type="checkbox" class="w-4 h-4" checked=${f.retired} onChange=${e=>setF({...f,retired:e.target.checked})}/>Retired (kept for history, left out of the fleet counts)</label>
+    </div><//>`;
+}
+
+/* one dialog for new and existing work orders, including completing a service and verifying */
+function WorkOrderDialog({ctx,wo,init,onClose}){
+  const {sb,notify,reload,perms,M,staff}=ctx;const isNew=!wo;
+  const [f,setF]=useState(()=>wo?{...wo,start_date:wo.start_date||'',end_date:wo.end_date||'',assigned_to:wo.assigned_to||'',description:wo.description||'',completion_notes:wo.completion_notes||'',parts:wo.parts||[]}
+    :{asset_id:'',wo_type:'request',plan_id:null,title:'',description:'',priority:'medium',assigned_to:'',start_date:'',end_date:'',parts:[],completion_notes:'',...(init||{})});
+  const a=M.byId.get(f.asset_id);
+  const [svc,setSvc]=useState(()=>({done_on:iso(TODAY),hours:a&&a.mt!=='km'&&a.cur.hours?String(a.cur.hours.value):'',km:a&&a.mt!=='hours'&&a.cur.km?String(a.cur.km.value):''}));
+  const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const locked=!isNew&&(!perms.work||((wo.status==='closed'||wo.status==='cancelled')&&!perms.mgr));
+  const row=()=>({wo_type:f.wo_type,plan_id:f.plan_id||null,title:f.title.trim(),description:f.description.trim()||null,priority:f.priority,assigned_to:f.assigned_to.trim()||null,
+    start_date:f.start_date||null,end_date:f.end_date||f.start_date||null,parts:cleanParts(f.parts),completion_notes:f.completion_notes.trim()||null});
+  const check=()=>{if(!f.asset_id)return 'Pick the machine.';if(!f.title.trim())return 'Give the work order a short title.';if(f.end_date&&f.start_date&&f.end_date<f.start_date)return 'The end date is before the start date.';return ''};
+  const save=async status=>{const c=check();if(c){setErr(c);return}setErr('');setBusy(true);
+    try{
+      if(isNew){const r=row();const st=status||(r.start_date?'scheduled':'open');const {error}=await sb.from('work_orders').insert({...r,asset_id:f.asset_id,status:st});if(error)throw error;notify('Work order created')}
+      else{const r=row();const next=status||(wo.status==='open'&&r.start_date?'scheduled':wo.status);
+        if(next==='completed'&&wo.status!=='completed'){
+          if(!r.completion_notes)throw new Error('Add completion notes: what was done.');
+          if(f.wo_type==='service'){   /* completing a service records it, which also moves its next due date */
+            const {error:e1}=await sb.from('service_records').insert({asset_id:f.asset_id,plan_id:f.plan_id||null,work_order_id:wo.id,service_type:f.title.trim(),done_on:svc.done_on,hours:n0(svc.hours),km:n0(svc.km),
+              mechanic:r.assigned_to,work_done:r.completion_notes,parts:r.parts});if(e1)throw e1}
+          else{for(const [k,v] of [['hours',svc.hours],['km',svc.km]])if(v!==''&&a&&(k==='hours'?a.mt!=='km':a.mt!=='hours')&&(!a.cur[k]||+v>a.cur[k].value)){
+            const {error:e2}=await sb.from('meter_readings').insert({asset_id:f.asset_id,kind:k,value:+v,source:'work_order',note:woNo(wo)});if(e2)throw e2}}
+        }
+        const {error}=await sb.from('work_orders').update({...r,status:next}).eq('id',wo.id);if(error)throw error;
+        notify(next!==wo.status?`${woNo(wo)}: ${WO_STATUS[next]}`:`${woNo(wo)} saved`)}
+      reload();onClose()}
+    catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
+  const cur=isNew?null:wo.status;
+  const acts=isNew?[]:[
+    ...(['open','scheduled','awaiting_parts'].includes(cur)?[['in_progress',cur==='awaiting_parts'?'Resume work':'Start work']]:[]),
+    ...(['open','scheduled','in_progress'].includes(cur)?[['awaiting_parts','Awaiting parts']]:[]),
+    ...(['open','scheduled','in_progress','awaiting_parts'].includes(cur)?[['completed','Mark completed']]:[]),
+    ...(cur==='completed'&&perms.verify?[['closed','Verify & close']]:[]),
+    ...(cur==='completed'?[['in_progress','Reopen']]:[]),
+    ...((cur==='closed'||cur==='cancelled')&&perms.mgr?[['open','Reopen']]:[]),
+    ...(WO_OPEN(cur)?[['cancelled','Cancel work order']]:[])];
+  const showSvc=!isNew&&WO_OPEN(cur)&&a;
+  const assets=M.assets.filter(x=>!x.retired).sort((x,y)=>x.m.name.localeCompare(y.m.name));
+  return html`<${Modal} title=${isNew?'New work order':`${woNo(wo)} · ${wo.title}`} sub=${isNew?'For servicing, a repair, a breakdown or any maintenance request':`${WO_TYPE[wo.wo_type]} · ${a?a.m.name:'Machine'} · created ${fmtTs(wo.created_at)}`} onClose=${onClose}
+    foot=${html`${err&&html`<span id="wo-err" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${err}</span>`}
+      ${!isNew&&woChip(cur)}<span class="flex-1"></span>
+      ${!locked&&acts.map(([s,l])=>html`<button key=${s+l} id=${'wo-act-'+s} type="button" class=${'btn'+(s==='completed'||s==='closed'?' btn-primary':'')} disabled=${busy} onClick=${()=>save(s)} style=${s==='cancelled'?{color:'var(--bad)'}:null}>${l}</button>`)}
+      ${!locked&&html`<button id="wo-save" type="button" class=${'btn'+(isNew?' btn-primary':'')} disabled=${busy} onClick=${()=>save()}>${isNew?'Create work order':'Save'}</button>`}
+      ${locked&&html`<button type="button" class="btn" onClick=${onClose}>Close</button>`}`}>
+    <fieldset disabled=${locked} class="m-0 p-0 border-0 min-w-0 grid sm:grid-cols-2 gap-3">
+      <${Fld} label="Machine">${isNew&&!(init&&init.asset_id)?html`<select id="wo-asset" class="field" style=${fs} value=${f.asset_id} onChange=${e=>setF({...f,asset_id:e.target.value})}>
+          <option value="">Choose a machine…</option>${assets.map(x=>html`<option key=${x.m.id} value=${x.m.id}>${x.m.name} · ${x.m.sub||''}</option>`)}</select>`
+        :html`<div class="field flex items-center" style=${fs}>${a?`${a.m.name} · ${a.m.sub||''}`:f.asset_id}</div>`}<//>
+      <${Fld} label="Type"><select id="wo-type" class="field" style=${fs} value=${f.wo_type} onChange=${e=>setF({...f,wo_type:e.target.value})}>${Object.entries(WO_TYPE).map(([k,v])=>html`<option key=${k} value=${k}>${v}</option>`)}</select><//>
+      <${Fld} label="Title" span=${true}><input id="wo-title" class="field" style=${fs} placeholder="e.g. 500 hr service, hydraulic hose leak" value=${f.title} onInput=${e=>setF({...f,title:e.target.value})}/><//>
+      <${Fld} label="Description" span=${true}><textarea id="wo-desc" class="field" style=${{height:'auto',minHeight:64,padding:'8px 10px',fontSize:13}} rows="3" value=${f.description} onInput=${e=>setF({...f,description:e.target.value})}></textarea><//>
+      <${Fld} label="Priority"><select id="wo-pri" class="field" style=${fs} value=${f.priority} onChange=${e=>setF({...f,priority:e.target.value})}>${Object.entries(PRI).map(([k,v])=>html`<option key=${k} value=${k}>${v}</option>`)}</select><//>
+      <${Fld} label="Assigned mechanic or contractor"><${Combo} id="wo-assign" className="field" style=${fs} label="Assigned to" value=${f.assigned_to} onChange=${v=>setF({...f,assigned_to:v})} options=${staff}/><//>
+      <${Fld} label="Scheduled from"><input id="wo-start" type="date" class="field mono" style=${fs} value=${f.start_date} onChange=${e=>setF({...f,start_date:e.target.value,end_date:f.end_date&&f.end_date>=e.target.value?f.end_date:e.target.value})}/><//>
+      <${Fld} label="Until"><input id="wo-end" type="date" class="field mono" style=${fs} value=${f.end_date} min=${f.start_date||undefined} onChange=${e=>setF({...f,end_date:e.target.value})}/><//>
+      ${f.start_date&&html`<p class="sm:col-span-2 text-[12px] text-muted -mt-1">Scheduled dates show on the schedule board as ${f.wo_type==='service'?'a scheduled service':'a breakdown / repair'} for this machine, so it isn’t booked for jobs.</p>`}
+      ${f.wo_type==='breakdown'&&f.safe_to_operate!=null&&html`<p class="sm:col-span-2 text-[12.5px] font-medium" style=${{color:f.safe_to_operate?'var(--ink)':'hsl(0 72% 47%)'}}>${f.safe_to_operate?'Reported as safe to operate.':'Reported as NOT safe to operate: shown as out of service until this is completed.'}</p>`}
+      ${!isNew&&html`<div class="sm:col-span-2 grid gap-1"><span class="label">Parts replaced or used</span><${PartsEditor} parts=${f.parts} disabled=${locked} onChange=${v=>setF({...f,parts:v})}/></div>
+        <${Fld} label="Completion notes" span=${true}><textarea id="wo-notes" class="field" style=${{height:'auto',minHeight:64,padding:'8px 10px',fontSize:13}} rows="3" placeholder="What was done" value=${f.completion_notes} onInput=${e=>setF({...f,completion_notes:e.target.value})}></textarea><//>`}
+      ${showSvc&&html`<div class="sm:col-span-2 rounded-lg border border-line bg-sunken p-3 grid sm:grid-cols-3 gap-3">
+        <div class="sm:col-span-3 text-[12.5px] text-muted">${f.wo_type==='service'?'When you mark it completed, this is saved as the service record and sets when the next one is due.':'Meters at completion (optional): saved as new readings.'}</div>
+        ${f.wo_type==='service'&&html`<${Fld} label="Date done"><input id="wo-done" type="date" class="field mono" style=${fs} value=${svc.done_on} max=${iso(TODAY)} onChange=${e=>setSvc({...svc,done_on:e.target.value})}/><//>`}
+        ${a.mt!=='km'&&html`<${Fld} label="Engine hours"><input id="wo-hours" type="number" min="0" step="any" class="field mono" style=${fs} value=${svc.hours} onInput=${e=>setSvc({...svc,hours:e.target.value})}/><//>`}
+        ${a.mt!=='hours'&&html`<${Fld} label="Odometer km"><input id="wo-km" type="number" min="0" step="any" class="field mono" style=${fs} value=${svc.km} onInput=${e=>setSvc({...svc,km:e.target.value})}/><//>`}
+      </div>`}
+      ${!isNew&&(wo.completed_at||wo.verified_at)&&html`<div class="sm:col-span-2 text-[12px] text-muted">${wo.completed_at?`Completed ${fmtTs(wo.completed_at)}. `:''}${wo.verified_at?`Verified and closed ${fmtTs(wo.verified_at)}.`:''}</div>`}
+    </fieldset>
+    ${!perms.work&&html`<p class="text-[12px] text-muted mt-3">Only mechanics, supervisors and administrators can change work orders.</p>`}<//>`;
+}
+
+function BreakdownDialog({ctx,a,onClose}){
+  const {sb,notify,reload,data}=ctx;
+  const crewJob=(()=>{const today=iso(TODAY);const b=data.blocks.find(x=>x.kind==='job'&&x.start<=today&&x.end>=today&&((x.plantIds||[]).includes(a.m.id)||x.resourceId===a.m.crewId));
+    if(!b)return '';const j=data.jobs.find(x=>x.id===b.jobId);return j?[j.customer,j.name].filter(Boolean).join(' · '):''})();
+  const [f,setF]=useState({what:'',location:crewJob,safe:null,priority:'high',hours:'',km:''});const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const save=async()=>{setErr('');if(!f.what.trim()){setErr('Describe what failed.');return}if(f.safe==null){setErr('Say whether it is safe to operate.');return}setBusy(true);
+    try{const first=f.what.trim().split('\n')[0];
+      const {error}=await sb.from('work_orders').insert({asset_id:a.m.id,wo_type:'breakdown',title:first.length>80?first.slice(0,77)+'…':first,
+        description:[f.what.trim(),f.location.trim()?'Location / job: '+f.location.trim():'',`Reported by ${window.__rosterMe||'someone'} at ${new Date().toLocaleString('en-AU',{dateStyle:'medium',timeStyle:'short'})}`].filter(Boolean).join('\n\n'),
+        priority:f.priority,safe_to_operate:f.safe,reported_hours:n0(f.hours),reported_km:n0(f.km),start_date:f.safe?null:iso(TODAY),end_date:f.safe?null:iso(TODAY),status:f.safe?'open':'scheduled'});
+      if(error)throw error;
+      let warn='';for(const [k,v] of [['hours',f.hours],['km',f.km]])if(v!==''){const {error:e2}=await sb.from('meter_readings').insert({asset_id:a.m.id,kind:k,value:+v,source:'manual',note:'Breakdown report'});if(e2)warn=' (the meter reading wasn’t saved: '+errMsg(e2)+')'}
+      notify('Breakdown reported'+warn);reload();onClose()}
+    catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
+  return html`<${Modal} title="Report a breakdown" sub=${`${a.m.name} · ${a.m.sub||''}`} onClose=${onClose}
+    foot=${html`${err&&html`<span id="bd-err" class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="bd-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>Report breakdown</button>`}>
+    <div class="grid sm:grid-cols-2 gap-3">
+      <${Fld} label="What failed?" span=${true}><textarea id="bd-what" class="field" style=${{height:'auto',minHeight:80,padding:'8px 10px',fontSize:13.5}} rows="3" autoFocus=${true} placeholder="e.g. Hydraulic hose burst on the drum, oil on the mat" value=${f.what} onInput=${e=>setF({...f,what:e.target.value})}></textarea><//>
+      <div class="sm:col-span-2 grid gap-1"><span class="label">Is it safe to operate?</span>
+        <div class="flex gap-2"><button id="bd-safe-yes" type="button" class="btn flex-1 justify-center" style=${f.safe===true?{background:'hsl(145 50% var(--blk-l))',borderColor:'hsl(145 55% 36%)'}:null} onClick=${()=>setF({...f,safe:true})}>Yes, it can keep working</button>
+          <button id="bd-safe-no" type="button" class="btn flex-1 justify-center" style=${f.safe===false?{background:'hsl(0 75% var(--blk-l))',borderColor:'hsl(0 72% 47%)'}:null} onClick=${()=>setF({...f,safe:false})}>No, take it out of service</button></div></div>
+      <${Fld} label="Location or job"><input class="field" style=${fs} value=${f.location} onInput=${e=>setF({...f,location:e.target.value})}/><//>
+      <${Fld} label="Urgency"><select class="field" style=${fs} value=${f.priority} onChange=${e=>setF({...f,priority:e.target.value})}>${Object.entries(PRI).map(([k,v])=>html`<option key=${k} value=${k}>${v}</option>`)}</select><//>
+      ${a.mt!=='km'&&html`<${Fld} label="Engine hours (optional)"><input type="number" min="0" step="any" class="field mono" style=${fs} value=${f.hours} onInput=${e=>setF({...f,hours:e.target.value})}/><//>`}
+      ${a.mt!=='hours'&&html`<${Fld} label="Odometer km (optional)"><input type="number" min="0" step="any" class="field mono" style=${fs} value=${f.km} onInput=${e=>setF({...f,km:e.target.value})}/><//>`}
+    </div>
+    <p class="text-[12px] text-muted mt-3">This creates a breakdown work order for the maintenance team.${' '}If it isn’t safe, the machine shows as out of service and is blocked on the schedule for today until the work order is updated.</p><//>`;
+}
+
+function PlanDialog({ctx,plan,onClose}){
+  const {sb,notify,reload,data}=ctx;
+  const [f,setF]=useState(()=>plan?{...plan,scope:plan.asset_id?'asset':'category',every_hours:plan.every_hours??'',every_km:plan.every_km??'',every_days:plan.every_days??'',category:plan.category||'',asset_id:plan.asset_id||''}
+    :{scope:'category',category:'',asset_id:'',name:'',every_hours:'',every_km:'',every_days:'',warn_hours:50,warn_km:1000,warn_days:14,active:true});
+  const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const save=async()=>{setErr('');if(!f.name.trim()){setErr('Name the service, e.g. 250 hr service.');return}
+    if(f.scope==='category'&&!f.category.trim()){setErr('Pick the machine category.');return}if(f.scope==='asset'&&!f.asset_id){setErr('Pick the machine.');return}
+    if(f.every_hours===''&&f.every_km===''&&f.every_days===''){setErr('Set at least one interval: hours, km or days.');return}
+    setBusy(true);const row={category:f.scope==='category'?f.category.trim():null,asset_id:f.scope==='asset'?f.asset_id:null,name:f.name.trim(),
+      every_hours:n0(f.every_hours),every_km:n0(f.every_km),every_days:f.every_days===''?null:Math.round(+f.every_days),warn_hours:+f.warn_hours||0,warn_km:+f.warn_km||0,warn_days:Math.round(+f.warn_days||0),active:!!f.active};
+    const {error}=plan?await sb.from('service_plans').update(row).eq('id',plan.id):await sb.from('service_plans').insert(row);
+    setBusy(false);if(error){setErr(errMsg(error));return}notify('Service plan saved');reload();onClose()};
+  const machines=data.resources.filter(r=>r.type==='machine').sort((a,b)=>a.name.localeCompare(b.name));
+  return html`<${Modal} title=${plan?'Edit service plan':'New service plan'} sub="A service due by engine hours, kilometres or time: whichever comes first" onClose=${onClose}
+    foot=${html`${err&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="pl2-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>Save plan</button>`}>
+    <div class="grid sm:grid-cols-2 gap-3">
+      <${Fld} label="Applies to"><div class="seg w-max"><button type="button" aria-pressed=${f.scope==='category'} onClick=${()=>setF({...f,scope:'category'})}>A machine category</button><button type="button" aria-pressed=${f.scope==='asset'} onClick=${()=>setF({...f,scope:'asset'})}>One machine</button></div><//>
+      ${f.scope==='category'?html`<${Fld} label="Category"><${Combo} id="sp-cat" className="field" style=${fs} label="Category" value=${f.category} onChange=${v=>setF({...f,category:v})} options=${machineCatsOf(data)}/><//>`
+        :html`<${Fld} label="Machine"><select id="sp-asset" class="field" style=${fs} value=${f.asset_id} onChange=${e=>setF({...f,asset_id:e.target.value})}><option value="">Choose…</option>${machines.map(m=>html`<option key=${m.id} value=${m.id}>${m.name} · ${m.sub||''}</option>`)}</select><//>`}
+      <${Fld} label="Service name" span=${true}><input id="sp-name" class="field" style=${fs} placeholder="e.g. 250 hr service, Annual inspection" value=${f.name} onInput=${e=>setF({...f,name:e.target.value})}/><//>
+      <div class="sm:col-span-2 grid grid-cols-3 gap-3">
+        <${Fld} label="Every … hours"><input id="sp-h" type="number" min="1" step="any" class="field mono" style=${fs} value=${f.every_hours} onInput=${e=>setF({...f,every_hours:e.target.value})}/><//>
+        <${Fld} label="Every … km"><input id="sp-km" type="number" min="1" step="any" class="field mono" style=${fs} value=${f.every_km} onInput=${e=>setF({...f,every_km:e.target.value})}/><//>
+        <${Fld} label="Every … days"><input id="sp-d" type="number" min="1" step="1" class="field mono" style=${fs} value=${f.every_days} onInput=${e=>setF({...f,every_days:e.target.value})}/><//>
+        <${Fld} label="Warn … hours before"><input type="number" min="0" class="field mono" style=${fs} value=${f.warn_hours} onInput=${e=>setF({...f,warn_hours:e.target.value})}/><//>
+        <${Fld} label="Warn … km before"><input type="number" min="0" class="field mono" style=${fs} value=${f.warn_km} onInput=${e=>setF({...f,warn_km:e.target.value})}/><//>
+        <${Fld} label="Warn … days before"><input type="number" min="0" class="field mono" style=${fs} value=${f.warn_days} onInput=${e=>setF({...f,warn_days:e.target.value})}/><//>
+      </div>
+      <label class="inline-flex items-center gap-2 text-[13px] cursor-pointer"><input type="checkbox" class="w-4 h-4" checked=${!!f.active} onChange=${e=>setF({...f,active:e.target.checked})}/>Active</label>
+    </div>
+    <p class="text-[12px] text-muted mt-3">Weekly or monthly inspections: use days (7, 30). Six-monthly: 182. Annual: 365. Km only counts on machines that track km.</p><//>`;
+}
+
+/* ---------- one machine's maintenance ---------- */
+function AssetPanel({ctx,a,onClose,open,behind}){
+  const {perms,data,M}=ctx;
+  const plans=a.plans.slice().sort((x,y)=>({overdue:0,soon:1,nobase:2,ok:3}[x.state]-{overdue:0,soon:1,nobase:2,ok:3}[y.state]));
+  const recs=M.recs.filter(r=>r.asset_id===a.m.id);
+  const reads=ctx.db.meter_readings.filter(r=>r.asset_id===a.m.id&&['manual','correction','replacement','work_order'].includes(r.source));
+  const down=data.blocks.filter(b=>b.resourceId===a.m.id&&KINDS[b.kind]&&KINDS[b.kind].for==='machine'&&!b.fromMaintenance);
+  const hist=[
+    ...recs.map(r=>({ts:r.done_on===localDay(r.created_at)?r.created_at:r.done_on+'T12:00:00',ic:'svc',t:`${r.baseline?'Last service before FraserFlow: ':''}${r.service_type}`,d:[r.hours!=null&&`${fmtN(+r.hours)} h`,r.km!=null&&`${fmtN(+r.km)} km`,r.mechanic,r.work_done,(r.parts||[]).length&&'Parts: '+partsTxt(r.parts),r.notes].filter(Boolean).join(' · ')})),
+    ...a.wos.flatMap(w=>[{ts:w.created_at,ic:'wo',t:`${woNo(w)} raised: ${w.title}`,d:`${WO_TYPE[w.wo_type]} · ${PRI[w.priority]}${w.wo_type==='breakdown'&&w.safe_to_operate===false?' · not safe to operate':''}`,wo:w},
+      ...(w.completed_at?[{ts:w.completed_at,ic:'done',t:`${woNo(w)} completed`,d:[w.completion_notes,(w.parts||[]).length&&'Parts: '+partsTxt(w.parts)].filter(Boolean).join(' · '),wo:w}]:[]),
+      ...(w.verified_at?[{ts:w.verified_at,ic:'ok',t:`${woNo(w)} verified and closed`,d:'',wo:w}]:[])]),
+    ...reads.map(r=>({ts:r.read_at,ic:'meter',t:`${r.kind==='hours'?'Hours':'Km'} reading ${fmtN(+r.value)}${r.source==='correction'?' (correction)':r.source==='replacement'?' (new meter)':''}`,d:r.note||''})),
+    ...down.map(b=>({ts:b.start+'T00:00:00',ic:'down',t:`${KINDS[b.kind].label}${b.title?': '+b.title:''}`,d:`On the schedule ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`}))
+  ].map(h=>({...h,at:localDay(h.ts),t0:new Date(h.ts).getTime()})).sort((x,y)=>y.t0-x.t0);   /* newest first, by when it actually happened */
+  const IC={svc:'hsl(145 55% 36%)',wo:'var(--accent)',done:'hsl(212 75% 48%)',ok:'hsl(145 55% 36%)',meter:'var(--faint)',down:'hsl(252 60% 55%)'};
+  const p=a.p||{};
+  return html`<${Modal} wide=${true} noEsc=${behind} title=${html`<span class="inline-flex items-center gap-2 flex-wrap">${a.m.name} <span class="text-muted font-normal text-[15px]">${a.m.sub||''}</span> ${stChip(a.status)}</span>`}
+    sub=${[machCatOf(a.m)||'No category',a.m.rego&&'Rego '+a.m.rego,a.crew&&a.crew.name,a.retired&&'Retired'].filter(Boolean).join(' · ')} onClose=${onClose}
+    foot=${html`<span class="text-[12px] text-muted mr-auto">${a.open.length} open work order${a.open.length===1?'':'s'}</span>
+      ${perms.work&&html`<button id="ap-breakdown" type="button" class="btn" style=${{color:'hsl(0 72% 47%)'}} onClick=${()=>open({k:'breakdown',a})}>${Icon.alert} Report breakdown</button>
+        <button id="ap-newwo" type="button" class="btn btn-primary" onClick=${()=>open({k:'wo',init:{asset_id:a.m.id}})}>${Icon.plus} Work order</button>`}`}>
+    <div class="grid gap-4">
+      <div class="grid gap-3 md:grid-cols-3">
+        <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
+          <div class="flex items-center gap-2"><span class="label flex-1">Machine details</span>${perms.work&&html`<button id="ap-profile" type="button" class="text-[12px] text-muted hover:text-ink inline-flex items-center gap-1" onClick=${()=>open({k:'profile',a})}>${Icon.pencil} Edit</button>`}</div>
+          ${[['Make / model',[p.make,p.model].filter(Boolean).join(' ')],['Year',p.year],['Serial',p.serial],['Meters',a.mt==='both'?'Hours and km':a.mt==='km'?'Kilometres':'Engine hours']].map(([k,v])=>html`<div key=${k} class="flex gap-2 text-[12.5px]"><span class="text-muted w-[92px] shrink-0">${k}</span><span class=${v?'':'text-faint'}>${v||'–'}</span></div>`)}
+        </section>
+        <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
+          <div class="flex items-center gap-2"><span class="label flex-1">Meters</span>${perms.work&&html`<button id="ap-reading" type="button" class="text-[12px] text-muted hover:text-ink inline-flex items-center gap-1" onClick=${()=>open({k:'reading',a})}>${Icon.plus} Reading</button>`}</div>
+          ${a.mt!=='km'&&html`<div class="font-display text-[20px] font-semibold tnum">${a.cur.hours?fmtN(a.cur.hours.value)+' h':'–'}</div><div class="text-[11.5px] text-muted -mt-1">${a.cur.hours?'read '+fmtTs(a.cur.hours.at):'no hours reading yet'}</div>`}
+          ${a.mt!=='hours'&&html`<div class="font-display text-[20px] font-semibold tnum">${a.cur.km?fmtN(a.cur.km.value)+' km':'–'}</div><div class="text-[11.5px] text-muted -mt-1">${a.cur.km?'read '+fmtTs(a.cur.km.at):'no km reading yet'}</div>`}
+        </section>
+        <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
+          <span class="label">Next service</span>
+          ${a.next?html`<div class="font-display text-[16px] font-semibold">${a.next.plan.name}</div><div class="text-[12.5px]">${planChip(a.next.state)} <span class="text-muted">${a.next.first.dueTxt} · ${a.next.first.leftTxt}</span></div>`
+            :html`<div class="text-[12.5px] text-muted">${a.plans.length?'Record the last service to start tracking.':'No service plan for this category yet.'}</div>`}
+          <div class="text-[11.5px] text-muted mt-1">Last service: ${a.last?`${a.last.service_type}, ${fmtTs(a.last.done_on)}`:'none recorded'}</div>
+        </section>
+      </div>
+
+      <section class="grid gap-2"><div class="flex items-baseline gap-2"><h3 class="font-display text-[15px] font-semibold">Service schedule</h3><span class="text-[12px] text-muted">From the service plans for ${machCatOf(a.m)||'this machine'}${perms.mgr?'. Change plans on the Service plans tab':''}</span></div>
+        ${!plans.length?html`<div class="text-[12.5px] text-muted">No service plans apply to this machine.${perms.mgr?' Add one on the Service plans tab.':''}</div>`
+          :html`<div class="rounded-lg border border-line divide-y" style=${{borderColor:'var(--line)'}}>${plans.map(x=>{const hasWo=a.open.some(w=>w.plan_id===x.plan.id);
+            return html`<div key=${x.plan.id} class="px-3 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1" style=${{borderColor:'var(--line)'}}>
+              <div class="min-w-[180px] flex-1"><div class="text-[13.5px] font-medium">${x.plan.name} ${planChip(x.state)}</div>
+                <div class="text-[12px] text-muted">${[x.plan.every_hours&&`every ${fmtN(+x.plan.every_hours)} h`,x.plan.every_km&&`every ${fmtN(+x.plan.every_km)} km`,x.plan.every_days&&`every ${x.plan.every_days} days`].filter(Boolean).join(' or ')}${x.plan.asset_id?' · this machine only':''}</div></div>
+              <div class="text-[12.5px] min-w-[200px]">${x.state==='nobase'?html`<span class="text-muted">${x.last?'The last service has no matching hours or km':'When was it last done?'}</span>`
+                :x.parts.map(pt=>html`<div key=${pt.k}><span class="text-muted">Due</span> ${pt.dueTxt} <span class=${pt.left!=null&&pt.left<=0?'font-semibold':'text-muted'} style=${pt.left!=null&&pt.left<=0?{color:'hsl(0 72% 47%)'}:null}>· ${pt.leftTxt}</span></div>`)}</div>
+              ${perms.work&&html`<div class="flex gap-2">
+                ${x.state==='nobase'&&html`<button type="button" class="btn" style=${{height:30}} onClick=${()=>open({k:'service',a,plan:x.plan,baseline:true})}>Set last service</button>`}
+                ${x.state!=='nobase'&&!hasWo&&html`<button type="button" class="btn" style=${{height:30}} onClick=${()=>open({k:'wo',init:{asset_id:a.m.id,wo_type:'service',plan_id:x.plan.id,title:x.plan.name,priority:x.state==='overdue'?'high':'medium'}})}>Create work order</button>`}
+                ${hasWo&&html`<span class="text-[12px] text-muted self-center">Work order open</span>`}
+                <button type="button" class="btn" style=${{height:30}} onClick=${()=>open({k:'service',a,plan:x.plan})}>Record service</button></div>`}
+            </div>`})}</div>`}
+      </section>
+
+      ${a.open.length>0&&html`<section class="grid gap-2"><h3 class="font-display text-[15px] font-semibold">Open work orders</h3>
+        <div class="rounded-lg border border-line divide-y" style=${{borderColor:'var(--line)'}}>${a.open.map(w=>html`<button key=${w.id} type="button" class="w-full text-left px-3 py-2 flex flex-wrap items-center gap-2 hover:bg-sunken" style=${{borderColor:'var(--line)'}} onClick=${()=>open({k:'wo',wo:w})}>
+          <span class="mono text-[12px] text-muted">${woNo(w)}</span><span class="text-[13px] font-medium flex-1 min-w-0 truncate">${w.title}</span>${woChip(w.status)}<span class="text-[12px]" style=${{color:PRI_COL[w.priority]}}>${PRI[w.priority]}</span>
+          ${w.start_date&&html`<span class="text-[12px] text-muted mono">${fmtShort(parse(w.start_date))}</span>`}</button>`)}</div></section>`}
+
+      <section class="grid gap-2"><h3 class="font-display text-[15px] font-semibold">Maintenance history</h3>
+        ${!hist.length?html`<div class="text-[12.5px] text-muted">Nothing recorded yet.</div>`:html`<ol class="grid gap-0 relative">${hist.map((h,i)=>html`<li key=${i} class="grid grid-cols-[86px_14px_1fr] gap-2 text-[12.5px] py-1.5">
+            <span class="mono text-muted">${fmtShort(parse(h.at))} ${parse(h.at).getFullYear()!==TODAY.getFullYear()?parse(h.at).getFullYear():''}</span>
+            <span class="mt-1 w-2.5 h-2.5 rounded-full" style=${{background:IC[h.ic]}}></span>
+            <span class="min-w-0">${h.wo?html`<button type="button" class="font-medium text-left hover:underline" onClick=${()=>open({k:'wo',wo:h.wo})}>${h.t}</button>`:html`<span class="font-medium">${h.t}</span>`}${h.d&&html`<span class="block text-muted whitespace-pre-line">${h.d}</span>`}</span></li>`)}</ol>`}
+      </section>
+
+      <section class="rounded-lg border border-dashed border-line p-3"><div class="label">Manuals and documents</div><div class="text-[12.5px] text-muted mt-1">Coming with file storage in the next phase (prestarts), together with photos.</div></section>
+    </div><//>`;
+}
+
+/* ---------- tabs ---------- */
+function Dashboard({ctx,open}){
+  const {M,data,perms}=ctx;
+  const [cat,setCat]=useState('');const [crew,setCrew]=useState('');const [st,setSt]=useState('');const [q,setQ]=useState('');
+  const act=M.assets.filter(a=>!a.retired);
+  const openWos=ctx.db.work_orders.filter(w=>WO_OPEN(w.status));
+  const cnt=s=>act.filter(a=>a.status===s).length;
+  const cards=[['Active machines',act.length,'',''],['Available for work',cnt('ok')+cnt('due'),'Operational or due soon','hsl(145 55% 36%)'],['Being serviced',cnt('service'),'In progress or down today','hsl(212 75% 48%)'],['Out of service',cnt('out'),'Unsafe breakdowns','hsl(0 72% 47%)'],
+    ['Services due soon',act.reduce((s,a)=>s+a.soon,0),'Within the warning window','hsl(30 90% 46%)'],['Overdue services',act.reduce((s,a)=>s+a.overdue,0),'',act.some(a=>a.overdue)?'hsl(0 72% 47%)':''],
+    ['Open work orders',openWos.length,`${openWos.filter(w=>w.priority==='urgent'||w.priority==='high').length} high or urgent`,''],['Prestart defects','–','Arrives with prestarts',''],['Critical defects','–','Arrives with defects','']];
+  const ql=q.trim().toLowerCase();
+  const rank={out:0,service:1,due:2,ok:3};
+  const list=act.filter(a=>(!cat||machCatOf(a.m).toLowerCase()===cat.toLowerCase())&&(!crew||(crew==='~'?!a.m.crewId:a.m.crewId===crew))&&(!st||a.status===st)&&(!ql||[a.m.name,a.m.sub,a.m.rego,a.p&&a.p.make,a.p&&a.p.model].join(' ').toLowerCase().includes(ql)))
+    .sort((x,y)=>rank[x.status]-rank[y.status]||y.overdue-x.overdue||x.m.name.localeCompare(y.m.name));
+  const attention=act.flatMap(a=>a.plans.filter(x=>x.state==='overdue'||x.state==='soon').map(x=>({a,x}))).sort((u,v)=>(u.x.state==='overdue'?0:1)-(v.x.state==='overdue'?0:1));
+  const crews=data.resources.filter(r=>r.type==='crew');
+  return html`<div class="grid gap-3">
+    <div class="grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-9">${cards.map(([k,v,s,c])=>html`<div key=${k} class="panel px-3 py-2.5 min-w-0"><div class="label leading-tight">${k}</div><div class="font-display text-[22px] font-semibold tnum" style=${c?{color:c}:null}>${v}</div>${s&&html`<div class="text-[11px] text-muted truncate" title=${s}>${s}</div>`}</div>`)}</div>
+    ${attention.length>0&&html`<section class="panel p-3 grid gap-2" aria-label="Services needing attention"><div class="flex items-baseline gap-2"><h3 class="font-display text-[15px] font-semibold">Services needing attention</h3><span class="text-[12px] text-muted">${attention.length}</span></div>
+      <div class="grid gap-1.5 md:grid-cols-2 xl:grid-cols-3">${attention.slice(0,12).map(({a,x})=>{const hasWo=a.open.some(w=>w.plan_id===x.plan.id);
+        return html`<div key=${a.m.id+x.plan.id} class="rounded-lg border border-line px-3 py-2 flex items-center gap-2">
+          <button type="button" class="min-w-0 flex-1 text-left" onClick=${()=>open({k:'asset',id:a.m.id})}><div class="text-[13px] font-medium truncate">${a.m.name} · ${x.plan.name}</div><div class="text-[12px] text-muted truncate">${planChip(x.state)} ${x.first.dueTxt} · ${x.first.leftTxt}</div></button>
+          ${hasWo?html`<span class="text-[11.5px] text-muted">WO open</span>`:perms.work&&html`<button type="button" class="btn" style=${{height:28,fontSize:12}} onClick=${()=>open({k:'wo',init:{asset_id:a.m.id,wo_type:'service',plan_id:x.plan.id,title:x.plan.name,priority:x.state==='overdue'?'high':'medium'}})}>Work order</button>`}</div>`})}</div></section>`}
+    <section class="panel flex flex-col min-h-0">
+      <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
+        <input id="fl-search" class="field" style=${{...fs,width:220}} placeholder="Search machine, rego, make" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search machines"/>
+        <select id="fl-cat" class="field w-auto" style=${fs} value=${cat} onChange=${e=>setCat(e.target.value)} aria-label="Category"><option value="">All categories</option>${machineCatsOf(data).map(c=>html`<option key=${c} value=${c}>${c}</option>`)}</select>
+        <select id="fl-crew" class="field w-auto" style=${fs} value=${crew} onChange=${e=>setCrew(e.target.value)} aria-label="Crew"><option value="">All crews</option>${crews.map(c=>html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}<option value="~">No crew</option></select>
+        <select id="fl-status" class="field w-auto" style=${fs} value=${st} onChange=${e=>setSt(e.target.value)} aria-label="Status"><option value="">All statuses</option>${Object.entries(ST).map(([k,v])=>html`<option key=${k} value=${k}>${v[0]}</option>`)}</select>
+        <span class="flex-1"></span>
+        <span class="hidden lg:inline-flex items-center gap-3 text-[11.5px] text-muted">${Object.entries(ST).map(([k,v])=>html`<span key=${k} class="inline-flex items-center gap-1">${stDot(k,8)} ${v[0]}</span>`)}</span>
+      </div>
+      <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="fl-table">
+        <thead><tr class="text-left">${['','Machine','Category','Rego','Crew','Meters','Next service','Work orders'].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+        <tbody>${list.map(a=>html`<tr key=${a.m.id} class="border-t border-line cursor-pointer hover:bg-sunken" tabindex="0" onClick=${()=>open({k:'asset',id:a.m.id})} onKeyDown=${e=>{if(e.key==='Enter')open({k:'asset',id:a.m.id})}}>
+            <td class="py-2 pl-3 pr-1">${stDot(a.status)}</td>
+            <td class="py-2 px-3"><div class="font-medium">${a.m.name}</div><div class="text-[11.5px] text-muted truncate max-w-[240px]">${a.m.sub||''}${a.p&&(a.p.make||a.p.model)?' · '+[a.p.make,a.p.model].filter(Boolean).join(' '):''}</div></td>
+            <td class="py-2 px-3 whitespace-nowrap">${machCatOf(a.m)||html`<span class="text-faint">–</span>`}</td>
+            <td class="py-2 px-3 mono whitespace-nowrap">${a.m.rego||html`<span class="text-faint">–</span>`}</td>
+            <td class="py-2 px-3 whitespace-nowrap">${a.crew?a.crew.name:html`<span class="text-faint">–</span>`}</td>
+            <td class="py-2 px-3 mono tnum whitespace-nowrap">${meterTxt(a)}</td>
+            <td class="py-2 px-3">${a.next?html`<div class="whitespace-nowrap">${a.next.plan.name} ${planChip(a.next.state)}</div><div class="text-[11.5px] text-muted whitespace-nowrap">${a.next.first.dueTxt} · ${a.next.first.leftTxt}</div>`:html`<span class="text-faint">${a.plans.length?'Last service not set':'No plan'}</span>`}</td>
+            <td class="py-2 px-3 whitespace-nowrap">${a.open.length?html`<span class="font-medium">${a.open.length} open</span>`:html`<span class="text-faint">–</span>`}</td></tr>`)}
+          ${!list.length&&html`<tr><td colspan="8" class="px-3 py-6 text-center text-muted">No machines match.</td></tr>`}</tbody></table></div>
+    </section>
+  </div>`;
+}
+
+function WorkOrders({ctx,open}){
+  const {M,perms}=ctx;const [view,setView]=useState('open');const [q,setQ]=useState('');
+  const ql=q.trim().toLowerCase();
+  const rows=ctx.db.work_orders.filter(w=>(view==='all'||(view==='open'?WO_OPEN(w.status):!WO_OPEN(w.status)))).filter(w=>{const a=M.byId.get(w.asset_id);return !ql||[w.number,w.title,w.assigned_to,a&&a.m.name].join(' ').toLowerCase().includes(ql)})
+    .sort((a,b)=>view==='open'?(['urgent','high','medium','low'].indexOf(a.priority)-['urgent','high','medium','low'].indexOf(b.priority))||(a.start_date||'9').localeCompare(b.start_date||'9')||b.number-a.number:b.number-a.number);
+  return html`<section class="panel flex flex-col min-h-0">
+    <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
+      <div class="seg" role="group" aria-label="Show"><button type="button" aria-pressed=${view==='open'} onClick=${()=>setView('open')}>Open</button><button type="button" aria-pressed=${view==='done'} onClick=${()=>setView('done')}>Completed & closed</button><button type="button" aria-pressed=${view==='all'} onClick=${()=>setView('all')}>All</button></div>
+      <input id="wo-search" class="field" style=${{...fs,width:220}} placeholder="Search number, title, machine, mechanic" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search work orders"/>
+      <span class="flex-1"></span>${perms.work&&html`<button id="wo-new" type="button" class="btn btn-primary" onClick=${()=>open({k:'wo'})}>${Icon.plus} New work order</button>`}
+    </div>
+    <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="wo-table">
+      <thead><tr class="text-left">${['No.','Machine','Type','Title','Priority','Status','Assigned','Scheduled'].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+      <tbody>${rows.map(w=>{const a=M.byId.get(w.asset_id);return html`<tr key=${w.id} class="border-t border-line cursor-pointer hover:bg-sunken" tabindex="0" onClick=${()=>open({k:'wo',wo:w})} onKeyDown=${e=>{if(e.key==='Enter')open({k:'wo',wo:w})}}>
+          <td class="py-2 px-3 mono whitespace-nowrap">${w.number}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${a?html`<span class="inline-flex items-center gap-1.5">${stDot(a.status,8)} ${a.m.name}</span>`:w.asset_id}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${WO_TYPE[w.wo_type]}${w.wo_type==='breakdown'&&w.safe_to_operate===false?html` <span class="text-[11px] font-semibold" style=${{color:'hsl(0 72% 47%)'}}>unsafe</span>`:''}</td>
+          <td class="py-2 px-3 min-w-[200px]">${w.title}</td>
+          <td class="py-2 px-3 whitespace-nowrap font-medium" style=${{color:PRI_COL[w.priority]}}>${PRI[w.priority]}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${woChip(w.status)}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${w.assigned_to||html`<span class="text-faint">–</span>`}</td>
+          <td class="py-2 px-3 mono whitespace-nowrap">${w.start_date?`${fmtShort(parse(w.start_date))}${w.end_date&&w.end_date!==w.start_date?' – '+fmtShort(parse(w.end_date)):''}`:html`<span class="text-faint">–</span>`}</td></tr>`})}
+        ${!rows.length&&html`<tr><td colspan="8" class="px-3 py-6 text-center text-muted">${view==='open'?'No open work orders.':'Nothing here yet.'}</td></tr>`}</tbody></table></div>
+  </section>`;
+}
+
+function Calendar({ctx,open}){
+  const {M,data}=ctx;const [mon,setMon]=useState(()=>{const d=new Date(TODAY);d.setDate(1);return iso(d)});
+  const first=parse(mon);const start=mondayOf(first);const days=[...Array(42)].map((_,i)=>iso(addDays(start,i)));
+  const month=first.getMonth();
+  const ev=new Map();const put=(k,e)=>{if(!ev.has(k))ev.set(k,[]);ev.get(k).push(e)};
+  ctx.db.work_orders.filter(w=>w.start_date&&w.status!=='cancelled').forEach(w=>{const a=M.byId.get(w.asset_id);for(let d=parse(w.start_date);iso(d)<=(w.end_date||w.start_date);d=addDays(d,1))
+    put(iso(d),{t:`${a?a.m.name:'?'} · ${w.title}`,c:w.wo_type==='service'?'hsl(252 60% 55%)':'hsl(318 55% 50%)',done:!WO_OPEN(w.status),go:()=>open({k:'wo',wo:w})})});
+  data.blocks.filter(b=>!b.fromMaintenance&&KINDS[b.kind]&&KINDS[b.kind].for==='machine'&&b.kind!=='onjob').forEach(b=>{const m=M.byId.get(b.resourceId);if(!m)return;
+    for(let d=parse(b.start);iso(d)<=b.end;d=addDays(d,1))put(iso(d),{t:`${m.m.name} · ${b.title||KINDS[b.kind].label}`,c:b.kind==='inspection'?'hsl(170 55% 38%)':'hsl(252 40% 60%)',go:()=>open({k:'asset',id:m.m.id})})});
+  M.assets.filter(a=>!a.retired).forEach(a=>a.plans.forEach(x=>{const d=x.parts.find(p=>p.k==='days');if(d&&!a.open.some(w=>w.plan_id===x.plan.id))put(d.due,{t:`Due: ${a.m.name} · ${x.plan.name}`,c:x.state==='overdue'?'hsl(0 72% 47%)':'hsl(30 90% 46%)',due:true,go:()=>open({k:'asset',id:a.m.id})})}));
+  const step=n=>{const d=parse(mon);d.setMonth(d.getMonth()+n);setMon(iso(d))};
+  return html`<section class="panel p-3 grid gap-2">
+    <div class="flex items-center gap-2"><button type="button" class="btn px-2" onClick=${()=>step(-1)} aria-label="Previous month">${Icon.chevL}</button>
+      <div class="font-display text-[16px] font-semibold min-w-[160px] text-center">${MONTHS_LONG[month]} ${first.getFullYear()}</div>
+      <button type="button" class="btn px-2" onClick=${()=>step(1)} aria-label="Next month">${Icon.chevR}</button>
+      <button type="button" class="btn" onClick=${()=>{const d=new Date(TODAY);d.setDate(1);setMon(iso(d))}}>This month</button>
+      <span class="flex-1"></span>
+      <span class="hidden md:inline-flex gap-3 text-[11.5px] text-muted">${[['Scheduled service','hsl(252 60% 55%)'],['Repair / breakdown','hsl(318 55% 50%)'],['Inspection','hsl(170 55% 38%)'],['Service due (by date)','hsl(30 90% 46%)']].map(([l,c])=>html`<span key=${l} class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm" style=${{background:c}}></span>${l}</span>`)}</span></div>
+    <div class="grid grid-cols-7 gap-px rounded-lg overflow-hidden border border-line" style=${{background:'var(--line)'}}>
+      ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>html`<div key=${d} class="label text-center py-1.5" style=${{background:'var(--sunken)'}}>${d}</div>`)}
+      ${days.map(k=>{const d=parse(k);const es=ev.get(k)||[];const isT=k===M.today;
+        return html`<div key=${k} class="min-h-[96px] p-1.5 grid content-start gap-1" style=${{background:d.getMonth()===month?'var(--surface)':'var(--sunken)',opacity:d.getMonth()===month?1:.65}}>
+          <div class="text-[11.5px] font-semibold mono" style=${isT?{color:'var(--accent)'}:null}>${d.getDate()}</div>
+          ${es.slice(0,4).map((e,i)=>html`<button key=${i} type="button" class="text-left text-[11px] leading-tight rounded px-1 py-0.5 truncate" title=${e.t}
+              style=${{background:e.due?'transparent':e.c,color:e.due?e.c:'#fff',boxShadow:e.due?`inset 0 0 0 1px ${e.c}`:null,opacity:e.done?.55:1}} onClick=${e.go}>${e.t}</button>`)}
+          ${es.length>4&&html`<span class="text-[11px] text-muted">+${es.length-4} more</span>`}</div>`})}
+    </div>
+    <p class="text-[12px] text-muted">Services due by hours or km aren’t on the calendar: their date depends on use. They show on the dashboard as they get close.</p>
+  </section>`;
+}
+
+function Plans({ctx,open}){
+  const {perms,data}=ctx;const [del,setDel]=useState(null);
+  const plans=ctx.db.service_plans.slice().sort((a,b)=>(a.category||'~').localeCompare(b.category||'~')||a.name.localeCompare(b.name));
+  const covers=p=>p.asset_id?1:ctx.M.assets.filter(a=>!a.retired&&machCatOf(a.m).toLowerCase()===(p.category||'').toLowerCase()).length;
+  const remove=async p=>{const {error}=await ctx.sb.from('service_plans').delete().eq('id',p.id);setDel(null);if(error){ctx.notify(errMsg(error));return}ctx.notify('Service plan removed');ctx.reload()};
+  return html`<section class="panel flex flex-col min-h-0">
+    <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line"><div class="text-[12.5px] text-muted">Each machine follows the plans for its category, plus any plans set for that machine alone. Default warnings: 50 h, 1,000 km, 14 days.</div>
+      <span class="flex-1"></span>${perms.mgr&&html`<button id="sp-new" type="button" class="btn btn-primary" onClick=${()=>open({k:'plan'})}>${Icon.plus} New service plan</button>`}</div>
+    <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="sp-table">
+      <thead><tr class="text-left">${['Applies to','Service','Every','Warn before','Machines','',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+      <tbody>${plans.map(p=>{const m=p.asset_id&&data.resources.find(r=>r.id===p.asset_id);return html`<tr key=${p.id} class="border-t border-line" style=${p.active?null:{opacity:.55}}>
+          <td class="py-2 px-3 whitespace-nowrap">${p.asset_id?html`<span class="font-medium">${m?m.name:p.asset_id}</span> <span class="text-muted">(one machine)</span>`:html`<span class="font-medium">${p.category}</span>`}</td>
+          <td class="py-2 px-3">${p.name}${!p.active?html` <span class="text-[11px] text-muted">(off)</span>`:''}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${[p.every_hours&&`${fmtN(+p.every_hours)} h`,p.every_km&&`${fmtN(+p.every_km)} km`,p.every_days&&`${p.every_days} days`].filter(Boolean).join(' / ')}</td>
+          <td class="py-2 px-3 whitespace-nowrap text-muted">${[p.every_hours&&`${fmtN(+p.warn_hours)} h`,p.every_km&&`${fmtN(+p.warn_km)} km`,p.every_days&&`${p.warn_days} days`].filter(Boolean).join(' / ')}</td>
+          <td class="py-2 px-3 tnum">${covers(p)}</td>
+          <td class="py-2 px-3 text-right whitespace-nowrap" colspan="2">${perms.mgr&&(del===p.id?html`<button type="button" class="text-[12px] font-semibold mr-2" style=${{color:'var(--bad)'}} onClick=${()=>remove(p)}>Remove</button><button type="button" class="text-[12px] text-muted" onClick=${()=>setDel(null)}>Keep</button>`
+            :html`<button type="button" class="p-1 rounded text-muted hover:text-ink" onClick=${()=>open({k:'plan',plan:p})} aria-label=${'Edit '+p.name}>${Icon.pencil}</button><button type="button" class="p-1 rounded text-muted hover:text-ink" onClick=${()=>setDel(p.id)} aria-label=${'Remove '+p.name}>${Icon.x}</button>`)}</td></tr>`})}
+        ${!plans.length&&html`<tr><td colspan="7" class="px-3 py-6 text-center text-muted">No service plans yet.${perms.mgr?' Add one, e.g. Steel Rollers: 250 hr service every 250 hours.':' An administrator adds them.'}</td></tr>`}</tbody></table></div>
+    ${!perms.mgr&&html`<p class="px-3 py-2 text-[12px] text-muted">Only administrators can change service plans.</p>`}
+  </section>`;
+}
+
+/* ---------- the screen ---------- */
+function FleetScreen({data,live,notify}){
+  const sb=live.sb;const role=live.role;
+  const perms={work:['admin','supervisor','mechanic'].includes(role),verify:['admin','supervisor'].includes(role),mgr:role==='admin'};
+  const {db,err,reload}=useMaint(sb);
+  const [tab,setTab]=useState(()=>{try{return localStorage.getItem(KEY+':fleet-tab')||'dash'}catch(e){return 'dash'}});
+  const pickTab=t=>{setTab(t);try{localStorage.setItem(KEY+':fleet-tab',t)}catch(e){}};
+  const [dlg,setDlg]=useState(null);const [asset,setAsset]=useState(null);
+  useEffect(()=>{try{const id=localStorage.getItem(KEY+':fleetAsset');if(id){localStorage.removeItem(KEY+':fleetAsset');setAsset(id)}}catch(e){}},[]);
+  const M=useMemo(()=>db?buildModel(data,db):null,[db,data.resources,data.blocks]);
+  if(err&&!db)return html`<div class="panel p-6 grid gap-2 max-w-[640px]"><div class="font-display text-[17px] font-semibold">Fleet & Maintenance isn’t set up yet</div>
+    <p class="text-[13px] text-muted">The maintenance tables aren’t in the database yet. An administrator needs to run <span class="mono">supabase/maintenance.sql</span> once in Supabase → SQL Editor.</p><p class="text-[12px] text-faint mono">${err}</p>
+    <div><button type="button" class="btn" onClick=${reload}>Try again</button></div></div>`;
+  if(!M)return html`<div class="panel p-6 text-[13px] text-muted">Loading maintenance…</div>`;
+  const staff=[...new Set(data.resources.filter(r=>r.type==='person').map(r=>r.name))].sort();
+  const ctx={sb,db,data,M,perms,notify,reload,staff,plans:db.service_plans};
+  const open=o=>{if(o.k==='asset'){setAsset(o.id);return}setDlg(o)};
+  const a=asset&&M.byId.get(asset);
+  const TABS=[['dash','Dashboard'],['wo','Work orders'],['cal','Calendar'],['plans','Service plans']];
+  return html`<div class="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto pr-1">
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="seg" role="tablist" aria-label="Fleet sections">${TABS.map(([k,l])=>html`<button key=${k} id=${'fl-tab-'+k} type="button" role="tab" aria-selected=${tab===k} aria-pressed=${tab===k} onClick=${()=>pickTab(k)}>${l}${k==='wo'?html` <span class="mono text-[11px] text-faint">${db.work_orders.filter(w=>WO_OPEN(w.status)).length}</span>`:''}</button>`)}</div>
+      <span class="flex-1"></span>${err&&html`<span class="text-[12px]" style=${{color:'var(--bad)'}}>${err}</span>`}
+      ${!perms.work&&html`<span class="text-[12px] text-muted">View only: mechanics, supervisors and administrators record maintenance</span>`}
+    </div>
+    ${tab==='dash'?html`<${Dashboard} ctx=${ctx} open=${open}/>`:tab==='wo'?html`<${WorkOrders} ctx=${ctx} open=${open}/>`:tab==='cal'?html`<${Calendar} ctx=${ctx} open=${open}/>`:html`<${Plans} ctx=${ctx} open=${open}/>`}
+    ${a&&html`<${AssetPanel} ctx=${ctx} a=${a} open=${open} behind=${!!dlg} onClose=${()=>setAsset(null)}/>`}
+    ${dlg&&dlg.k==='wo'&&html`<${WorkOrderDialog} ctx=${ctx} wo=${dlg.wo&&db.work_orders.find(w=>w.id===dlg.wo.id)||dlg.wo} init=${dlg.init} onClose=${()=>setDlg(null)}/>`}
+    ${dlg&&dlg.k==='service'&&html`<${ServiceDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} plan=${dlg.plan} baseline=${dlg.baseline} onClose=${()=>setDlg(null)}/>`}
+    ${dlg&&dlg.k==='reading'&&html`<${ReadingDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
+    ${dlg&&dlg.k==='profile'&&html`<${ProfileDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
+    ${dlg&&dlg.k==='breakdown'&&html`<${BreakdownDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
+    ${dlg&&dlg.k==='plan'&&html`<${PlanDialog} ctx=${ctx} plan=${dlg.plan} onClose=${()=>setDlg(null)}/>`}
+  </div>`;
+}
+window.FleetScreen=FleetScreen;
+window.__maintModel=buildModel;
+})();

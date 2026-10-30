@@ -55,3 +55,27 @@ Vercel → Project → **Settings → Domains** → add e.g. `roster.yourcompany
 ## What is shared and what is personal
 Shared by everyone: crews, staff, machines, asphalt plants, jobs, bookings, quantities, mixes, binders and quote-change history.
 Personal to each person's browser: hidden rows, section order, view length, dark mode and notification settings.
+
+## Fleet & Maintenance
+
+Servicing, meter readings, work orders and breakdowns for the machines on the roster (the **Fleet** screen).
+
+- `maint.js`: the Fleet screens, loaded only when someone opens Fleet
+- `supabase/maintenance.sql`: the maintenance tables, roles and database rules
+- `tests/maintenance_test.sql`: checks the database rules; leaves no data behind
+
+### Set up (once)
+1. Supabase → **SQL Editor** → **New query**. Paste all of `supabase/maintenance.sql` and click **Run**. It is safe to run again and doesn't change roster data.
+2. To check it: paste `tests/maintenance_test.sql` into a new query and **Run**. The messages list each check as PASS and finish with `ALL MAINTENANCE TESTS PASSED`. It rolls itself back.
+
+### Roles
+| Role | Schedule | Maintenance |
+| --- | --- | --- |
+| `admin` | Everything | Everything: service plans, verify & close, meter corrections |
+| `planner` | Edit | View |
+| `supervisor` | View | Record work, verify & close work orders |
+| `mechanic` | View | Record services, readings and work order progress |
+| `operator` | View | Prestarts (coming next) |
+| `viewer` | View | None |
+
+Set a role the same way as before, e.g. `update public.profiles set role = 'mechanic' where email = 'name@yourcompany.com.au';`

@@ -498,7 +498,7 @@ function JobsManager({data,setData,onImport,onMerge}){
 }
 
 /* ---------- sidebar ---------- */
-function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onImport,onMerge,screen,onImportMachines,notify}){
+function Sidebar({data,setData,days,tab,setTab,onClose,onMaint,renameId,setRenameId,onImport,onMerge,screen,onImportMachines,notify}){
   /* Staff and Machines only show on their own screens; the Schedule screen gets everything else */
   const tabOK=t=>screen==='staff'?t==='person':screen==='machines'?t==='machine':(t!=='person'&&t!=='machine');
   const [q,setQ]=useState('');
@@ -705,6 +705,7 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
                 <button class="text-[11px] font-semibold px-2 py-0.5 rounded" style=${{background:'hsl(352 70% var(--blk-l))',color:'hsl(352 60% var(--blk-fg-l))'}} onClick=${()=>remove(r.id)}>Remove</button>
                 <button class="text-[11px] text-muted px-2" onClick=${()=>setConfirmId(null)}>Keep</button></div>`
             :html`<div class="flex flex-col items-center gap-0.5 lg:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                ${r.type==='machine'&&onMaint&&html`<button class="p-1 rounded text-muted hover:text-ink" onClick=${()=>onMaint(r.id)} aria-label=${'Maintenance for '+r.name} title="Maintenance">${Icon.wrench}</button>`}
                 <button class="p-1 rounded text-muted hover:text-ink" onClick=${()=>setRenameId(r.id)} aria-label=${'Edit '+r.name} title="Edit name">${Icon.pencil}</button>
                 <button class="p-1 rounded text-muted hover:text-ink" onClick=${()=>patch(r.id,{visible:!r.visible})} aria-label=${(r.visible?'Hide ':'Show ')+r.name} title=${r.visible?'Hide from board':'Show on board'}>${r.visible?Icon.eye:Icon.eyeOff}</button>
                 <button class="p-1 rounded text-muted hover:text-ink" onClick=${()=>setConfirmId(r.id)} aria-label=${'Remove '+r.name} title="Remove">${Icon.x}</button></div>`}
@@ -1457,6 +1458,7 @@ function Section({title,id,children,aside}){
 
 function BookingDetails({f,set,data,rtype,err,changeRes}){
   return html`<div class="grid gap-6">
+    ${f.fromMaintenance&&html`<div class="rounded-lg px-3 py-2 text-[12.5px]" style=${{background:'var(--accent-soft)'}}>This downtime comes from a maintenance work order. Change its dates on the work order in Fleet & Maintenance, or they’ll be put back.</div>`}
     <${Section} title="Assignment" id="sec-assign">
       <label class="grid gap-1"><span class="label">Crew, staff member or machine</span>
         <select id="ed-res" class="field" value=${f.resourceId} onChange=${e=>changeRes(e.target.value)}>
@@ -2587,16 +2589,28 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
   </div>`;
 }
 
+/* ---------- Fleet & Maintenance: its own file, loaded the first time the screen opens ---------- */
+function LazyFleet(props){
+  const [ok,setOk]=useState(!!window.FleetScreen);const [err,setErr]=useState('');
+  useEffect(()=>{if(window.FleetScreen)return;const s=document.createElement('script');
+    const v=((document.querySelector('script[src*="/app.js"]')||{}).src||'').split('?v=')[1]||Date.now();
+    s.src='/maint.js?v='+v;s.onload=()=>setOk(!!window.FleetScreen);s.onerror=()=>setErr('Couldn’t load Fleet & Maintenance. Check the connection and reload.');document.body.appendChild(s)},[]);
+  if(err)return html`<div class="panel p-6 text-[13px]" style=${{color:'var(--bad)'}}>${err}</div>`;
+  if(!ok)return html`<div class="panel p-6 text-[13px] text-muted">Loading Fleet & Maintenance…</div>`;
+  return html`<${window.FleetScreen} ...${props}/>`;
+}
 /* ---------- screens: the left menu ---------- */
 const SCREENS={
   schedule:{label:'Schedule',title:'FraserFlow',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   jobs:{label:'Jobs',title:'Jobs',only:[],legend:[],head:''},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
+  fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',roles:['admin','planner','supervisor','mechanic']},   /* maintenance: not for operators or viewers */
   planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
   ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',admin:true},   /* administrators only (button hidden for everyone else) */
 };
 const NAV_ICON={
+  fleet:svg(html`<path d="M10.5 2a3.5 3.5 0 00-3.2 4.9L2.5 11.7a1.3 1.3 0 001.8 1.8l4.8-4.8A3.5 3.5 0 0014 5.5l-2 2-1.8-.3-.3-1.8 2-2c-.4-.3-.9-.4-1.4-.4z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/>`,20),
   jobs:svg(html`<rect x="2" y="4.5" width="12" height="9" rx="1.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M5.8 4.5V3.2c0-.4.3-.7.7-.7h3c.4 0 .7.3.7.7v1.3M2 8.5h12" stroke="currentColor" stroke-width="1.5" fill="none"/>`,20),
   ideas:svg(html`<path d="M8 1.8a4.4 4.4 0 00-2.6 7.9c.5.4.8 1 .8 1.6v.4h3.6v-.4c0-.6.3-1.2.8-1.6A4.4 4.4 0 008 1.8z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M6.4 13.6h3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,20),
   schedule:svg(html`<rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M5 9h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`,20),
@@ -2604,12 +2618,12 @@ const NAV_ICON={
   planning:svg(html`<path d="M4 2.5h6l2.5 2.5v8.5H4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 7h4.5M6 9.5h4.5M6 12h2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`,20),
   machines:svg(html`<path d="M2 11.5V8.5l2-3h4l1.5 3H14v3" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="4.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/><circle cx="11.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/>`,20),
 };
-function NavRail({screen,go,isAdmin,badge={}}){
+function NavRail({screen,go,isAdmin,role,badge={}}){
   const btn=([k,s])=>{const on=screen===k;
     return html`<button key=${k} class=${'flex flex-col items-center gap-1 rounded-lg py-2.5 text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
       style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
       <span class="relative inline-flex">${NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${s.label}</span></button>`};
-  const all=Object.entries(SCREENS).filter(([,s])=>!s.admin||isAdmin);
+  const all=Object.entries(SCREENS).filter(([,s])=>(!s.admin||isAdmin)&&(!s.roles||s.roles.includes(role)));
   /* admin-only screens (Ideas) sit at the bottom of the bar */
   return html`<nav class="panel shrink-0 w-[68px] h-full flex flex-col gap-1 p-1.5" aria-label="Screens">
     ${all.filter(([,s])=>!s.admin).map(btn)}
@@ -2645,7 +2659,7 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog}){
       ${account&&html`<div class="px-4 py-3 border-b border-line">
         <div class="text-[12px] text-muted">Signed in as</div>
         <div class="text-[13.5px] font-semibold truncate">${account.email}</div>
-        <div class="text-[11.5px] text-muted mt-0.5">${account.role==='admin'?'Administrator':account.role==='planner'?'Planner (can edit)':'View only'}</div>
+        <div class="text-[11.5px] text-muted mt-0.5">${({admin:'Administrator',planner:'Planner (can edit)',supervisor:'Supervisor (maintenance)',mechanic:'Mechanic (maintenance)',operator:'Operator'})[account.role]||'View only'}</div>
       </div>`}
       <div class="p-2">
         ${sectionLabel('Appearance')}
@@ -4618,8 +4632,8 @@ function App({boot,live}){
     return()=>{clearInterval(t);document.removeEventListener('visibilitychange',chk);window.removeEventListener('focus',chk)}},[]);
   /* which screen of the left menu is open (remembered in this browser) */
   const isAdmin=live.role==='admin';
-  const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return SCREENS[v]&&(!SCREENS[v].admin||isAdmin)?v:'schedule'}catch(e){return 'schedule'}});
-  const boardScreen=screen!=='planning'&&screen!=='ideas'&&screen!=='jobs';   /* the date controls and + Booking belong to the board screens */
+  const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return SCREENS[v]&&(!SCREENS[v].admin||isAdmin)&&(!SCREENS[v].roles||SCREENS[v].roles.includes(live.role))?v:'schedule'}catch(e){return 'schedule'}});
+  const boardScreen=screen!=='planning'&&screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet';   /* the date controls and + Booking belong to the board screens */
   const goScreen=k=>{setScreen(k);try{localStorage.setItem(KEY+':screen',k)}catch(e){}
     const t=SCREENS[k].tab;if(t)setTab(t);else if(tab==='person'||tab==='machine')setTab('crew')};
   useEffect(()=>{const t=SCREENS[screen].tab;if(t&&tab!==t)setTab(t);else if(!t&&(tab==='person'||tab==='machine'))setTab('crew')},[screen,tab]);
@@ -4724,11 +4738,11 @@ function App({boot,live}){
   const legend=[['Crews',['job','standby','crewtraining']],['Asphalt plant',['plantmaint','plantreduced']],['Machines',['onjob','service','repair','inspection']],['Staff',['leave','sick','rdo','training']]];
 
   return html`<div class="shell h-full flex gap-4">
-    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} badge=${{ideas:(data.suggestions||[]).length}}/>
-    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
+    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} badge=${{ideas:(data.suggestions||[]).length}}/>
+    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onMaint=${['admin','planner','supervisor','mechanic'].includes(live.role)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
-        <${Sidebar} screen=${screen} notify=${setToast} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
+        <${Sidebar} screen=${screen} notify=${setToast} onMaint=${['admin','planner','supervisor','mechanic'].includes(live.role)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
 
     <main class="flex-1 min-w-0 h-full flex flex-col gap-3">
       <header class="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -4736,7 +4750,7 @@ function App({boot,live}){
           <img src=${BRAND_OVAL} alt="Alex Fraser Group" class="block h-[50px] w-auto select-none" draggable="false"/>
           <img src=${BRAND_TAG} alt="Building greener roads" class="brand-tag hidden xl:block h-[30px] w-auto select-none" draggable="false"/>
         </div>
-        ${screen!=='ideas'&&screen!=='jobs'&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
+        ${screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet'&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
           title=${on?'Hide Settings':'Crews, plant, mixes, seal, trucks and subcontractors'}
           style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.gear} Settings</button>`)(panel&&tab!=='jobs')}
         ${screen==='schedule'&&html`<${ExportsMenu} items=${[{id:'exp-program',label:'Daily program',desc:'PDF for each job working on a day',run:()=>setProgram(true)},
@@ -4764,7 +4778,7 @@ function App({boot,live}){
         <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${live.role==='admin'?()=>setLogOpen(true):null}/>
       </header>
 
-      ${screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
+      ${screen==='fleet'?html`<${LazyFleet} data=${data} live=${live} notify=${setToast}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
       <section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
         <${Stat} k="Crews on jobs today" v=${`${crewsOnJob.length}/${vis('crew').length}`} sub=${`${util}% of crew-days booked`}/>
         <${Stat} k="Machines down today" v=${downToday.length} sub=${downToday.length?downToday.map(m=>m.name).join(', '):'all available'} tone=${downToday.length?'var(--bad)':null}/>
