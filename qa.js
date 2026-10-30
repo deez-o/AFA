@@ -49,9 +49,8 @@ const JSA_SECTIONS=[
     H('Measuring equipment','Calibrations current'),
     H('Product temperature','Measure temperatures with calibrated device')]}];
 const CHECKS=[['swms','SWMS available'],['emergency','Emergency procedures available'],['prestarts','Plant prestarts completed'],['vest','Truck controller in alternate coloured vest']];
-const COMMS=[['hseq','HSEQ Alert'],['learning','Learning'],['focus','Focus'],['pavement','Pavement'],['other','Other']];
 const HEAD=[['job_no','Job number'],['location','Job location'],['customer','Customer'],['date','Date'],['time','Time'],['foreman','Foreman'],['supervisor','Supervisor'],['client_rep','Client rep'],
-  ['truck_controller','Truck controller'],['uhf','UHF channel'],['swms_ref','SWMS reference'],['chief_warden','Chief warden'],['deputy_warden','Deputy warden'],['first_aid','First aid officers']];
+  ['truck_controller','Truck controller'],['uhf','UHF channel'],['first_aid','First aid officers']];
 const RISK=['Low','Medium','High','Extreme'];
 const RISK_COL={Low:'hsl(145 55% 36%)',Medium:'hsl(38 90% 42%)',High:'hsl(20 85% 45%)',Extreme:'hsl(0 72% 47%)'};
 const tickKey=(s,h,i)=>`${s}.${h.key}.${i}`;
@@ -67,8 +66,8 @@ function prestartHint(data,b,k){const ids=b.plantIds||[];if(!ids.length)return n
 function newPack(data,e,myName){const b=e.b,j=jobOf(data,b)||{};const crew=data.resources.find(r=>r.id===e.crewId);
   return {id:newId(),block_id:b.id,shift_date:e.k,job_id:b.jobId||null,crew_id:e.crewId,status:'draft',toolbox:null,
     jsa:{v:JSA_VERSION,type:isSealCrew(crew)?'seal':'asphalt',night:b.shift==='night',
-      head:{job_no:j.projectNo||'',location:j.address||j.name||'',customer:j.customer||'',date:e.k,time:hhmm(),foreman:'',supervisor:myName||'',client_rep:'',truck_controller:'',uhf:'',swms_ref:'',chief_warden:'',deputy_warden:'',first_aid:''},
-      ticks:{},quality:{serial:''},extra:[],checks:{},comms:{},comms_title:''}}}
+      head:{job_no:j.projectNo||'',location:j.address||j.name||'',customer:j.customer||'',date:e.k,time:hhmm(),foreman:'',supervisor:myName||'',client_rep:'',truck_controller:'',uhf:'',first_aid:''},
+      ticks:{},quality:{serial:''},extra:[],checks:{}}}}
 /* another pack for the same shift: a copy of the latest one (not its signatures), as a new draft */
 const packsFor=(packs,e)=>packs.filter(p=>p.block_id===e.b.id&&p.shift_date===e.k).sort((a,b)=>String(a.created_at||'9').localeCompare(String(b.created_at||'9')));
 const packName=(p,list)=>p.label||(list.length>1?`Pack ${list.indexOf(p)+1}`:'QA pack');
@@ -233,12 +232,10 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
         ${canEdit&&html`<div><button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>setJ(j=>({extra:j.extra.filter((y,k)=>k!==i)}))}>Remove this hazard</button></div>`}</div>`)}
       ${canEdit&&html`<div><button id="qa-add-hazard" type="button" class="btn" onClick=${()=>setJ(j=>({extra:[...(j.extra||[]),{hazard:'',risk:'',controls:'',residual:''}]}))}>${Icon.plus} Add hazard</button></div>`}<//>
 
-    <${Card} title="Checklists & communications" id="qa-checks">
+    <${Card} title="Checklists" id="qa-checks">
       <div class="grid gap-1.5 sm:grid-cols-2">${CHECKS.map(([k,l])=>html`<div key=${k}><${Tick} id=${'qa-c-'+k} label=${l} on=${!!(J.checks||{})[k]} disabled=${!canEdit} onChange=${v=>setJ(j=>({checks:{...j.checks,[k]:v}}))}/>
         ${k==='prestarts'&&hint&&html`<div class="text-[11.5px] mt-0.5 ml-1" id="qa-ps-hint" style=${{color:hint.done===hint.of?'hsl(145 55% 32%)':'hsl(30 90% 38%)'}}>${hint.done} of ${hint.of} machine${hint.of===1?'':'s'} on this job ${hint.of===1?'has':'have'} done a prestart today</div>`}</div>`)}</div>
-      <div class="label mt-1">Communications</div>
-      <div class="grid gap-1.5 grid-cols-2 sm:grid-cols-5">${COMMS.map(([k,l])=>html`<${Tick} key=${k} id=${'qa-m-'+k} label=${l} on=${!!(J.comms||{})[k]} disabled=${!canEdit} onChange=${v=>setJ(j=>({comms:{...j.comms,[k]:v}}))}/>`)}</div>
-      <${Fld} label="Title / date"><input id="qa-comms-title" class="field" style=${fs} value=${J.comms_title||''} disabled=${!canEdit} onInput=${ev=>setJ(()=>({comms_title:ev.target.value}))}/><//><//>
+      <//>
 
     <${Card} title="Sign-off" id="qa-sign" sub=${`${jsaSigs.length} signed`}>
       <p class="text-[12px] text-muted">${AGREE}</p>
@@ -363,7 +360,7 @@ async function packPdf(data,e,p,sigs){
   /* header grid: 5 columns × 3 rows like the form */
   const cells=[['Job Number',hd.job_no],['Job Location',hd.location],['Customer',hd.customer],['Date',hd.date?fmtShort(parse(hd.date))+' '+parse(hd.date).getFullYear():''],['Time',hd.time],
     ['Foreman',hd.foreman],['Supervisor',hd.supervisor],['Client Rep',hd.client_rep],['Truck Controller',hd.truck_controller],['UHF Channel',hd.uhf],
-    ['SWMS Reference',hd.swms_ref],['Chief Warden',hd.chief_warden],['Deputy Warden',hd.deputy_warden],['First Aid Officers',hd.first_aid],['Type',J.type==='seal'?'Spray Seal':'Asphalt']];
+    ['First Aid Officers',hd.first_aid],['Type',J.type==='seal'?'Spray Seal':'Asphalt']];
   const cw=(W-2*M)/5;cells.forEach(([k,v],i)=>{const x=M+(i%5)*cw,yy=y+Math.floor(i/5)*10;box(x,yy,cw,10);doc.setFont('helvetica','bold');doc.setFontSize(6.8);doc.setTextColor(94,99,110);txt(k,x+1.5,yy+3.4);
     doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(22,24,29);txt(doc.splitTextToSize(String(v||''),cw-3)[0]||'',x+1.5,yy+8)});y+=33;
   doc.setFontSize(7.5);doc.setTextColor(94,99,110);txt('Ticks mark the control measures actually implemented. Hazards that needed other controls are listed under Site / work location / task / process specific hazards.',M,y);y+=3;
@@ -390,12 +387,11 @@ async function packPdf(data,e,p,sigs){
   (ex.length?ex:[{hazard:'None',risk:'',controls:'',residual:''}]).forEach((x,i)=>{const a=doc.splitTextToSize(`${ex.length?(i+1)+'. ':''}${x.hazard||''}`,xc[0][1]-2),c=doc.splitTextToSize(x.controls||'',xc[2][1]-2);const h=Math.max(a.length,c.length,1)*3.4+2;
     room(h);xc.forEach(([xx,w])=>box(xx,y,w,h));doc.setFont('helvetica','normal');doc.setTextColor(22,24,29);txt(a,xc[0][0]+1.2,y+3.4);txt(x.risk||'',xc[1][0]+1.2,y+3.4);txt(c,xc[2][0]+1.2,y+3.4);txt(x.residual||'',xc[3][0]+1.2,y+3.4);y+=h});
   y+=4;
-  /* checklists & communications */
-  room(16);doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(153,10,44);txt('Checklists',M,y+3.5);txt('Communications',M+colW,y+3.5);y+=5.5;doc.setFontSize(7.6);doc.setTextColor(22,24,29);
+  /* checklists */
+  room(16);doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(153,10,44);txt('Checklists',M,y+3.5);y+=5.5;doc.setFontSize(7.6);doc.setTextColor(22,24,29);
   const mark=(on,x,yy)=>{box(x,yy-3,3.4,3.4);if(on){doc.setDrawColor(20,120,60);doc.setLineWidth(.5);doc.line(x+.6,yy-1.4,x+1.4,yy-.5);doc.line(x+1.4,yy-.5,x+2.9,yy-2.5);doc.setLineWidth(.2)}};
-  CHECKS.forEach(([k,l],i)=>{const x=M+(i%2)*colW/2,yy=y+3+Math.floor(i/2)*5;mark((J.checks||{})[k],x,yy);doc.setFont('helvetica','normal');txt(l,x+5,yy)});
-  COMMS.forEach(([k,l],i)=>{const x=M+colW+(i%3)*colW/3,yy=y+3+Math.floor(i/3)*5;mark((J.comms||{})[k],x,yy);txt(l,x+5,yy)});
-  y+=13;if(J.comms_title){txt('Title / date: '+J.comms_title,M+colW,y);y+=4}
+  CHECKS.forEach(([k,l],i)=>{const x=M+(i%4)*(W-2*M)/4,yy=y+3+Math.floor(i/4)*5;mark((J.checks||{})[k],x,yy);doc.setFont('helvetica','normal');txt(l,x+5,yy)});
+  y+=13;
   /* attendees */
   const sigTable=(form,label)=>{const list=sigs.filter(s=>s.pack_id===p.id&&s.form===form);room(22);
     doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(153,10,44);txt(label,M,y+3.5);y+=5;
