@@ -4787,7 +4787,7 @@ function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit,admin,
     if(isNew)setData(d=>({...d,resources:[...d.resources,{id,type:'person',name:f.name.trim(),sub:f.sub.trim()||'Crew member',crewId:f.crewId||null,hue:f.hue,visible:true}]}));
     else setData(d=>({...d,resources:d.resources.map(r=>r.id===person.id?{...r,name:f.name.trim(),sub:f.sub.trim(),crewId:f.crewId||null,hue:f.hue}:r)}));
     notify&&notify(isNew?`${f.name.trim()} added`:'Saved');onClose()};
-  const remove=async()=>{const goLogin=canDelLogin&&delLogin;
+  const remove=async()=>{if(!admin)return;const goLogin=canDelLogin&&delLogin;
     if(goLogin){setBusy(true);setErr('');try{await usersApi(sb,{action:'delete',id:prof.id})}catch(e){setBusy(false);setErr(e.message||String(e));return}setBusy(false)}   /* the login first: if that fails, nothing is removed */
     setData(d=>({...d,resources:d.resources.filter(r=>r.id!==person.id),blocks:d.blocks.filter(b=>b.resourceId!==person.id)}));
     if(prof&&sb&&!goLogin)try{await sb.from('profiles').update({staff_id:null}).eq('id',prof.id)}catch(e){}   /* their login stays, unlinked */
@@ -4798,7 +4798,7 @@ function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit,admin,
           :prof?html`<span class="text-[12px] text-muted">Their login stays, unlinked.</span>`:null}
         ${err&&html`<span class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}</div>
       <button type="button" class="btn" onClick=${()=>{if(startDel)onClose();else{setDel(false);setErr('')}}}>Cancel</button><button id="pd-remove-go" type="button" class="btn" disabled=${busy} style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${remove}>${busy?'Deleting…':'Yes, delete'}</button>`
-      :html`${!isNew&&canEdit&&html`<button id="pd-remove" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>{setDel(true);setErr('')}}>${Icon.trash} Delete</button>`}${err&&html`<span class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span>
+      :html`${!isNew&&canEdit&&admin&&html`<button id="pd-remove" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>{setDel(true);setErr('')}}>${Icon.trash} Delete</button>`}${err&&html`<span class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span>
         <button type="button" class="btn" onClick=${onClose}>${canEdit?'Cancel':'Close'}</button>${canEdit&&html`<button id="pd-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Adding…':isNew?(withLogin&&lg.on?'Add with login':'Add staff member'):'Save'}</button>`}`}>
     <fieldset disabled=${!canEdit} class="m-0 p-0 border-0 min-w-0 grid sm:grid-cols-2 gap-3">
       <${SFld} label="Name"><input id="pd-name" class="field" placeholder="Full name" value=${f.name} onInput=${e=>setF({...f,name:e.target.value})}/><//>
@@ -4859,7 +4859,7 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
         <button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>setMade(null)}>Done</button></div>`}
       ${perr&&html`<div id="lg-err" class="px-3 py-2 text-[12.5px]" style=${{color:'var(--bad)'}}>${perr}</div>`}
       <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="sp-table">
-        <thead><tr class="text-left">${['Name','Crew','Leave',...(admin?['Login','Role','']:[]),...(canEdit?['']:[])].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+        <thead><tr class="text-left">${['Name','Crew','Leave',...(admin?['Login','Role','']:[]),...(canEdit&&admin?['']:[])].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
         <tbody>${list.map(p=>{const lv=leaveOf(p);const pr=profOf.get(p.id);
           return html`<tr key=${p.id} class="border-t border-line" data-person=${p.name}>
             <td class="py-2 px-3"><button type="button" class="flex items-center gap-2.5 text-left sp-open" onClick=${()=>setDlg({k:'person',p})}><${Badge} r=${p} size=${28}/><span class="min-w-0"><span class="block font-medium text-[13px] hover:underline">${p.name}</span><span class="block text-[11.5px] text-muted">${p.sub||''}</span></span></button></td>
@@ -4867,7 +4867,7 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
             <td class="py-2 px-3 whitespace-nowrap">${lv?html`<span class="text-[12px]" style=${lv.now?{color:'hsl(28 80% 40%)',fontWeight:600}:{color:'var(--muted)'}}>${lv.now?'Away: ':'Next: '}${lv.t}</span>`:html`<span class="text-faint">–</span>`}</td>
             ${admin&&(profs==null?html`<td colspan="3" class="py-2 px-3 text-muted">…</td>`:pr?html`<td class="py-2 px-3 mono whitespace-nowrap sp-login">${showLogin(pr.email)}${pr.id===me?html` <span class="text-muted font-sans">(you)</span>`:''}</td><td class="py-2 px-3">${roleSel(pr)}</td><td class="py-2 px-3 text-right whitespace-nowrap">${resetCtl(pr)}</td>`
               :html`<td class="py-2 px-3 text-faint">No login</td><td></td><td class="py-2 px-3 text-right"><button type="button" class="btn sp-newlogin" style=${{height:30}} onClick=${()=>{setMade(null);setDlg({k:'login',p})}}>${Icon.plus} Create login</button></td>`)}
-            ${canEdit&&html`<td class="py-2 pl-1 pr-3 text-right w-0"><button type="button" class="sp-del w-8 h-8 inline-flex items-center justify-center rounded-md hover:opacity-70" style=${{color:'var(--bad)'}} title=${'Delete '+p.name} aria-label=${'Delete '+p.name} onClick=${()=>setDlg({k:'person',p,del:true})}>${Icon.trash}</button></td>`}
+            ${canEdit&&admin&&html`<td class="py-2 pl-1 pr-3 text-right w-0"><button type="button" class="sp-del w-8 h-8 inline-flex items-center justify-center rounded-md hover:opacity-70" style=${{color:'var(--bad)'}} title=${'Delete '+p.name} aria-label=${'Delete '+p.name} onClick=${()=>setDlg({k:'person',p,del:true})}>${Icon.trash}</button></td>`}
 </tr>`})}
           ${!list.length&&html`<tr><td colspan="7" class="px-3 py-6 text-center text-muted">${people.length?'No staff match.':'No staff yet.'+(canEdit?' Add your first staff member.':'')}</td></tr>`}</tbody></table></div>
     </section>
