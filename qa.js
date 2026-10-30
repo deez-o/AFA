@@ -199,6 +199,16 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
   const remove=()=>{clearTimeout(tm.current);tm.current=null;save({t:'delpack',id:p.id});ctx.notify&&ctx.notify('QA pack deleted');onBack&&onBack()};
   const pdf=async()=>{setBusy(true);try{await packPdf(data,e,p,sigs)}catch(x){setMsg(errMsg(x))}finally{setBusy(false)}};
   const T=p.toolbox;const setT=f=>upd(x=>({...x,toolbox:{...x.toolbox,...f(x.toolbox)}}));
+  /* two toolbox meetings a week: how many this crew has held this week (Monday to Sunday), this pack included */
+  const [wkTb,setWkTb]=useState(null);
+  useEffect(()=>{if(!canEdit||!e.crewId||!ctx.sb)return;let off=false;const d=parse(e.k);const mon=new Date(d);mon.setDate(d.getDate()-((d.getDay()+6)%7));const sun=new Date(mon);sun.setDate(mon.getDate()+6);
+    (async()=>{try{const {data:rows,error}=await ctx.sb.from('qa_packs').select('id,toolbox').eq('crew_id',e.crewId).gte('shift_date',iso(mon)).lte('shift_date',iso(sun));if(error)throw error;if(!off)setWkTb((rows||[]).filter(r=>r.id!==p.id&&r.toolbox).length)}catch(x){}})();
+    return()=>{off=true}},[p.id,e.crewId,e.k,canEdit]);
+  const tbWeek=wkTb==null?null:wkTb+(T?1:0);
+  const tbRemind=btn=>canEdit&&!T&&tbWeek!=null&&tbWeek<2&&html`<div id="qa-tb-remind" class="rounded-xl border px-4 py-3 flex flex-wrap items-center gap-3" style=${{borderColor:'hsl(30 90% 45%)',background:'hsl(38 100% 50% / .10)'}}>
+    <div class="flex-1 min-w-[200px]"><div class="text-[13.5px] font-semibold" style=${{color:'hsl(30 90% 32%)'}}>Toolbox meetings this week: ${tbWeek} of 2</div>
+      <div class="text-[12px] text-muted">${crewName(data,e.crewId)} needs two toolbox meetings a week${tbWeek?' – one more to go':''}.</div></div>
+    ${btn&&html`<button type="button" class="btn qa-tb-remind-add" onClick=${()=>addOpt('toolbox')}>${Icon.plus} Add a toolbox meeting</button>`}</div>`;
   const FF=window.FFQF;const forms=p.forms||{};
   const fctx={data,e,pack:p,sigs,ctx,canEdit,open:setDlg,set:(id,f)=>upd(x=>({...x,forms:{...(x.forms||{}),[id]:typeof f==='function'?f((x.forms||{})[id]):f}})),
     add:id=>upd(x=>{const fs0=x.forms||{};const lot=fs0.lot||FF.newLot(data,e,x);return {...x,forms:{...fs0,lot,[id]:FF.byId[id].make(data,e,x,ctx)}}}),
@@ -208,7 +218,7 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
   const [sec,setSec]=useState('jsa');const [showMiss,setShowMiss]=useState(false);
   const go=id=>{setSec(id);try{const el=document.getElementById('qa-pack');const sc=el&&el.closest('.overflow-y-auto');if(sc)sc.scrollTop=0}catch(x){}};
   const optOn=id=>id==='toolbox'?!!T:!!forms[id];
-  const tabs=[{id:'jsa',label:'JSA'},...(FF&&canFill?[{id:'lot',label:'Lot details'},...FF.FORMS.filter(f=>f.required).map(f=>({id:f.id,label:f.short})),...FF.FORMS.filter(f=>!f.required).map(f=>({id:f.id,label:f.short,opt:true,on:optOn(f.id)}))]:[]),
+  const tabs=[{id:'jsa',label:'JSA'},...(FF&&canFill?[{id:'lot',label:'Job details'},...FF.FORMS.filter(f=>f.required).map(f=>({id:f.id,label:f.short})),...FF.FORMS.filter(f=>!f.required).map(f=>({id:f.id,label:f.short,opt:true,on:optOn(f.id)}))]:[]),
     ...(canFill||T?[{id:'toolbox',label:'Toolbox meeting',opt:true,on:!!T}]:[])].filter(t=>!(t.opt&&!t.on&&!canEdit));
   const order=tabs.filter(t=>!t.opt||t.on);
   const o={p,sigs};
@@ -282,6 +292,7 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
         <ul class="text-[12.5px] text-muted pl-4 list-disc">${g.items.map((x,i)=>html`<li key=${i}>${x}</li>`)}</ul></div>`)}
     </section>`}
 
+    ${sec==='jsa'&&tbRemind(true)}
     ${sec==='jsa'&&html`<${Card} title="Job specific assessment (JSA)" sub=${`Version ${J.v||JSA_VERSION} · ${J.type==='seal'?'Spray seal':'Asphalt'}`} id="qa-head">
       <fieldset disabled=${!canEdit} class="m-0 p-0 border-0 min-w-0 grid gap-3">
         <div class="seg w-max"><button type="button" aria-pressed=${J.type!=='seal'} onClick=${()=>setJ(()=>({type:'asphalt'}))}>Asphalt</button><button type="button" aria-pressed=${J.type==='seal'} onClick=${()=>setJ(()=>({type:'seal'}))}>Spray seal</button></div>
@@ -337,7 +348,7 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
         <div class="label">Attendees</div>
         <${SignOff} form="toolbox" pack=${p} sigs=${sigs} ctx=${ctx} canEdit=${canEdit} open=${setDlg}/>
         ${canEdit&&!sigs.some(s=>s.pack_id===p.id&&s.form==='toolbox')&&html`<div><button id="qa-tb-remove" type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>{upd(x=>({...x,toolbox:null}));setSec('jsa')}}>Remove the toolbox meeting</button></div>`}<//>`
-      :canEdit&&html`<button id="qa-add-toolbox" type="button" class="panel px-4 py-3 text-left flex items-center gap-2 hover:bg-sunken" onClick=${()=>upd(x=>({...x,toolbox:newToolbox(x,myName)}))}>${Icon.plus}<span><span class="block font-display text-[15px] font-semibold">Add a toolbox meeting</span><span class="block text-[12px] text-muted">Only when you hold one</span></span></button>`}`}
+      :canEdit&&html`${tbRemind(false)}<button id="qa-add-toolbox" type="button" class="panel px-4 py-3 text-left flex items-center gap-2 hover:bg-sunken" onClick=${()=>upd(x=>({...x,toolbox:newToolbox(x,myName)}))}>${Icon.plus}<span><span class="block font-display text-[15px] font-semibold">Add a toolbox meeting</span><span class="block text-[12px] text-muted">Only when you hold one</span></span></button>`}`}
 
     ${(()=>{const i=order.findIndex(t=>t.id===sec);const nx=order[i+1];return nx&&html`<div class="flex justify-end"><button id="qa-next" type="button" class="btn" onClick=${()=>go(nx.id)}>Next: ${nx.label} ${Icon.chevR}</button></div>`})()}
     <div class="panel px-4 py-3 flex flex-wrap items-center gap-2 sticky bottom-0" style=${{zIndex:5}}>

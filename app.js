@@ -5081,6 +5081,20 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
   </div>`;
 }
 
+/* a newer FraserFlow is live: offer to reload (an installed app or an open tab otherwise keeps running the old one) */
+function UpdateBar(){
+  const [ready,setReady]=useState(false);
+  useEffect(()=>{const mine=(((document.querySelector('script[src*="/app.js"]')||{}).src||'').split('?v=')[1]||'').split('&')[0];if(!mine)return;
+    let busy=false;const check=async()=>{if(busy||document.visibilityState==='hidden'||navigator.onLine===false)return;busy=true;
+      try{const r=await fetch('/?v-check='+Date.now(),{cache:'no-store'});const t=await r.text();const m=t.match(/\/app\.js\?v=([0-9]+)/);if(m&&m[1]!==mine)setReady(true)}catch(e){}finally{busy=false}};
+    const t0=setTimeout(check,20000);const iv=setInterval(check,5*60000);const vis=()=>{if(document.visibilityState==='visible')check()};
+    document.addEventListener('visibilitychange',vis);window.addEventListener('focus',check);
+    return()=>{clearTimeout(t0);clearInterval(iv);document.removeEventListener('visibilitychange',vis);window.removeEventListener('focus',check)}},[]);
+  if(!ready)return null;
+  return html`<div id="update-bar" class="fixed left-1/2 -translate-x-1/2 z-[80] panel px-3 py-2 flex items-center gap-3 text-[13px] shadow" style=${{bottom:'max(14px, env(safe-area-inset-bottom, 0px))',maxWidth:'calc(100vw - 24px)'}}>
+    <span>FraserFlow has been updated.</span><button type="button" class="btn btn-primary" style=${{height:32}} onClick=${()=>location.reload()}>Reload</button>
+    <button type="button" class="btn btn-ghost px-2" style=${{height:32}} aria-label="Later" onClick=${()=>setReady(false)}>${Icon.x}</button></div>`;
+}
 function OfflineBar({at}){
   const [on,setOn]=useState(navigator.onLine);
   useEffect(()=>{const a=()=>setOn(true),b=()=>setOn(false);window.addEventListener('online',a);window.addEventListener('offline',b);return()=>{window.removeEventListener('online',a);window.removeEventListener('offline',b)}},[]);
@@ -5327,6 +5341,7 @@ function App({boot,live}){
       </header>
 
       ${live.offline&&html`<${OfflineBar} at=${live.offline.at}/>`}
+      <${UpdateBar}/>
       ${screen==='staff'&&live.role!=='supervisor'&&!myLeaveView&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg" role="tablist" aria-label="Staff sections">
         <button id="sv-leave" type="button" role="tab" aria-selected=${!peopleView} aria-pressed=${!peopleView} onClick=${()=>setStaffView('leave')}>Leave calendar</button>
         <button id="sv-people" type="button" role="tab" aria-selected=${peopleView} aria-pressed=${peopleView} onClick=${()=>setStaffView('people')}>People</button></div></div>`}

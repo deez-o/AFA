@@ -15,11 +15,11 @@ const In=({id,v,on,ph,type='text',mono,w})=>html`<input id=${id} type=${type} cl
 const rowStyle='rounded-lg border border-line p-2.5 grid gap-2';
 
 /* ---------- lot details, shared by the forms ---------- */
-const LOT=[['client','Client / customer'],['job_no','Job number'],['location','Job location'],['date','Date'],['lot_desc','Lot description'],['lot_no','Lot number'],['start_ch','Start chainage'],['end_ch','End chainage']];
+const LOT=[['client','Client / customer'],['job_no','Job number'],['location','Job location'],['date','Date'],['lot_desc','Job description'],['start_ch','Start chainage'],['end_ch','End chainage']];
 function newLot(data,e,p){const h=((p&&p.jsa)||{}).head||{};const j=data.jobs.find(x=>x.id===e.b.jobId)||{};
-  return {client:h.customer||j.customer||'',job_no:h.job_no||j.projectNo||'',location:h.location||j.address||j.name||'',date:e.k,lot_desc:'',lot_no:'',start_ch:'',end_ch:''}}
+  return {client:h.customer||j.customer||'',job_no:h.job_no||j.projectNo||'',location:h.location||j.address||j.name||'',date:e.k,lot_desc:'',start_ch:'',end_ch:''}}
 function LotCard({f}){const L=f.pack.forms.lot||{};const set=(k,v)=>f.set('lot',l=>({...(l||{}),[k]:v}));
-  return html`<${Card} title="Lot details" id="qa-lot" sub="Shared by the forms below (entered once)">
+  return html`<${Card} title="Job details" id="qa-lot" sub="Shared by the forms below (entered once)">
     <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-4 gap-3">
       ${LOT.map(([k,l])=>html`<${Fld} key=${k} label=${l}><${In} id=${'qa-lot-'+k} type=${k==='date'?'date':'text'} v=${L[k]} on=${v=>set(k,v)}/><//>`)}</fieldset><//>`}
 /* a form's card, with "remove" while nothing on it is signed */
@@ -40,18 +40,34 @@ const aqrRow=()=>({product:'',description:'',rate:'',area:'',delivered:'',deduct
 const claimedOf=r=>r.claimed!==''&&r.claimed!=null?n0(r.claimed):(r.delivered!==''?n0(r.delivered)-n0(r.deductions):0);
 const AQR={id:'aqr',label:'Agreed quantity record',short:'Agreed quantities',
   make:(data,e)=>{const ls=linesOn(e.b,e.k);return {rows:ls.length?ls.map(l=>({product:l.type||'',description:[l.binder,l.virgin?'virgin':''].filter(Boolean).join(' · '),rate:l.depth?`${l.depth} mm`:'',area:l.area?String(l.area):'',delivered:l.tonnes?String(l.tonnes):'',deductions:'',claimed:''})):[aqrRow()]}},
-  Editor:({f})=>{const d=f.pack.forms.aqr;const tot=(d.rows||[]).reduce((a,r)=>a+claimedOf(r),0);
+  Editor:({f})=>{const d=f.pack.forms.aqr;const rows=d.rows||[];const tot=rows.reduce((a,r)=>a+claimedOf(r),0);
+    const [err,setErr]=useState('');
+    const setRow=(i,p)=>f.set('aqr',x=>({...x,rows:(x.rows||[]).map((r,k)=>k===i?{...r,...p}:r)}));
+    const delRow=i=>f.set('aqr',x=>({...x,rows:(x.rows||[]).filter((r,k)=>k!==i)}));
+    const confirm=i=>{const r=rows[i];if(blank(r.product)){setErr('Enter the product first.');return}if(!(claimedOf(r)>0)){setErr('Enter what was delivered (or the quantity claimed) first.');return}setErr('');setRow(i,{ok:true})};
+    const shown=rows.map((r,i)=>({r,i})).filter(x=>x.r.ok||!f.canEdit);
+    const kv=(l,v)=>v!==''&&v!=null&&html`<span><span class="text-faint">${l}</span> <span class="tnum">${v}</span></span>`;
     return html`<${FormCard} f=${f} id="aqr" title="Agreed quantity record" sub=${`Total tonnes claimed: ${fmtN(t1(tot))}`} sigForms=${['aqr_afa','aqr_client']}>
-      <div class="label">Quantities</div>
-      <${Rows} f=${f} id="aqr" items=${d.rows||[]} make=${aqrRow} addLabel="Add product" addId="qa-aqr-add" render=${(r,i,set)=>html`
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><${Fld} label="Product"><${In} v=${r.product} on=${v=>set({product:v})} ph="e.g. AC14"/><//><${Fld} label="Description"><${In} v=${r.description} on=${v=>set({description:v})}/><//>
-          <${Fld} label="Application rate"><${In} v=${r.rate} on=${v=>set({rate:v})} ph="L/m², m²/m³, mm"/><//><${Fld} label="Area (m²)"><${In} v=${r.area} on=${v=>set({area:v})}/><//>
-          <${Fld} label="Delivered (t or L)"><${In} v=${r.delivered} on=${v=>set({delivered:v})}/><//><${Fld} label="Deductions"><${In} v=${r.deductions} on=${v=>set({deductions:v})}/><//>
-          <${Fld} label="Claimed"><${In} v=${r.claimed} on=${v=>set({claimed:v})} ph=${r.delivered!==''?String(t1(n0(r.delivered)-n0(r.deductions))):''}/><//></div>`}/>
-      <div class="text-[13.5px] font-semibold" id="qa-aqr-total">Total tonnes claimed: ${fmtN(t1(tot))}</div>
+      ${shown.length>0&&html`<div class="rounded-xl border border-line overflow-hidden" id="qa-aqr-summary">
+        <div class="px-3 py-2 bg-sunken flex items-center gap-2"><span class="label flex-1">What we are claiming</span><span class="label">Claimed</span></div>
+        ${shown.map(({r,i})=>html`<div key=${i} class="px-3 py-2.5 border-t border-line flex items-start gap-3 qa-aqr-line">
+          <div class="flex-1 min-w-0 grid gap-0.5"><div class="text-[14px] font-semibold">${r.product||'–'}${r.description&&html`<span class="font-normal text-muted"> · ${r.description}</span>`}</div>
+            <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[12px]">${kv('Rate',r.rate)}${kv('Area',r.area&&(fmtN(n0(r.area))+' m²'))}${kv('Delivered',r.delivered)}${kv('Deductions',r.deductions)}</div>
+            ${f.canEdit&&html`<div class="pt-1"><button type="button" class="btn qa-aqr-edit" style=${{height:28,fontSize:12}} onClick=${()=>{setRow(i,{ok:false});setErr('')}}>${Icon.pencil} Edit</button></div>`}</div>
+          <div class="text-[18px] font-semibold tnum leading-tight text-right">${fmtN(t1(claimedOf(r)))}</div></div>`)}
+        <div class="px-3 py-2.5 border-t border-line flex items-center gap-3 bg-sunken"><span class="flex-1 text-[13.5px] font-semibold">Total tonnes claimed</span><span class="text-[18px] font-semibold tnum" id="qa-aqr-total">${fmtN(t1(tot))}</span></div></div>`}
+      ${f.canEdit&&rows.map((r,i)=>!r.ok&&html`<div key=${'e'+i} class=${rowStyle+' qa-row-aqr'}>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><${Fld} label="Product"><${In} v=${r.product} on=${v=>setRow(i,{product:v})} ph="e.g. AC14"/><//><${Fld} label="Description"><${In} v=${r.description} on=${v=>setRow(i,{description:v})}/><//>
+          <${Fld} label="Application rate"><${In} v=${r.rate} on=${v=>setRow(i,{rate:v})} ph="L/m², m²/m³, mm"/><//><${Fld} label="Area (m²)"><${In} v=${r.area} on=${v=>setRow(i,{area:v})}/><//>
+          <${Fld} label="Delivered (t or L)"><${In} v=${r.delivered} on=${v=>setRow(i,{delivered:v})}/><//><${Fld} label="Deductions"><${In} v=${r.deductions} on=${v=>setRow(i,{deductions:v})}/><//>
+          <${Fld} label="Claimed"><${In} v=${r.claimed} on=${v=>setRow(i,{claimed:v})} ph=${r.delivered!==''?String(t1(n0(r.delivered)-n0(r.deductions))):''}/><//></div>
+        <div class="flex flex-wrap items-center gap-3"><button type="button" class="btn btn-primary qa-aqr-confirm" onClick=${()=>confirm(i)}>Confirm product</button>
+          <button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>{delRow(i);setErr('')}}>Remove</button></div></div>`)}
+      ${err&&html`<div id="qa-aqr-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+      ${f.canEdit&&html`<div><button id="qa-aqr-add" type="button" class="btn" onClick=${()=>f.set('aqr',x=>({...x,rows:[...(x.rows||[]),aqrRow()]}))}>${Icon.plus} Add product</button></div>`}
       <div class="grid gap-3 sm:grid-cols-2"><${Sig} f=${f} form="aqr_afa" label="Agreed by: Alex Fraser Asphalt quality representative" other="Someone else signs for AFA"/>
         <${Sig} f=${f} form="aqr_client" label="Agreed by: client representative" me=${false} other="Client representative signs"/></div><//>`},
-  pdf:o=>{const d=o.p.forms.aqr;const doc=o.doc;o.newPage('p');o.page('AGREED QUANTITY RECORD');let y=24;y=lotGrid(o,y,['client','job_no','location','date','lot_desc','lot_no','start_ch','end_ch']);
+  pdf:o=>{const d=o.p.forms.aqr;const doc=o.doc;o.newPage('p');o.page('AGREED QUANTITY RECORD');let y=24;y=lotGrid(o,y,['client','job_no','location','date','lot_desc','start_ch','end_ch']);
     y=table(o,y+3,[['Product',1],['Description',1.6],['Application rate',1.1],['Area',.8],['Delivered to site',1],['Deductions',.9],['Claimed',.9]],(d.rows||[]).map(r=>[r.product,r.description,r.rate,r.area,r.delivered,r.deductions,fmtN(t1(claimedOf(r)))]));
     doc.setFont('helvetica','bold');doc.setFontSize(9.5);o.txt(`Total tonnes claimed: ${fmtN(t1((d.rows||[]).reduce((a,r)=>a+claimedOf(r),0)))}`,o.M,y+5);y+=12;
     y=sigBlock(o,y,'aqr_afa','Quantities agreed by: Alex Fraser Asphalt quality representative');y=sigBlock(o,y+3,'aqr_client','Client representative')}};
@@ -69,7 +85,7 @@ const HOLD={id:'hold',label:'Hold point release',short:'Hold point',
         <${Fld} label="The following requires attention"><textarea id="qa-hold-attention" class="field" rows="2" style=${{height:'auto',padding:'6px 10px',fontSize:13}} value=${d.attention} onInput=${e=>set({attention:e.target.value})}></textarea><//>
         <label class="inline-flex items-start gap-2 text-[13.5px] cursor-pointer"><input id="qa-hold-released" type="checkbox" class="w-4 h-4 mt-0.5" checked=${!!d.released} onChange=${e=>set({released:e.target.checked})}/>Release of the hold point is granted. Work on this lot may proceed.</label></fieldset>
       <${Sig} f=${f} form="hold_client" label="Client representative" me=${false} other="Client representative signs"/><//>`},
-  pdf:o=>{const d=o.p.forms.hold;const doc=o.doc;o.newPage('p');o.page('HOLD POINT RELEASE FORM · Authorisation to Proceed');let y=24;y=lotGrid(o,y,['client','job_no','location','date','lot_desc','lot_no','start_ch','end_ch']);
+  pdf:o=>{const d=o.p.forms.hold;const doc=o.doc;o.newPage('p');o.page('HOLD POINT RELEASE FORM · Authorisation to Proceed');let y=24;y=lotGrid(o,y,['client','job_no','location','date','lot_desc','start_ch','end_ch']);
     y=para(o,y+3,'Comments',d.comments);y=sigBlock(o,y+2,'hold_afa','Alex Fraser Asphalt quality representative');
     doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(153,10,44);o.txt('Client response',o.M,y+6);y+=8;y=para(o,y,'The following requires attention',d.attention);
     doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(22,24,29);o.txt(`${d.released?'[✓]':'[  ]'} Release of the Hold Point described above is hereby granted. Work on this lot may proceed.`.replace('✓','x'),o.M,y+5);y+=9;
@@ -208,7 +224,7 @@ const DIAGRAM={id:'diagram',label:'Field site diagram',short:'Site diagram',
         ${(d.photos||[]).length<4&&html`<label class="btn cursor-pointer">${Icon.plus} ${busy?'Adding…':'Photo of a hand-drawn map'}<input id="qa-dg-photo" type="file" accept="image/*" capture="environment" multiple class="sr-only" onChange=${e=>{addPhotos(e.target.files);e.target.value=''}}/></label>`}</div>`}
       ${draw&&html`<${SketchDialog} initial=${d.shapes||null} aspect=${d.shapes&&d.shapes.length?d.aspect||4/3:null} onClose=${()=>setDraw(false)} onSave=${r=>{set({sketch:r.png,shapes:r.shapes,aspect:r.aspect});setDraw(false)}}/>`}<//>`},
   pdf:o=>{const d=o.p.forms.diagram;const doc=o.doc;o.newPage('p');o.page('FIELD SITE DIAGRAM');let y=24;
-    y=kvGrid(o,y,[['Job location',o.lot.location],['Customer',o.lot.client],['Date',dateTxt(o.lot.date)],['Lot number',o.lot.lot_no],['Job number',o.lot.job_no],['Start chainage',o.lot.start_ch],['End chainage',o.lot.end_ch],['Map prepared by',d.prepared_by]]);
+    y=kvGrid(o,y,[['Job location',o.lot.location],['Customer',o.lot.client],['Date',dateTxt(o.lot.date)],['Job number',o.lot.job_no],['Start chainage',o.lot.start_ch],['End chainage',o.lot.end_ch],['Map prepared by',d.prepared_by]]);
     y=table(o,y+2,[['Layer',1.4],['Nominal depth',1],['Mix type',1.4],['Area m²',1]],layersOf(d).map((L,i)=>[L.layer||`Layer ${i+1}`,L.depth,L.mix,L.area?fmtN(n0(L.area)):'']));
     doc.setFont('helvetica','italic');doc.setFontSize(8.5);doc.setTextColor(94,99,110);o.txt('All patchwork must be clearly measured and marked on the map with chainages',o.M,y+4);y+=7;
     const W=doc.internal.pageSize.getWidth()-2*o.M;const pics=[d.sketch,...(d.photos||[])].filter(Boolean);
@@ -330,7 +346,7 @@ const ENV={id:'env',label:'Site environmental checklist',short:'Environmental',
         <div class="grid gap-1"><span class="label">Condition of site after job complete</span><div class="seg w-max" id="qa-env-after">${[['clean','Clean'],['unclean','Unclean']].map(([k,l])=>html`<button key=${k} type="button" disabled=${!f.canEdit} aria-pressed=${d.after===k} onClick=${()=>set({after:d.after===k?'':k})}>${l}</button>`)}</div></div></div>
       <${Sig} f=${f} form="env" label="Prepared by" other="Someone else signs"/><//>`},
   pdf:o=>{const d=o.p.forms.env;const it=d.items||{};const doc=o.doc;o.newPage('p');o.page('OPERATIONS SITE ENVIRONMENTAL CHECKLIST');let y=24;
-    y=kvGrid(o,y,[['Customer',o.lot.client],['Date',dateTxt(o.lot.date)],['Job number',o.lot.job_no],['Job location',o.lot.location],['Lot number',o.lot.lot_no]],3);
+    y=kvGrid(o,y,[['Customer',o.lot.client],['Date',dateTxt(o.lot.date)],['Job number',o.lot.job_no],['Job location',o.lot.location]],3);
     const yn=v=>({yes:'YES',no:'NO',na:'N/A'})[v]||'';
     y=table(o,y+2,[['Item',3],['Pre-surfacing',1],['Post surfacing',1],['Comments',2]],ENV_ITEMS.map(([k,l])=>[l,yn((it[k]||{}).pre),yn((it[k]||{}).post),(it[k]||{}).comment||'']));
     doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(22,24,29);o.txt(`Condition of site prior to paving: ${({safe:'Safe',unsafe:'Unsafe'})[d.before]||'–'}`,o.M,y+5);o.txt(`Condition of site after job complete: ${({clean:'Clean',unclean:'Unclean'})[d.after]||'–'}`,o.M,y+10);y+=14;
@@ -381,17 +397,17 @@ function sigBlock(o,y,form,label){const doc=o.doc;const W=doc.internal.pageSize.
 /* ---------- what each form needs before the pack can be submitted ---------- */
 const signedOn=(o,form)=>o.sigs.some(s=>s.pack_id===o.p.id&&s.form===form);
 const blank=v=>!String(v==null?'':v).trim();
-const LOT_NEED=[['client','Client / customer'],['job_no','Job number'],['location','Job location'],['date','Date'],['lot_no','Lot number']];
+const LOT_NEED=[['client','Client / customer'],['job_no','Job number'],['location','Job location'],['date','Date']];
 const lotCheck=o=>{const L=(o.p.forms||{}).lot||{};return LOT_NEED.filter(([k])=>blank(L[k])).map(([,l])=>l)};
-AQR.check=(d,o)=>[...(!(d.rows||[]).some(r=>!blank(r.product)&&claimedOf(r)>0)?['At least one product with its quantity']:[]),...(signedOn(o,'aqr_afa')?[]:['AFA quality rep’s signature']),...(signedOn(o,'aqr_client')?[]:['Client rep’s signature'])];
+AQR.check=(d,o)=>{const un=(d.rows||[]).filter(r=>!r.ok).length;return [...(!(d.rows||[]).some(r=>r.ok&&!blank(r.product)&&claimedOf(r)>0)?['At least one confirmed product with its quantity']:[]),...(un?[`${un} product${un===1?'':'s'} not confirmed yet`]:[]),...(signedOn(o,'aqr_afa')?[]:['AFA quality rep’s signature']),...(signedOn(o,'aqr_client')?[]:['Client rep’s signature'])]};
 HOLD.check=(d,o)=>[...(signedOn(o,'hold_afa')?[]:['AFA quality rep’s signature']),...(!d.released&&blank(d.attention)?['Client response: release it, or say what needs attention']:[]),...(signedOn(o,'hold_client')?[]:['Client rep’s signature'])];
 DIAGRAM.check=d=>[...(!d.sketch&&!(d.photos||[]).length?['The diagram (draw it, or add a photo)']:[]),...layersOf(d).flatMap((L,i,a)=>{const n=a.length>1?` (layer ${i+1})`:'';return [...(blank(L.mix)?['Mix type'+n]:[]),...(blank(L.depth)?['Nominal depth'+n]:[]),...(!(n0(L.area)>0)?['Area m²'+n]:[])]}),...(blank(d.prepared_by)?['Map prepared by']:[])];
 ENV.check=(d,o)=>{const it=d.items||{};const pre=ENV_ITEMS.filter(([k])=>!(it[k]||{}).pre).length,post=ENV_ITEMS.filter(([k])=>!(it[k]||{}).post).length;
   return [...(pre?[`${pre} item${pre===1?'':'s'} not answered before surfacing`]:[]),...(post?[`${post} item${post===1?'':'s'} not answered after surfacing`]:[]),...(blank(d.before)?['Condition of the site before paving']:[]),...(blank(d.after)?['Condition of the site after the job']:[]),...(signedOn(o,'env')?[]:['Signature of whoever prepared it'])]};
 COSTS.check=d=>[...(blank(d.supervisor)?['Supervisor name']:[]),...(blank(d.start_paving)?['Start paving time']:[]),...(blank(d.finish_paving)?['Finish paving time']:[]),...(!d.none&&!(d.rows||[]).some(r=>!blank(r.contractor))?['The external contractors (or tick “No external contractors”)']:[])];
 LAYING.check=d=>[...(!(d.rows||[]).length?['At least one truck load']:[]),...((d.rows||[]).some(r=>!rowDone(r))?['Every load needs its docket number, tonnes and temperature']:[]),...(blank(d.device)?['Calibrated temperature device']:[]),...(blank(d.serial)?['Its serial number']:[]),...(blank(d.prepared_by)?['Prepared by']:[])];
-[AQR,HOLD,DIAGRAM,ENV,COSTS].forEach(f=>f.required=true);LAYING.required=false;
-const FORMS=[AQR,HOLD,DIAGRAM,LAYING,ENV,COSTS];
+const FORMS=[HOLD,AQR,DIAGRAM,LAYING,ENV,COSTS];
+FORMS.forEach(f=>f.required=true);
 const SIGN_TITLES={aqr_afa:'Agree the quantities (AFA)',aqr_client:'Agree the quantities (client)',hold_afa:'Hold point (AFA quality rep)',hold_client:'Release the hold point (client)',env:'Sign the environmental checklist'};
 const SIGN_NOTES={aqr_afa:'I agree the quantities on this record.',aqr_client:'I agree the quantities on this record.',hold_afa:'Hold point inspection by the Alex Fraser Asphalt quality representative.',
   hold_client:'Signing records the client response above. Tick “Release granted” on the form when work on this lot may proceed.',env:'I prepared this checklist.'};
