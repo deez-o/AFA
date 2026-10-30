@@ -570,7 +570,7 @@ function FleetScreen({data,live,notify}){
   const a=asset&&M.byId.get(asset);
   const P=window.FFP;
   const D=window.FFD;
-  const TABS=[['dash','Dashboard'],['wo','Work orders'],...(D?[['df','Defects']]:[]),['cal','Calendar'],['plans','Service plans'],...(P?[['ps','Prestarts'],['cl','Checklists']]:[]),...(window.FFR?[['rp','Reports']]:[]),...(P&&perms.mgr?[['lg','Logins']]:[])];
+  const TABS=[['dash','Dashboard'],['wo','Work orders'],...(D?[['df','Defects']]:[]),['cal','Calendar'],['plans','Service plans'],...(P?[['ps','Prestarts'],['cl','Checklists']]:[]),...(window.FFR?[['rp','Reports']]:[]),];
   const tabOk=TABS.some(x=>x[0]===tab)?tab:'dash';
   return html`<div class="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto pr-1">
     <div class="flex flex-wrap items-center gap-2">
@@ -579,7 +579,7 @@ function FleetScreen({data,live,notify}){
       ${!perms.work&&html`<span class="text-[12px] text-muted">View only: mechanics, supervisors and administrators record maintenance</span>`}
     </div>
     ${tabOk==='dash'?html`<${Dashboard} ctx=${ctx} open=${open}/>`:tabOk==='wo'?html`<${WorkOrders} ctx=${ctx} open=${open}/>`:tabOk==='cal'?html`<${Calendar} ctx=${ctx} open=${open}/>`
-      :tabOk==='df'?html`<${D.DefectsTab} ctx=${ctx} open=${open}/>`:tabOk==='ps'?html`<${P.PrestartsTab} ctx=${ctx} open=${open}/>`:tabOk==='cl'?html`<${P.ChecklistsTab} ctx=${ctx} open=${open}/>`:tabOk==='lg'?html`<${P.LoginsTab} ctx=${ctx}/>`:tabOk==='rp'?html`<${window.FFR.ReportsTab} ctx=${ctx}/>`:html`<${Plans} ctx=${ctx} open=${open}/>`}
+      :tabOk==='df'?html`<${D.DefectsTab} ctx=${ctx} open=${open}/>`:tabOk==='ps'?html`<${P.PrestartsTab} ctx=${ctx} open=${open}/>`:tabOk==='cl'?html`<${P.ChecklistsTab} ctx=${ctx} open=${open}/>`:tabOk==='rp'?html`<${window.FFR.ReportsTab} ctx=${ctx}/>`:html`<${Plans} ctx=${ctx} open=${open}/>`}
     ${a&&html`<${AssetPanel} ctx=${ctx} a=${a} open=${open} behind=${!!dlg} onClose=${()=>setAsset(null)}/>`}
     ${dlg&&dlg.k==='wo'&&html`<${WorkOrderDialog} ctx=${ctx} wo=${dlg.wo&&db.work_orders.find(w=>w.id===dlg.wo.id)||dlg.wo} init=${dlg.init} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='service'&&html`<${ServiceDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} plan=${dlg.plan} baseline=${dlg.baseline} onClose=${()=>setDlg(null)}/>`}

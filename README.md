@@ -102,7 +102,7 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 - **Checklists** (Fleet › Checklists, admin and superuser): one per machine category, plus an optional one for *all other machines*. Start from the standard list and change it. Saving a change makes a new version; prestarts already done keep the questions they answered. Mark questions **critical**: a fail means *Do not operate*.
 - **Operators** fill in the prestart on their phone: meters, each question (Pass / Fail / N/A; a fail needs a comment and can have photos), signature and declaration. Answers are saved on the phone as they go, so a dropped connection or a closed browser loses nothing. Submitting twice never makes two prestarts.
 - A submitted prestart can't be changed. Only the `admin` can delete one (e.g. a test): open it → *Delete…*, give a reason. A full copy and the reason are kept in the audit trail. Hours or km lower than the last reading don't stop the prestart: it is saved with a note and the reading isn't recorded.
-- **Logins** (Fleet › Logins, admin and superuser): set each person's role and link each login to its Staff record, so prestarts carry the operator's name. Nobody can change their own role, and only the `admin` can give or remove the admin role. New logins are still added in Supabase → Authentication → Users.
+- **Logins** (Staff › People, admin and superuser): set each person's role and link each login to its Staff record, so prestarts carry the operator's name. Nobody can change their own role, and only the `admin` can give or remove the admin role. New logins are still added in Supabase → Authentication → Users.
 
 ### Defects
 - A failed prestart item becomes a **defect** (major, or critical for a critical question). While it is open, the same item failing again adds to it ("seen 3×") instead of making a new one. Maintenance staff can also report defects by hand from the machine panel.
@@ -129,8 +129,13 @@ Once FraserFlow has been opened on a phone with reception, it opens again withou
 
 After pulling this version, run `supabase/schema.sql`, then `supabase/maintenance.sql`, `supabase/prestarts.sql`, `supabase/defects.sql` and `supabase/planner_link.sql` in the SQL Editor: all are safe to re-run.
 
+### Staff
+The **Staff** screen has two views (switch at the top):
+- **Leave calendar**: everyone's leave, sick days, RDOs and training, on the same calendar as before and counted as *staff away* on the schedule. The **Leave** panel beside it lists who's away today and over the next 4 weeks; **Add leave** books it, and clicking any leave changes or removes it.
+- **People**: the staff list with crew, position and current or next leave. Planners and administrators add, edit and remove staff here (it is no longer under Settings). Administrators and superusers also see each person's **login** on their row (username, role, *Create login*, *Reset password*), and a list of logins that aren't linked to anyone on staff.
+
 ### Creating logins inside FraserFlow
-Fleet › **Logins** › **New login** (administrators and superusers): username (or email), a temporary password (one is suggested), role and Staff record. **Reset password…** on a row gives someone a new temporary password. Either way they choose their own the next time they sign in. Only the administrator can create admins or reset an admin's password; nobody resets their own here.
+Staff › **People**: *Create login* on a person's row, or **New login** under *Logins without a staff member* (administrators and superusers): username (or email), a temporary password (one is suggested), role and Staff record. **Reset password…** on a row gives someone a new temporary password. Either way they choose their own the next time they sign in. Only the administrator can create admins or reset an admin's password; nobody resets their own here.
 
 This needs one setting, because creating logins uses Supabase's admin key, which must stay on the server:
 1. Supabase → **Project Settings → API Keys** (or *API*) → copy the **service_role** secret key. Never paste it anywhere else, or into a chat.
@@ -143,6 +148,6 @@ The **prestart** role was called `operator` before. Running `supabase/schema.sql
 
 ### Usernames instead of email addresses
 People can sign in with a plain username (e.g. `jsmith`) instead of an email. Supabase still needs an address for every login, so a username is stored as `jsmith@fraserflow.local` (nothing is ever sent there); FraserFlow only ever shows `jsmith`.
-To add one: Fleet › Logins › **New login**, or in Supabase → **Authentication → Users → Add user → Create new user**. Email: `jsmith@fraserflow.local`, a temporary password, tick **Auto Confirm User**. They sign in with `jsmith` and the temporary password, then choose their own. Forgotten passwords: reset it the same way (a new temporary password). People with real email logins keep signing in with their email.
+To add one: Staff › People › **Create login**, or in Supabase → **Authentication → Users → Add user → Create new user**. Email: `jsmith@fraserflow.local`, a temporary password, tick **Auto Confirm User**. They sign in with `jsmith` and the temporary password, then choose their own. Forgotten passwords: reset it the same way (a new temporary password). People with real email logins keep signing in with their email.
 
 Set a role the same way as before, e.g. `update public.profiles set role = 'mechanic' where email = 'name@yourcompany.com.au';`

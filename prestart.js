@@ -468,72 +468,7 @@ function ChecklistsTab({ctx,open}){
   </section>`;
 }
 
-/* ---------- Fleet › Logins: roles and Staff links ---------- */
-const ROLES=[['admin','Admin'],['superuser','Superuser'],['planner','Planner'],['supervisor','Supervisor'],['mechanic','Mechanic'],['prestart','Prestart'],['viewer','Viewer']];
-/* a temporary password that's easy to read out: two words and a number */
-const TEMP_WORDS=['Asphalt','Roller','Paver','Bitumen','Gravel','Kerb','Tipper','Grader','Screed','Binder','Stone','Bobcat','Broom','Drum','Spray','Road'];
-const tempPw=()=>{const r=n=>{const a=new Uint32Array(1);crypto.getRandomValues(a);return a[0]%n};return TEMP_WORDS[r(16)]+'-'+TEMP_WORDS[r(16)]+'-'+(100+r(900))};
-/* create logins and reset passwords: done by the server (api/users.js), which holds Supabase's admin key */
-async function usersApi(sb,body){
-  const {data:{session}}=await sb.auth.getSession();
-  let r;try{r=await fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(session&&session.access_token||'')},body:JSON.stringify(body)})}
-  catch(e){throw new Error('No connection. Try again when you have reception.')}
-  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('The server said no ('+r.status+').'));return j}
-function NewLogin({ctx,people,linked,onDone,onCancel}){
-  const {sb,role}=ctx;const [f,setF]=useState(()=>({login:'',password:tempPw(),role:'prestart',staff_id:''}));const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
-  const go=async()=>{setErr('');if(!f.login.trim()){setErr('Enter a username, e.g. jsmith.');return}setBusy(true);
-    try{const r=await usersApi(sb,{action:'create',...f});onDone({login:f.login.trim(),password:f.password,warning:r.warning})}catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
-  return html`<div id="lg-new" class="px-3 py-3 border-b border-line grid gap-2" style=${{background:'var(--sunken)'}}>
-    <div class="font-semibold text-[13.5px]">New login</div>
-    <div class="grid sm:grid-cols-4 gap-2">
-      <${Fld} label="Username (or email)"><input id="lg-new-login" class="field" style=${fs} autocapitalize="none" spellcheck="false" placeholder="e.g. jsmith" value=${f.login} onInput=${e=>setF({...f,login:e.target.value})}/><//>
-      <${Fld} label="Temporary password"><div class="flex gap-1"><input id="lg-new-pw" class="field mono" style=${fs} value=${f.password} onInput=${e=>setF({...f,password:e.target.value})}/><button type="button" class="btn px-2" title="Make another" aria-label="Make another password" onClick=${()=>setF({...f,password:tempPw()})}>↻</button></div><//>
-      <${Fld} label="Role"><select id="lg-new-role" class="field" style=${fs} value=${f.role} onChange=${e=>setF({...f,role:e.target.value})}>${ROLES.filter(([k])=>k!=='admin'||role==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select><//>
-      <${Fld} label="Staff record"><select id="lg-new-staff" class="field" style=${fs} value=${f.staff_id} onChange=${e=>setF({...f,staff_id:e.target.value})}><option value="">Not linked</option>${people.map(p=>html`<option key=${p.id} value=${p.id} disabled=${linked.has(p.id)}>${p.name}${linked.has(p.id)?' (has a login)':''}</option>`)}</select><//>
-    </div>
-    ${err&&html`<div id="lg-new-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
-    <div class="flex flex-wrap items-center gap-2"><span class="text-[12px] text-muted flex-1">They sign in with the username and this password, then choose their own.</span>
-      <button type="button" class="btn" onClick=${onCancel}>Cancel</button><button id="lg-new-go" type="button" class="btn btn-primary" disabled=${busy} onClick=${go}>${busy?'Creating…':'Create login'}</button></div>
-  </div>`;
-}
-function LoginsTab({ctx}){
-  const {sb,data,me,role,notify}=ctx;const [rows,setRows]=useState(null);const [err,setErr]=useState('');const [q,setQ]=useState('');
-  const [adding,setAdding]=useState(false);const [made,setMade]=useState(null);const [reset,setReset]=useState(null);const [busy,setBusy]=useState(false);
-  const doReset=async r=>{setBusy(true);setErr('');try{await usersApi(sb,{action:'reset',id:r.id,password:reset.password});setMade({login:showLogin(r.email),password:reset.password,reset:true});setReset(null)}catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
-  const load=async()=>{const {data:r,error}=await sb.from('profiles').select('*').order('email');if(error){setErr(errMsg(error));return}setRows(r||[]);setErr('')};
-  useEffect(()=>{load()},[]);
-  const save=async(p,patch)=>{setErr('');const {error}=await sb.from('profiles').update(patch).eq('id',p.id);if(error){setErr(errMsg(error));load();return}notify('Login updated');load()};
-  const people=data.resources.filter(r=>r.type==='person').sort((a,b)=>a.name.localeCompare(b.name));
-  if(!rows)return html`<div class="panel p-6 text-[13px] text-muted">${err||'Loading logins…'}</div>`;
-  const linked=new Map(rows.filter(r=>r.staff_id).map(r=>[r.staff_id,r.id]));const ql=q.trim().toLowerCase();
-  const rank=r=>{const i=ROLES.findIndex(([k])=>k===(r.role==='operator'?'prestart':r.role));return i<0?99:i};   /* by role (admin first), then username */
-  const list=rows.filter(r=>!ql||[r.email,showLogin(r.email),(people.find(p=>p.id===r.staff_id)||{}).name,r.role,(ROLES.find(([k])=>k===(r.role==='operator'?'prestart':r.role))||[])[1]].join(' ').toLowerCase().includes(ql))
-    .sort((a,b)=>rank(a)-rank(b)||showLogin(a.email).localeCompare(showLogin(b.email)));
-  return html`<section class="panel flex flex-col min-h-0">
-    <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
-      <input id="lg-search" class="field" style=${{...fs,width:220}} placeholder="Search username, name, role" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search logins"/>
-      <span class="text-[12.5px] text-muted flex-1 min-w-[240px]">Link each operator to their Staff record so their prestarts carry their name.</span>
-      ${!adding&&html`<button id="lg-add" type="button" class="btn btn-primary" onClick=${()=>{setAdding(true);setMade(null)}}>${Icon.plus} New login</button>`}</div>
-    ${adding&&html`<${NewLogin} ctx=${ctx} people=${people} linked=${linked} onCancel=${()=>setAdding(false)} onDone=${m=>{setAdding(false);setMade(m);load()}}/>`}
-    ${made&&html`<div id="lg-made" class="px-3 py-2.5 border-b border-line text-[13px] flex flex-wrap items-center gap-2" style=${{background:'hsl(145 50% var(--blk-l))'}}>
-      <span class="flex-1">${made.reset?'Password reset.':'Login created.'} Give <span class="font-semibold">${made.login}</span> the temporary password <span class="mono font-semibold">${made.password}</span>. They choose their own when they sign in.${made.warning?html` <span style=${{color:'var(--bad)'}}>${made.warning}</span>`:''}</span>
-      <button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>setMade(null)}>Done</button></div>`}
-    ${err&&html`<div id="lg-err" class="px-3 py-2 text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
-    <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="lg-table">
-      <thead><tr class="text-left">${['Username','Role','Staff record',''].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
-      <tbody>${list.map(r=>{const self=r.id===me;const lockRole=self||((r.role==='admin')&&role!=='admin');
-        return html`<tr key=${r.id} class="border-t border-line" data-email=${r.email}>
-          <td class="py-2 px-3 whitespace-nowrap">${showLogin(r.email)}${self&&html` <span class="text-muted">(you)</span>`}</td>
-          <td class="py-2 px-3"><select class="field w-auto lg-role" style=${fs} value=${r.role==='operator'?'prestart':r.role} disabled=${lockRole} title=${self?'You can’t change your own role':lockRole?'Only the admin can change this':''} onChange=${e=>save(r,{role:e.target.value})} aria-label=${'Role for '+showLogin(r.email)}>
-            ${ROLES.filter(([k])=>k!=='admin'||role==='admin'||r.role==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select></td>
-          <td class="py-2 px-3"><select class="field w-auto lg-staff" style=${{...fs,minWidth:200}} value=${r.staff_id||''} onChange=${e=>save(r,{staff_id:e.target.value||null})} aria-label=${'Staff record for '+showLogin(r.email)}>
-            <option value="">Not linked</option>${people.map(p=>html`<option key=${p.id} value=${p.id} disabled=${linked.has(p.id)&&linked.get(p.id)!==r.id}>${p.name}${linked.has(p.id)&&linked.get(p.id)!==r.id?' (linked to another login)':''}</option>`)}</select></td>
-          <td class="py-2 px-3 text-right whitespace-nowrap">${!self&&(r.role!=='admin'||role==='admin')&&(reset&&reset.id===r.id
-            ?html`<span class="inline-flex items-center gap-1.5"><span class="text-[12px] text-muted">New temporary password</span><input class="field mono lg-reset-pw" style=${{...fs,width:190}} value=${reset.password} onInput=${e=>setReset({...reset,password:e.target.value})}/>
-                <button type="button" class="btn" onClick=${()=>setReset(null)}>Cancel</button><button type="button" class="btn btn-primary lg-reset-go" disabled=${busy} onClick=${()=>doReset(r)}>Reset</button></span>`
-            :html`<button type="button" class="text-[12px] text-muted hover:text-ink lg-reset" onClick=${()=>{setReset({id:r.id,password:tempPw()});setMade(null)}}>Reset password…</button>`)}</td></tr>`})}</tbody></table></div>
-  </section>`;
-}
+/* logins live on the Staff screen (People) in app.js */
 
 /* ---------- machine panel: prestarts, manuals and documents ---------- */
 function AssetPrestarts({ctx,a,open}){
@@ -569,5 +504,5 @@ function FilesSection({ctx,a}){
 }
 
 window.PrestartScreen=PrestartScreen;
-window.FFP={useSigned,PrestartsTab,ChecklistsTab,ChecklistDialog,LoginsTab,PrestartView,AssetPrestarts,FilesSection,tplFor,RES};
+window.FFP={useSigned,PrestartsTab,ChecklistsTab,ChecklistDialog,PrestartView,AssetPrestarts,FilesSection,tplFor,RES};
 })();
