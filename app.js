@@ -2538,7 +2538,8 @@ function ProgramShifts({f,set,data,part}){
                 onPointerDown=${e=>lStart(e,g.key)} onPointerMove=${lMove} onPointerUp=${lEnd} onPointerCancel=${()=>setLdrag(null)}>${Icon.grip}</span>`}
               <span class="w-3 h-3 rounded-sm shrink-0" style=${{background:sw}}></span>
               <span class="text-[13px] font-semibold mr-1">${g.label||'No location'}</span>
-              <span class="text-[12px] text-muted tnum">${g.items.length} truck${g.items.length===1?'':'s'} · ${fmtN(tT)}T</span>
+              <span class="text-[12px] text-muted tnum">${g.items.length} truck${g.items.length===1?'':'s'}</span>
+              <span class="text-[13px] font-semibold tnum rounded-md px-1.5 py-0.5 bg-surface border border-line" title="Total truck tonnes at this location">${fmtN(tT)}T</span>
               <span class="flex-1"></span>
               <span class="text-[12px] text-muted">First truck</span>
               <span style=${{width:164}}><${TimeSelect} id=${`pg-loc-${g.key||'none'}-start`} label=${`First truck time at ${g.label||'no location'}`} value=${locStart(g.key)} pm=${night} onChange=${v=>setLoc(g.key,{start:v})}/></span>
@@ -2565,6 +2566,11 @@ function ProgramShifts({f,set,data,part}){
               </div>
             </div>
           </div>`})})()}
+      ${tl.length>0&&(()=>{const byLoc=[];tl.forEach(t=>{const kk=lkey(t);let g=byLoc.find(x=>x.key===kk);if(!g){g={key:kk,label:(t.loc||'').trim()||'No location',t:0,n:0};byLoc.push(g)}g.t+=truckT(t.w);g.n++});
+        return html`<div class="rounded-lg bg-sunken border border-line px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span class="text-[13px]"><span class="font-semibold">Total for this shift:</span> <span class="font-semibold tnum text-[14px]">${fmtN(totT)}T</span> <span class="text-muted">· ${tl.length} truck${tl.length===1?'':'s'}</span></span>
+          ${byLoc.length>1&&html`<span class="text-[12px] text-muted tnum">${byLoc.map(g=>`${g.label} ${fmtN(g.t)}T`).join(' · ')}</span>`}
+        </div>`})()}
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-[12px] text-muted">${realTrucks.length?'Add trucks at another location':'Add trucks at'}</span>
         <span style=${{width:210}}><${Combo} id="pg-newloc" style=${fs} placeholder="Location, e.g. SCA" value=${newLoc} onChange=${setNewLoc} label="Location for new trucks" options=${locs} onEnter=${addNewLoc}/></span>
@@ -2605,13 +2611,16 @@ function programEntries(data,k){
     .map(b=>({b,k,crewId:coverOf(b,k)||b.resourceId}))
     .sort((x,y)=>(order.get(x.crewId)??999)-(order.get(y.crewId)??999)||(x.b.shift==='night')-(y.b.shift==='night'));
 }
-const PLANT_GROUPS=[['Pavers',/paver/i],['Steel rollers',/steel|tandem|drum|smooth/i],['Multi rollers',/multi|pneumatic|tyre|tire|rubber/i],['Bobcat',/bobcat|skid|loader|posi/i]];
-const SEAL_PLANT_GROUPS=[['Sprayer',/spray/i],['Roller',/roller/i],['Broom',/broom|sweep/i],['Bobcat',/bobcat|skid|loader|posi/i]];
+/* rows of the daily program's plant box; optional rows only show when a machine lands in them */
+const PLANT_GROUPS=[['Pavers',/paver/i],['Steel rollers',/steel|tandem|drum|smooth/i],['Multi rollers',/multi|pneumatic|tyre|tire|rubber/i],['Bobcat',/bobcat|skid|loader|posi/i],['Brooms',/broom|sweep/i,true]];
+const SEAL_PLANT_GROUPS=[['Sprayer',/spray/i],['Roller',/roller|multi|steel|tandem|pneumatic/i],['Broom',/broom|sweep/i],['Bobcat',/bobcat|skid|loader|posi/i]];
 function plantGroups(machines,seal){
-  const G=seal?SEAL_PLANT_GROUPS:PLANT_GROUPS;const g=G.map(([l])=>({label:l,items:[]}));const extra={label:'Additional',items:[]};
-  machines.forEach(m=>{const t=`${m.name} ${m.sub||''} ${m.category||''}`;const i=G.findIndex(([,re])=>re.test(t));
+  const G=seal?SEAL_PLANT_GROUPS:PLANT_GROUPS;const g=G.map(([l,,opt])=>({label:l,items:[],opt:!!opt}));const extra={label:'Additional',items:[]};
+  /* the machine's own name and description decide first (e.g. "Tractor Broom" in the Spray Seal category is a broom), then its category */
+  const find=t=>G.findIndex(([,re])=>re.test(t));
+  machines.forEach(m=>{let i=find(`${m.name} ${m.sub||''}`);if(i<0)i=find(m.category||'');const t=`${m.name} ${m.sub||''} ${m.category||''}`;
     (i>=0?g[i]:(!seal&&/roller/i.test(t)?g[1]:extra)).items.push(m)});
-  return [...g,extra];
+  return [...g.filter(x=>!x.opt||x.items.length),extra];
 }
 const AFA_RED=[155,10,30],AFA_DARK=[58,58,58],AFA_GRID=[160,160,160];
 function drawProgram(doc,data,{b,k,crewId}){
@@ -2641,7 +2650,7 @@ function drawProgram(doc,data,{b,k,crewId}){
   cell(140,5,60,6,longD,{fill:AFA_DARK,color:[255,255,255],bold:true,size:7.5,border:false});
   const rh=5.4;let ry=11.5;
   [['SHIFT :',b.shift==='night'?'NIGHT':'DAY',{bold:true}],['SHIFT No :',idx>=0?`${idx+1} OF ${dates.length}`:'',{bold:true}],
-   ['PROJECT No :',b.projectNo||job.projectNo||'',{bold:true,color:AFA_RED}],['SITE CONTACT :',pick('siteContact'),{bold:true}],['',pick('sitePhone'),{bold:true}]]
+   ['PROJECT No :',b.projectNo||job.projectNo||'',{bold:true,color:AFA_RED}],['SITE CONTACT :',(b.siteContact||'').trim(),{bold:true}],['',(b.sitePhone||'').trim(),{bold:true}]]
     .forEach(([l,v,o])=>{cell(140,ry,22,rh,l,{border:false,align:'right',size:6.8,color:[70,70,70]});cell(162,ry,38,rh,v,o);ry+=rh});
   let my=16;
   [['CLIENT:',job.customer||''],['PROJECT LOCATION:',b.address||job.address||job.name],['JOB:',job.name],['SUPERVISOR:',pick('supervisor')],['QUOTE No:',b.quoteNo||'']]
@@ -2797,8 +2806,9 @@ const AFA_LOGO='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAcIAAACvCAIAAADhZ0
 /* ---------- machines: rego, category and importing the fleet list ---------- */
 const machCatOf=r=>((r&&r.category)||'').trim();
 /* every category in use, in the saved order (from the fleet list), then any others */
+const MACHINE_CATS_BUILTIN=['Brooms'];   /* always offered in the category box */
 const machineCatsOf=d=>{const out=[];const add=c=>{c=(c||'').trim();if(c&&!out.some(x=>x.toLowerCase()===c.toLowerCase()))out.push(c)};
-  (d.machineCats||[]).forEach(add);d.resources.forEach(r=>{if(r.type==='machine')add(r.category)});return out};
+  (d.machineCats||[]).forEach(add);d.resources.forEach(r=>{if(r.type==='machine')add(r.category)});MACHINE_CATS_BUILTIN.forEach(add);return out};
 function groupMachines(rows,d){
   const ord=machineCatsOf(d).map(x=>x.toLowerCase());const m=new Map();
   rows.forEach(r=>{const c=machCatOf(r);const k=c.toLowerCase()||'~';if(!m.has(k))m.set(k,{key:k,label:c||'No category',rows:[]});m.get(k).rows.push(r)});
