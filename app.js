@@ -2701,9 +2701,10 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
                     <div class="text-[11.5px] text-muted">${p.status==='scheduled'?'On the schedule':p.status==='ready'?'Ready':'Draft'}${p.appliedAt?' · sent '+new Date(p.appliedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'}):''}</div></div>
                   <button type="button" class="btn" style=${{height:30}} onClick=${()=>onOpenPlan(p.id)}>Open</button></div>`)}
           </section>
-          <section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-paper" style=${{borderStyle:'dashed'}}>
+          <section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-paper">
             <h3 id="job-paper" class="font-display text-[15px] font-semibold">Paperwork</h3>
-            <div class="text-[12.5px] text-muted">Coming soon: keep the job’s paperwork here, like inductions, traffic plans, test results and dockets.</div>
+            <div class="text-[12px] text-muted">Site QA packs and external costs summaries, once submitted.</div>
+            <${JobPaperwork} data=${data} jobId=${job.id}/>
           </section>
         </div>
       </div>`}
@@ -2711,6 +2712,11 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
   </div>`;
 }
 
+/* the job's submitted QA paperwork (qa.js, loaded on first use) */
+function JobPaperwork({data,jobId}){const live=window.__ffLive;const [ok,setOk]=useState(!!(window.FFQ&&window.FFQ.JobQaDocs));
+  useEffect(()=>{if(!ok&&live&&live.sb)loadMaint().then(()=>setOk(true),()=>{})},[]);
+  if(!live||!live.sb)return null;if(!ok||!window.FFQ)return html`<div class="text-[12.5px] text-muted">Loading…</div>`;
+  const C=window.FFQ.JobQaDocs;return html`<${C} key=${jobId} data=${data} jobId=${jobId} sb=${live.sb}/>`}
 /* ---------- Fleet & Maintenance and Prestarts: their own files (maint.js, prestart.js, defects.js, reports.js), loaded the first time either screen opens ---------- */
 let maintLoading=null;
 function loadMaint(){

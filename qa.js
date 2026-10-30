@@ -354,6 +354,7 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
     <div class="panel px-4 py-3 flex flex-wrap items-center gap-2 sticky bottom-0" style=${{zIndex:5}}>
       ${msg&&html`<span id="qa-msg" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${msg}</span>`}
       <button id="qa-pdf" type="button" class="btn" disabled=${busy} onClick=${pdf}>${Icon.download} ${busy?'Making PDF…':'PDF'}</button>
+      ${forms.costs&&html`<button id="qa-costs-pdf" type="button" class="btn" disabled=${busy} title="External costs summary: office use only, not sent to the customer" onClick=${async()=>{setBusy(true);try{await costsPdf(data,e,p,sigs)}catch(x){setMsg(errMsg(x))}finally{setBusy(false)}}}>${Icon.download} External costs</button>`}
       <span class="text-[12px] text-muted flex-1" id="qa-progress">${order.length-missAll.length} of ${order.length} form${order.length===1?'':'s'} complete</span>
       ${canEdit&&!del&&html`<button id="qa-delete" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>${Icon.trash} Delete</button>`}
       ${canEdit&&del&&html`<span id="qa-del-confirm" class="w-full flex flex-wrap items-center gap-2"><span class="text-[12.5px] font-medium flex-1" style=${{color:'var(--bad)'}}>Delete this pack${jsaSigs.length?` and its ${sigs.filter(s=>s.pack_id===p.id).length} signature${sigs.filter(s=>s.pack_id===p.id).length===1?'':'s'}`:''}? This can’t be undone.</span>
@@ -440,37 +441,37 @@ function QaBookingTab({data,block,live}){
 }
 
 /* ---------- the PDF: laid out like the paper JSA, signatures included ---------- */
-async function packPdf(data,e,p,sigs){
-  const Jp=await loadJsPDF();const doc=new Jp({orientation:'l',unit:'mm',format:'a4'});
-  const W=297,Ht=210,M=10;let y=0;const J=p.jsa||{};const hd=J.head||{};const ticks=J.ticks||{};
+async function packPdf(data,e,p,sigs,opt={}){
+  const Jp=await loadJsPDF();const doc=new Jp({orientation:'p',unit:'mm',format:'a4'});
+  const W=210,Ht=297,M=10;let y=0;const J=p.jsa||{};const hd=J.head||{};const ticks=J.ticks||{};
   const txt=(t,x,yy,o)=>doc.text(Array.isArray(t)?t:String(t==null?'':t),x,yy,o);
   const img=(d,x,yy,w,h,alias)=>{try{doc.addImage(d,'PNG',x,yy,w,h,alias,'FAST')}catch(e){}};
   const page=(title,orient)=>{const w=doc.internal.pageSize.getWidth();doc.setFillColor(153,10,44);doc.rect(0,0,w,2,'F');img(AFA_LOGO,w-M-34,5,34,13.2,'afa-logo');
-    doc.setFont('helvetica','bold');doc.setFontSize(13);doc.setTextColor(22,24,29);txt(title+(p.label?' · '+p.label:''),M,13);y=22};
+    doc.setFont('helvetica','bold');doc.setFontSize(13);doc.setTextColor(0,0,0);txt(title+(p.label?' · '+p.label:''),M,13);y=22};
   const foot=()=>{const n=doc.internal.getNumberOfPages();for(let i=1;i<=n;i++){doc.setPage(i);const w=doc.internal.pageSize.getWidth(),h=doc.internal.pageSize.getHeight();doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(120,125,135);
     txt(`Approved by Dan Soundy – Operations Manager · JSA version ${J.v||JSA_VERSION} · FraserFlow · ${p.status==='submitted'?'submitted '+fmtDT(p.submitted_at)+(p.submitted_name?' by '+p.submitted_name:''):'draft'}`,M,h-5);txt(`Page ${i} of ${n}`,w-M,h-5,{align:'right'})}};
   const box=(x,yy,w,h)=>{doc.setDrawColor(60,60,60);doc.setLineWidth(.2);doc.rect(x,yy,w,h)};
-  const room=(h)=>{const hh=doc.internal.pageSize.getHeight();if(y+h>hh-10){doc.addPage('a4','l');page('JOB SPECIFIC ASSESSMENT (JSA) FORM (continued)');return true}return false};
+  const room=(h)=>{const hh=doc.internal.pageSize.getHeight();if(y+h>hh-12){doc.addPage('a4','p');page('JOB SPECIFIC ASSESSMENT (JSA) FORM (continued)');return true}return false};
   page('JOB SPECIFIC ASSESSMENT (JSA) FORM');
-  /* header grid: 5 columns × 3 rows like the form */
+  /* header grid: 3 columns × 4 rows (portrait) */
   const cells=[['Job Number',hd.job_no],['Job Location',hd.location],['Customer',hd.customer],['Date',hd.date?fmtShort(parse(hd.date))+' '+parse(hd.date).getFullYear():''],['Time',hd.time],
     ['Foreman',hd.foreman],['Supervisor',hd.supervisor],['Client Rep',hd.client_rep],['Truck Controller',hd.truck_controller],['UHF Channel',hd.uhf],
     ['First Aid Officers',hd.first_aid],['Type',J.type==='seal'?'Spray Seal':'Asphalt']];
-  const cw=(W-2*M)/5;cells.forEach(([k,v],i)=>{const x=M+(i%5)*cw,yy=y+Math.floor(i/5)*10;box(x,yy,cw,10);doc.setFont('helvetica','bold');doc.setFontSize(6.8);doc.setTextColor(94,99,110);txt(k,x+1.5,yy+3.4);
-    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(22,24,29);txt(doc.splitTextToSize(String(v||''),cw-3)[0]||'',x+1.5,yy+8)});y+=33;
-  doc.setFontSize(7.5);doc.setTextColor(94,99,110);txt('Ticks mark the control measures actually implemented. Hazards that needed other controls are listed under Site / work location / task / process specific hazards.',M,y);y+=3;
-  /* hazards: two columns per section, like the paper */
-  const colW=(W-2*M)/2;
+  const cw=(W-2*M)/3;cells.forEach(([k,v],i)=>{const x=M+(i%3)*cw,yy=y+Math.floor(i/3)*10;box(x,yy,cw,10);doc.setFont('helvetica','bold');doc.setFontSize(6.8);doc.setTextColor(0,0,0);txt(k,x+1.5,yy+3.4);
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(0,0,0);txt(doc.splitTextToSize(String(v||''),cw-3)[0]||'',x+1.5,yy+8)});y+=Math.ceil(cells.length/3)*10+3;
+  doc.setFontSize(7.5);doc.setTextColor(94,99,110);txt(doc.splitTextToSize('Ticks mark the control measures actually implemented. Hazards that needed other controls are listed under Site / work location / task / process specific hazards.',W-2*M),M,y);y+=6;
+  /* hazards: one column on the portrait page */
+  const colW=W-2*M;
   for(const s of JSA_SECTIONS){
     const rows=s.hazards.flatMap(h=>h.controls.map((c,i)=>({h:i===0?h.hazard:'',c,on:!!ticks[tickKey(s.id,h,i)]})));
     if(s.id==='q'){const r=rows.find(x=>/calibrated/i.test(x.c));if(r&&(J.quality||{}).serial)r.c+=` (device serial ${(J.quality||{}).serial})`}
-    const half=Math.ceil(rows.length/2);const lines=[rows.slice(0,half),rows.slice(half)];
+    const half=rows.length;const lines=[rows,[]];
     doc.setFontSize(7.2);const wrap=it=>it?{a:(doc.setFont('helvetica','bold'),doc.splitTextToSize(it.h,colW*.38-2.4)),b:(doc.setFont('helvetica','normal'),doc.splitTextToSize(it.c,colW*.54-2.4))}:{a:[],b:[]};
     room(14);doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(153,10,44);txt(s.label,M,y+3.5);y+=5.5;
-    for(let r=0;r<half;r++){doc.setFontSize(7.2);const L=[wrap(lines[0][r]),wrap(lines[1][r])];const rh=Math.max(1,...L.flatMap(x=>[x.a.length,x.b.length]))*3+2.2;room(rh);
+    for(let r=0;r<half;r++){doc.setFontSize(7.2);const L=[wrap(lines[0][r]),wrap(null)];const rh=Math.max(1,...L.flatMap(x=>[x.a.length,x.b.length]))*3+2.2;room(rh);
       [0,1].forEach(side=>{const it=lines[side][r];if(!it)return;const x=M+side*colW;
       box(x,y,colW*.38,rh);box(x+colW*.38,y,colW*.54,rh);box(x+colW*.92,y,colW*.08,rh);
-      doc.setFont('helvetica','bold');doc.setFontSize(7.2);doc.setTextColor(22,24,29);txt(L[side].a,x+1.2,y+3.5);
+      doc.setFont('helvetica','bold');doc.setFontSize(7.2);doc.setTextColor(0,0,0);txt(L[side].a,x+1.2,y+3.5);
       doc.setFont('helvetica','normal');txt(L[side].b,x+colW*.38+1.2,y+3.5);
       if(it.on){doc.setDrawColor(20,120,60);doc.setLineWidth(.6);const cx=x+colW*.96,cy=y+rh/2;doc.line(cx-1.6,cy,cx-.5,cy+1.2);doc.line(cx-.5,cy+1.2,cx+1.7,cy-1.4);doc.setLineWidth(.2)}});y+=rh}
     y+=3}
@@ -478,30 +479,31 @@ async function packPdf(data,e,p,sigs){
   const ex=(J.extra||[]).filter(x=>x.hazard||x.controls);
   room(16);doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(153,10,44);txt('Site / work location / task / process specific hazards',M,y+3.5);y+=5.5;
   const xc=[[M,(W-2*M)*.38,'Hazard'],[M+(W-2*M)*.38,(W-2*M)*.1,'Risk rating'],[M+(W-2*M)*.48,(W-2*M)*.42,'Additional controls implemented'],[M+(W-2*M)*.9,(W-2*M)*.1,'Residual risk']];
-  doc.setFontSize(7.2);xc.forEach(([x,w,h])=>{box(x,y,w,5);doc.setFont('helvetica','bold');doc.setTextColor(22,24,29);txt(h,x+1.2,y+3.5)});y+=5;
+  doc.setFontSize(7.2);xc.forEach(([x,w,h])=>{box(x,y,w,5);doc.setFont('helvetica','bold');doc.setTextColor(0,0,0);txt(h,x+1.2,y+3.5)});y+=5;
   (ex.length?ex:[{hazard:'None',risk:'',controls:'',residual:''}]).forEach((x,i)=>{const a=doc.splitTextToSize(`${ex.length?(i+1)+'. ':''}${x.hazard||''}`,xc[0][1]-2),c=doc.splitTextToSize(x.controls||'',xc[2][1]-2);const h=Math.max(a.length,c.length,1)*3.4+2;
-    room(h);xc.forEach(([xx,w])=>box(xx,y,w,h));doc.setFont('helvetica','normal');doc.setTextColor(22,24,29);txt(a,xc[0][0]+1.2,y+3.4);txt(x.risk||'',xc[1][0]+1.2,y+3.4);txt(c,xc[2][0]+1.2,y+3.4);txt(x.residual||'',xc[3][0]+1.2,y+3.4);y+=h});
+    room(h);xc.forEach(([xx,w])=>box(xx,y,w,h));doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);txt(a,xc[0][0]+1.2,y+3.4);txt(x.risk||'',xc[1][0]+1.2,y+3.4);txt(c,xc[2][0]+1.2,y+3.4);txt(x.residual||'',xc[3][0]+1.2,y+3.4);y+=h});
   y+=4;
   /* checklists */
-  room(16);doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(153,10,44);txt('Checklists',M,y+3.5);y+=5.5;doc.setFontSize(7.6);doc.setTextColor(22,24,29);
+  room(16);doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(153,10,44);txt('Checklists',M,y+3.5);y+=5.5;doc.setFontSize(7.6);doc.setTextColor(0,0,0);
   const mark=(on,x,yy)=>{box(x,yy-3,3.4,3.4);if(on){doc.setDrawColor(20,120,60);doc.setLineWidth(.5);doc.line(x+.6,yy-1.4,x+1.4,yy-.5);doc.line(x+1.4,yy-.5,x+2.9,yy-2.5);doc.setLineWidth(.2)}};
-  CHECKS.forEach(([k,l],i)=>{const x=M+(i%4)*(W-2*M)/4,yy=y+3+Math.floor(i/4)*5;mark((J.checks||{})[k],x,yy);doc.setFont('helvetica','normal');txt(l,x+5,yy)});
-  y+=13;
+  CHECKS.forEach(([k,l],i)=>{const x=M+(i%2)*(W-2*M)/2,yy=y+3+Math.floor(i/2)*5;mark((J.checks||{})[k],x,yy);doc.setFont('helvetica','normal');txt(l,x+5,yy)});
+  y+=Math.ceil(CHECKS.length/2)*5+3;
   /* attendees */
   const sigTable=(form,label)=>{const list=sigs.filter(s=>s.pack_id===p.id&&s.form===form);room(22);
     doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(153,10,44);txt(label,M,y+3.5);y+=5;
     if(form==='jsa'){doc.setFont('helvetica','normal');doc.setFontSize(6.8);doc.setTextColor(60,64,72);const a=doc.splitTextToSize('Attendees: '+AGREE,W-2*M);txt(a,M,y+2.5);y+=a.length*2.9+2}
     const cw3=[(W-2*M)*.34,(W-2*M)*.26,(W-2*M)*.18,(W-2*M)*.22];const hdr=['Name','Company','Signed','Signature'];
-    doc.setFontSize(7.2);let x=M;hdr.forEach((h,i)=>{box(x,y,cw3[i],5);doc.setFont('helvetica','bold');doc.setTextColor(22,24,29);txt(h,x+1.2,y+3.5);x+=cw3[i]});y+=5;
+    doc.setFontSize(7.2);let x=M;hdr.forEach((h,i)=>{box(x,y,cw3[i],5);doc.setFont('helvetica','bold');doc.setTextColor(0,0,0);txt(h,x+1.2,y+3.5);x+=cw3[i]});y+=5;
     (list.length?list:[null]).forEach(s=>{room(11);let x=M;cw3.forEach(w=>{box(x,y,w,11);x+=w});if(!s){doc.setFont('helvetica','normal');txt('Nobody has signed',M+1.2,y+6.5);y+=11;return}
       doc.setFont('helvetica','normal');doc.setFontSize(8.2);txt(s.name,M+1.2,y+6.5);txt(s.company||AFA,M+cw3[0]+1.2,y+6.5);doc.setFontSize(7.2);txt(fmtDT(s.signed_at),M+cw3[0]+cw3[1]+1.2,y+6.5);
       img(s.signature,M+cw3[0]+cw3[1]+cw3[2]+2,y+.6,26,9.8,'sig-'+s.id);y+=11})};
   y+=2;sigTable('jsa','Sign-off');
   /* the other forms, in the order of the paper pack */
-  if(window.FFQF)for(const f of window.FFQF.FORMS)if((p.forms||{})[f.id]&&f.pdf){f.pdf({doc,J:p,p,data,e,sigs,M,txt,img,box,page,newPage:o=>{doc.addPage('a4',o||'l');},AFA,fmtDT})}
+  /* the external costs summary is office-only: it has its own PDF (costsPdf), not sent to the customer */
+  if(window.FFQF)for(const f of window.FFQF.FORMS)if(f.id!=='costs'&&(p.forms||{})[f.id]&&f.pdf){f.pdf({doc,J:p,p,data,e,sigs,M,txt,img,box,page,newPage:o=>{doc.addPage('a4',o||'p');},AFA,fmtDT})}
   /* toolbox meeting (optional), portrait like the paper */
   const T=p.toolbox;
-  if(T){doc.addPage('a4','p');const w=210;page('TOOLBOX MEETING RECORD FORM');doc.setFontSize(8.5);doc.setTextColor(22,24,29);
+  if(T){doc.addPage('a4','p');const w=210;page('TOOLBOX MEETING RECORD FORM');doc.setFontSize(8.5);doc.setTextColor(0,0,0);
     const kv=[['Date',hd.date?fmtShort(parse(hd.date))+' '+parse(hd.date).getFullYear():''],['Location',T.location],['WHS&E Rep',T.whs_rep],['Supervisor',T.supervisor],['Manager',T.manager]];
     kv.forEach(([k,v],i)=>{const x=M+(i%2)*(w-2*M)/2,yy=y+Math.floor(i/2)*6;doc.setFont('helvetica','bold');txt(k+':',x,yy);doc.setFont('helvetica','normal');txt(v||'',x+24,yy)});y+=20;
     const tc=[[M,(w-2*M)*.36,'Topics discussed'],[M+(w-2*M)*.36,(w-2*M)*.36,'Action'],[M+(w-2*M)*.72,(w-2*M)*.13,'Date'],[M+(w-2*M)*.85,(w-2*M)*.15,'Who']];
@@ -512,17 +514,52 @@ async function packPdf(data,e,p,sigs){
     y+=2;const W0=W;
     /* attendees table on the portrait page */
     const list=sigs.filter(s=>s.pack_id===p.id&&s.form==='toolbox');const cw3=[(w-2*M)*.32,(w-2*M)*.26,(w-2*M)*.18,(w-2*M)*.24];
-    doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(153,10,44);txt('Attendees (name & sign)',M,y);y+=3;doc.setTextColor(22,24,29);doc.setFontSize(7.2);
+    doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(153,10,44);txt('Attendees (name & sign)',M,y);y+=3;doc.setTextColor(0,0,0);doc.setFontSize(7.2);
     let x=M;['Name','Company','Signed','Signature'].forEach((h,i)=>{box(x,y,cw3[i],5);txt(h,x+1.2,y+3.5);x+=cw3[i]});y+=5;
     (list.length?list:[null]).forEach(s=>{if(y+11>287){doc.addPage('a4','p');page('TOOLBOX MEETING RECORD FORM (continued)')}let x=M;cw3.forEach(ww=>{box(x,y,ww,11);x+=ww});
       if(!s){doc.setFont('helvetica','normal');txt('Nobody has signed',M+1.2,y+6.5);y+=11;return}
       doc.setFont('helvetica','normal');doc.setFontSize(8.2);txt(s.name,M+1.2,y+6.5);txt(s.company||AFA,M+cw3[0]+1.2,y+6.5);doc.setFontSize(7.2);txt(fmtDT(s.signed_at),M+cw3[0]+cw3[1]+1.2,y+6.5);
       img(s.signature,M+cw3[0]+cw3[1]+cw3[2]+2,y+.6,26,9.8,'sig-'+s.id);y+=11})}
   foot();
-  const j=jobOf(data,e.b);doc.save(`QA pack ${(j&&(j.projectNo||j.name))||'job'} ${e.k}${p.label?' '+p.label:''}.pdf`.replace(/[\\/:*?"<>|]+/g,'-'));
+  const j=jobOf(data,e.b);const name=`QA pack ${(j&&(j.projectNo||j.name))||'job'} ${e.k}${p.label?' '+p.label:''}.pdf`.replace(/[\\/:*?"<>|]+/g,'-');
+  if(opt.blob)return {blob:doc.output('blob'),name};doc.save(name);
+}
+/* the external costs summary on its own (office use only) */
+async function costsPdf(data,e,p,sigs,opt={}){
+  const F=window.FFQF;const C=F&&F.byId.costs;if(!C||!(p.forms||{}).costs)throw new Error('This pack has no external costs summary.');
+  const Jp=await loadJsPDF();const doc=new Jp({orientation:'p',unit:'mm',format:'a4'});const M=10;let first=true;
+  const txt=(t,x,yy,o)=>doc.text(Array.isArray(t)?t:String(t==null?'':t),x,yy,o);
+  const img=(d,x,yy,w,h,alias)=>{try{doc.addImage(d,'PNG',x,yy,w,h,alias,'FAST')}catch(e){}};
+  const box=(x,yy,w,h)=>{doc.setDrawColor(60,60,60);doc.setLineWidth(.2);doc.rect(x,yy,w,h)};
+  const page=title=>{const w=doc.internal.pageSize.getWidth();doc.setFillColor(153,10,44);doc.rect(0,0,w,2,'F');img(AFA_LOGO,w-M-34,5,34,13.2,'afa-logo');
+    doc.setFont('helvetica','bold');doc.setFontSize(13);doc.setTextColor(0,0,0);txt(title+(p.label?' · '+p.label:''),M,13)};
+  C.pdf({doc,J:p,p,data,e,sigs,M,txt,img,box,page,newPage:o=>{if(first){first=false;return}doc.addPage('a4',o||'p')},AFA,fmtDT});
+  const n=doc.internal.getNumberOfPages();for(let i=1;i<=n;i++){doc.setPage(i);const w=doc.internal.pageSize.getWidth(),h=doc.internal.pageSize.getHeight();doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(120,125,135);
+    txt('Office use only · not for the customer · FraserFlow',M,h-5);txt(`Page ${i} of ${n}`,w-M,h-5,{align:'right'})}
+  const j=jobOf(data,e.b);const name=`External costs ${(j&&(j.projectNo||j.name))||'job'} ${e.k}${p.label?' '+p.label:''}.pdf`.replace(/[\\/:*?"<>|]+/g,'-');
+  if(opt.blob)return {blob:doc.output('blob'),name};doc.save(name);
+}
+
+/* the job's paperwork (Jobs › a job): every submitted QA pack, with its PDF and the external costs PDF */
+function JobQaDocs({data,jobId,sb}){
+  const [v,setV]=useState(null);const [err,setErr]=useState('');const [busy,setBusy]=useState('');
+  useEffect(()=>{let off=false;setV(null);(async()=>{try{const {data:ps,error}=await sb.from('qa_packs').select('*').eq('job_id',jobId).eq('status','submitted');if(error)throw error;if(!off)setV(ps||[])}catch(x){if(!off){setErr(errMsg(x));setV([])}}})();return()=>{off=true}},[jobId]);
+  const entryOf=p=>{const b=data.blocks.find(x=>x.id===p.block_id);return b?{b,k:p.shift_date,crewId:coverOf(b,p.shift_date)||b.resourceId}:null};
+  const run=async(p,kind)=>{const e=entryOf(p);if(!e){setErr('That booking is no longer on the schedule.');return}setBusy(p.id+kind);setErr('');
+    try{const {data:sg,error}=await sb.from('qa_signatures').select('*').eq('pack_id',p.id);if(error)throw error;await (kind==='costs'?costsPdf:packPdf)(data,e,p,sg||[])}catch(x){setErr(errMsg(x))}finally{setBusy('')}};
+  if(!v)return html`<div class="text-[12.5px] text-muted">Loading…</div>`;
+  const list=[...v].sort((a,b)=>String(b.shift_date).localeCompare(String(a.shift_date)));
+  return html`<div class="grid gap-1.5" id="job-qa-docs">
+    ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+    ${!list.length?html`<div class="text-[12.5px] text-muted">No QA packs submitted for this job yet. They appear here once submitted.</div>`
+      :list.map(p=>{const e=entryOf(p);const crew=e&&data.resources.find(r=>r.id===e.crewId);return html`<div key=${p.id} class="flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2 job-qa-doc">
+        <div class="min-w-0 flex-1"><div class="text-[13px] font-medium">QA pack · ${WD[parse(p.shift_date).getDay()]} ${fmtShort(parse(p.shift_date))}${p.label?' · '+p.label:''}</div>
+          <div class="text-[11.5px] text-muted">${[crew&&crew.name,p.submitted_at&&'submitted '+fmtDT(p.submitted_at),p.submitted_name].filter(Boolean).join(' · ')}</div></div>
+        <button type="button" class="btn job-qa-pdf" style=${{height:28,fontSize:12}} disabled=${!!busy} onClick=${()=>run(p,'qa')}>${Icon.download} ${busy===p.id+'qa'?'…':'QA PDF'}</button>
+        ${(p.forms||{}).costs&&html`<button type="button" class="btn job-costs-pdf" style=${{height:28,fontSize:12}} disabled=${!!busy} title="Office use only" onClick=${()=>run(p,'costs')}>${Icon.download} ${busy===p.id+'costs'?'…':'External costs'}</button>`}</div>`})}</div>`;
 }
 
 window.QaScreen=QaScreen;
 window.QaBookingTab=QaBookingTab;
-window.FFQ={JSA_SECTIONS,packPdf,allTicks,Card,Tick,SignOff,SignPad,newId,AFA,chip};
+window.FFQ={JSA_SECTIONS,packPdf,costsPdf,JobQaDocs,allTicks,Card,Tick,SignOff,SignPad,newId,AFA,chip};
 })();

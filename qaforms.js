@@ -74,23 +74,31 @@ const AQR={id:'aqr',label:'Agreed quantity record',short:'Agreed quantities',
 
 /* ---------- hold point release ---------- */
 const HOLD={id:'hold',label:'Hold point release',short:'Hold point',
-  make:()=>({lot_numbers:'',comments:'',attention:'',released:false}),
-  Editor:({f})=>{const d=f.pack.forms.hold;const set=p=>f.set('hold',x=>({...x,...p}));
+  make:(data,e)=>({comments:'',attention:'',released:false,no_client:false,...holdPlanned(e)}),
+  Editor:({f})=>{const d=f.pack.forms.hold;const set=p=>f.set('hold',x=>({...x,...p}));const pl=holdPlanOf(d,f.e);
     return html`<${FormCard} f=${f} id="hold" title="Hold point release" sub=${d.released?'Released: work on this lot may proceed':'Authorisation to proceed'} sigForms=${['hold_afa','hold_client']}>
       <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid gap-3">
+        <div class="grid grid-cols-2 gap-3"><${Fld} label="Planned tonnes"><${In} id="qa-hold-pt" v=${pl.planned_t} on=${v=>set({planned_t:v})} ph="t"/><//><${Fld} label="Planned area (m²)"><${In} id="qa-hold-pa" v=${pl.planned_a} on=${v=>set({planned_a:v})} ph="m²"/><//></div>
         <${Fld} label="Comments"><textarea id="qa-hold-comments" class="field" rows="2" style=${{height:'auto',padding:'6px 10px',fontSize:13}} value=${d.comments} onInput=${e=>set({comments:e.target.value})}></textarea><//></fieldset>
       <${Sig} f=${f} form="hold_afa" label="Alex Fraser Asphalt quality representative" other="Someone else signs for AFA"/>
       <div class="label mt-1">Client response</div>
-      <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid gap-3">
+      <label class="inline-flex items-start gap-2 text-[13.5px] cursor-pointer"><input id="qa-hold-noclient" type="checkbox" class="w-4 h-4 mt-0.5" disabled=${!f.canEdit} checked=${!!d.no_client} onChange=${e=>set({no_client:e.target.checked})}/>Customer not on site: no client signature required</label>
+      ${!d.no_client&&html`<fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid gap-3">
         <${Fld} label="The following requires attention"><textarea id="qa-hold-attention" class="field" rows="2" style=${{height:'auto',padding:'6px 10px',fontSize:13}} value=${d.attention} onInput=${e=>set({attention:e.target.value})}></textarea><//>
         <label class="inline-flex items-start gap-2 text-[13.5px] cursor-pointer"><input id="qa-hold-released" type="checkbox" class="w-4 h-4 mt-0.5" checked=${!!d.released} onChange=${e=>set({released:e.target.checked})}/>Release of the hold point is granted. Work on this lot may proceed.</label></fieldset>
-      <${Sig} f=${f} form="hold_client" label="Client representative" me=${false} other="Client representative signs"/><//>`},
+      <${Sig} f=${f} form="hold_client" label="Client representative" me=${false} other="Client representative signs"/>`}<//>`},
   pdf:o=>{const d=o.p.forms.hold;const doc=o.doc;o.newPage('p');o.page('HOLD POINT RELEASE FORM · Authorisation to Proceed');let y=24;y=lotGrid(o,y,['client','job_no','location','date','lot_desc','start_ch','end_ch']);
+    const pl=holdPlanOf(d,o.e);y=kvGrid(o,y+2,[['Planned tonnes',pl.planned_t?pl.planned_t+' t':''],['Planned area',pl.planned_a?pl.planned_a+' m2':'']],2);
     y=para(o,y+3,'Comments',d.comments);y=sigBlock(o,y+2,'hold_afa','Alex Fraser Asphalt quality representative');
-    doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(153,10,44);o.txt('Client response',o.M,y+6);y+=8;y=para(o,y,'The following requires attention',d.attention);
-    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(22,24,29);o.txt(`${d.released?'[✓]':'[  ]'} Release of the Hold Point described above is hereby granted. Work on this lot may proceed.`.replace('✓','x'),o.M,y+5);y+=9;
+    doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(153,10,44);o.txt('Client response',o.M,y+6);y+=8;
+    if(d.no_client){doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(0,0,0);o.txt('Customer not on site: no client signature required.',o.M,y+5);return}
+    y=para(o,y,'The following requires attention',d.attention);
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(0,0,0);o.txt(`${d.released?'[✓]':'[  ]'} Release of the Hold Point described above is hereby granted. Work on this lot may proceed.`.replace('✓','x'),o.M,y+5);y+=9;
     y=sigBlock(o,y,'hold_client','Client representative')}};
 
+/* the shift's planned tonnes and area (from the booking), unless typed in */
+function holdPlanned(e){const ls=e?linesOn(e.b,e.k):[];const t=ls.reduce((a,l)=>a+n0(l.tonnes),0),a=ls.reduce((s,l)=>s+n0(l.area),0);return {planned_t:t?String(t1(t)):'',planned_a:a?String(t1(a)):''}}
+const holdPlanOf=(d,e)=>{const c=holdPlanned(e);return {planned_t:d.planned_t!=null?d.planned_t:c.planned_t,planned_a:d.planned_a!=null?d.planned_a:c.planned_a}};
 /* ---------- field site diagram ---------- */
 function shrinkPhoto(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const sc=Math.min(1,1280/Math.max(im.width,im.height));
   const c=document.createElement('canvas');c.width=Math.round(im.width*sc);c.height=Math.round(im.height*sc);c.getContext('2d').drawImage(im,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',.7))};im.onerror=rej;im.src=r.result};r.onerror=rej;r.readAsDataURL(file)})}
@@ -319,11 +327,11 @@ function LayingEditor({f}){
 const LAYING={id:'laying',label:'Asphalt laying record',short:'Laying record',
   make:(data,e,p,ctx)=>({date_placed:e.k,rows:[],device:'',serial:((p.jsa||{}).quality||{}).serial||'',prepared_by:ctx.myName||''}),
   Editor:LayingEditor,
-  pdf:o=>{const d=o.p.forms.laying;const doc=o.doc;o.newPage('l');o.page('ASPHALT LAYING RECORD (PAVING)');let y=24;
-    y=kvGrid(o,y,[['Customer',o.lot.client],['Job location',o.lot.location],['Job number',o.lot.job_no],['Date placed',dateTxt(d.date_placed)]],4);let run=0;
+  pdf:o=>{const d=o.p.forms.laying;const doc=o.doc;o.newPage('p');o.page('ASPHALT LAYING RECORD (PAVING)');let y=24;
+    y=kvGrid(o,y,[['Customer',o.lot.client],['Job location',o.lot.location],['Job number',o.lot.job_no],['Date placed',dateTxt(d.date_placed)]],2);let run=0;
     y=table(o,y+2,[['Docket number',1.2],['Truck rego',1],['Time in',.7],['Temperature',.9],['Tonnes',.8],['Progressive total',1],['Chainage start',.9],['Chainage finish',.9],['Run location / comments',2.6]],
-      (d.rows||[]).map(r=>{run+=n0(r.tonnes);return [r.docket,r.rego,r.time,r.temp,r.tonnes,fmt2((run)),r.ch_start,r.ch_finish,r.comments]}),'l');
-    y=kvGrid(o,y+3,[['Calibrated temperature device used',d.device],['Serial number',d.serial],['Prepared by',d.prepared_by],['Total tonnes',fmt2((run))]],4)}};
+      (d.rows||[]).map(r=>{run+=n0(r.tonnes);return [r.docket,r.rego,r.time,r.temp,r.tonnes,fmt2((run)),r.ch_start,r.ch_finish,r.comments]}),'p');
+    y=kvGrid(o,y+3,[['Calibrated temperature device used',d.device],['Serial number',d.serial],['Prepared by',d.prepared_by],['Total tonnes',fmt2((run))]],2)}};
 
 /* ---------- operations site environmental checklist ---------- */
 const ENV_ITEMS=[['residents','Residents notified'],['kerb','Kerb and channel clean'],['gully','Gully pits clean'],['profiling','Profiling required'],['swept','Pave section swept and clean'],['linemarking','Temporary line marking / stick ’n’ stomps'],['prime','Prime / bitumen on kerb, crossovers'],
@@ -349,7 +357,7 @@ const ENV={id:'env',label:'Site environmental checklist',short:'Environmental',
     y=kvGrid(o,y,[['Customer',o.lot.client],['Date',dateTxt(o.lot.date)],['Job number',o.lot.job_no],['Job location',o.lot.location]],3);
     const yn=v=>({yes:'YES',no:'NO',na:'N/A'})[v]||'';
     y=table(o,y+2,[['Item',3],['Pre-surfacing',1],['Post surfacing',1],['Comments',2]],ENV_ITEMS.map(([k,l])=>[l,yn((it[k]||{}).pre),yn((it[k]||{}).post),(it[k]||{}).comment||'']));
-    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(22,24,29);o.txt(`Condition of site prior to paving: ${({safe:'Safe',unsafe:'Unsafe'})[d.before]||'–'}`,o.M,y+5);o.txt(`Condition of site after job complete: ${({clean:'Clean',unclean:'Unclean'})[d.after]||'–'}`,o.M,y+10);y+=14;
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(0,0,0);o.txt(`Condition of site prior to paving: ${({safe:'Safe',unsafe:'Unsafe'})[d.before]||'–'}`,o.M,y+5);o.txt(`Condition of site after job complete: ${({clean:'Clean',unclean:'Unclean'})[d.after]||'–'}`,o.M,y+10);y+=14;
     y=sigBlock(o,y,'env','Prepared by')}};
 
 /* ---------- QA external costs summary ---------- */
@@ -376,19 +384,19 @@ const COSTS={id:'costs',label:'External costs summary',short:'External costs',
 /* ---------- PDF building blocks ---------- */
 function lotGrid(o,y,keys){const L=o.lot;return kvGrid(o,y,keys.map(k=>[LOT.find(x=>x[0]===k)[1],k==='date'?dateTxt(L.date):L[k]]),2)}
 function kvGrid(o,y,pairs,cols=3){const doc=o.doc;const W=doc.internal.pageSize.getWidth()-2*o.M;const cw=W/cols;
-  pairs.forEach(([k,v],i)=>{const x=o.M+(i%cols)*cw,yy=y+Math.floor(i/cols)*10;o.box(x,yy,cw,10);doc.setFont('helvetica','bold');doc.setFontSize(6.8);doc.setTextColor(94,99,110);o.txt(k,x+1.5,yy+3.4);
-    doc.setFont('helvetica','normal');doc.setFontSize(8.8);doc.setTextColor(22,24,29);o.txt(doc.splitTextToSize(String(v||''),cw-3)[0]||'',x+1.5,yy+8)});return y+Math.ceil(pairs.length/cols)*10}
+  pairs.forEach(([k,v],i)=>{const x=o.M+(i%cols)*cw,yy=y+Math.floor(i/cols)*10;o.box(x,yy,cw,10);doc.setFont('helvetica','bold');doc.setFontSize(6.8);doc.setTextColor(0,0,0);o.txt(k,x+1.5,yy+3.4);
+    doc.setFont('helvetica','normal');doc.setFontSize(8.8);doc.setTextColor(0,0,0);o.txt(doc.splitTextToSize(String(v||''),cw-3)[0]||'',x+1.5,yy+8)});return y+Math.ceil(pairs.length/cols)*10}
 function table(o,y,cols,rows,orient='p'){const doc=o.doc;const W=doc.internal.pageSize.getWidth()-2*o.M,Hh=doc.internal.pageSize.getHeight();const tot=cols.reduce((a,c)=>a+c[1],0);const ws=cols.map(c=>W*c[1]/tot);
-  const head=()=>{doc.setFontSize(7);doc.setFont('helvetica','bold');doc.setTextColor(22,24,29);const hs=cols.map((c,i)=>doc.splitTextToSize(c[0],ws[i]-2));const h=Math.max(...hs.map(x=>x.length))*2.9+2.6;let x=o.M;
+  const head=()=>{doc.setFontSize(7);doc.setFont('helvetica','bold');doc.setTextColor(0,0,0);const hs=cols.map((c,i)=>doc.splitTextToSize(c[0],ws[i]-2));const h=Math.max(...hs.map(x=>x.length))*2.9+2.6;let x=o.M;
     hs.forEach((t,i)=>{doc.setFillColor(244,244,246);doc.rect(x,y,ws[i],h,'F');o.box(x,y,ws[i],h);o.txt(t,x+1.1,y+3.3);x+=ws[i]});y+=h};
   head();doc.setFont('helvetica','normal');
   (rows.length?rows:[cols.map(()=>'')]).forEach(r=>{doc.setFontSize(7.8);const cs=r.map((v,i)=>doc.splitTextToSize(String(v==null?'':v),ws[i]-2));const h=Math.max(1,...cs.map(c=>c.length))*3.3+2.4;
     if(y+h>Hh-12){o.newPage(orient);o.page('(continued)');y=24;head();doc.setFont('helvetica','normal');doc.setFontSize(7.8)}
     let x=o.M;cs.forEach((c,i)=>{o.box(x,y,ws[i],h);o.txt(c,x+1.1,y+3.6);x+=ws[i]});y+=h});return y}
-function para(o,y,label,text){const doc=o.doc;const W=doc.internal.pageSize.getWidth()-2*o.M;doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(22,24,29);o.txt(label+':',o.M,y+4);
+function para(o,y,label,text){const doc=o.doc;const W=doc.internal.pageSize.getWidth()-2*o.M;doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(0,0,0);o.txt(label+':',o.M,y+4);
   doc.setFont('helvetica','normal');const t=doc.splitTextToSize(text||'–',W);o.txt(t,o.M,y+8.5);return y+8.5+t.length*3.8}
 function sigBlock(o,y,form,label){const doc=o.doc;const W=doc.internal.pageSize.getWidth()-2*o.M;const s=o.sigs.find(x=>x.pack_id===o.p.id&&x.form===form);
-  doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(22,24,29);o.txt(label,o.M,y+4);y+=6;const cw=[W*.32,W*.26,W*.2,W*.22];let x=o.M;
+  doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(0,0,0);o.txt(label,o.M,y+4);y+=6;const cw=[W*.32,W*.26,W*.2,W*.22];let x=o.M;
   ['Name','Company','Date','Signature'].forEach((h,i)=>{o.box(x,y,cw[i],5);doc.setFontSize(7);o.txt(h,x+1.1,y+3.5);x+=cw[i]});y+=5;x=o.M;cw.forEach(w=>{o.box(x,y,w,12);x+=w});
   if(s){doc.setFont('helvetica','normal');doc.setFontSize(8.5);o.txt(s.name,o.M+1.2,y+7);o.txt(s.company||AFA,o.M+cw[0]+1.2,y+7);doc.setFontSize(7.5);o.txt(o.fmtDT(s.signed_at),o.M+cw[0]+cw[1]+1.2,y+7);
     o.img(s.signature,o.M+cw[0]+cw[1]+cw[2]+2,y+1,28,10,'sig-'+s.id)}else{doc.setFont('helvetica','italic');doc.setFontSize(8);doc.setTextColor(140,145,155);o.txt('Not signed',o.M+1.2,y+7)}
@@ -400,7 +408,7 @@ const blank=v=>!String(v==null?'':v).trim();
 const LOT_NEED=[['client','Client / customer'],['job_no','Job number'],['location','Job location'],['date','Date']];
 const lotCheck=o=>{const L=(o.p.forms||{}).lot||{};return LOT_NEED.filter(([k])=>blank(L[k])).map(([,l])=>l)};
 AQR.check=(d,o)=>{const un=(d.rows||[]).filter(r=>!r.ok).length;return [...(!(d.rows||[]).some(r=>r.ok&&!blank(r.product)&&claimedOf(r)>0)?['At least one confirmed product with its quantity']:[]),...(un?[`${un} product${un===1?'':'s'} not confirmed yet`]:[]),...(signedOn(o,'aqr_afa')?[]:['AFA quality rep’s signature']),...(signedOn(o,'aqr_client')?[]:['Client rep’s signature'])]};
-HOLD.check=(d,o)=>[...(signedOn(o,'hold_afa')?[]:['AFA quality rep’s signature']),...(!d.released&&blank(d.attention)?['Client response: release it, or say what needs attention']:[]),...(signedOn(o,'hold_client')?[]:['Client rep’s signature'])];
+HOLD.check=(d,o)=>[...(signedOn(o,'hold_afa')?[]:['AFA quality rep’s signature']),...(!d.no_client&&!d.released&&blank(d.attention)?['Client response: release it, or say what needs attention (or tick customer not on site)']:[]),...(d.no_client||signedOn(o,'hold_client')?[]:['Client rep’s signature'])];
 DIAGRAM.check=d=>[...(!d.sketch&&!(d.photos||[]).length?['The diagram (draw it, or add a photo)']:[]),...layersOf(d).flatMap((L,i,a)=>{const n=a.length>1?` (layer ${i+1})`:'';return [...(blank(L.mix)?['Mix type'+n]:[]),...(blank(L.depth)?['Nominal depth'+n]:[]),...(!(n0(L.area)>0)?['Area m²'+n]:[])]}),...(blank(d.prepared_by)?['Map prepared by']:[])];
 ENV.check=(d,o)=>{const it=d.items||{};const pre=ENV_ITEMS.filter(([k])=>!(it[k]||{}).pre).length,post=ENV_ITEMS.filter(([k])=>!(it[k]||{}).post).length;
   return [...(pre?[`${pre} item${pre===1?'':'s'} not answered before surfacing`]:[]),...(post?[`${post} item${post===1?'':'s'} not answered after surfacing`]:[]),...(blank(d.before)?['Condition of the site before paving']:[]),...(blank(d.after)?['Condition of the site after the job']:[]),...(signedOn(o,'env')?[]:['Signature of whoever prepared it'])]};
