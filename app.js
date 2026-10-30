@@ -2608,11 +2608,11 @@ const screenOK=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=ro
 const SCREENS={
   schedule:{label:'Schedule',title:'FraserFlow',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   jobs:{label:'Jobs',title:'Jobs',only:[],legend:[],head:''},
+  planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
   fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',roles:['admin','superuser','planner','supervisor','mechanic'],preview:true},   /* maintenance: not for operators or viewers */
-  planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
-  ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',roles:['admin']},   /* the administrator only, never superusers */   /* administrators only (button hidden for everyone else) */
+  ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',roles:['admin'],bottom:true},   /* the administrator only, never superusers; always at the bottom of the menu */   /* administrators only (button hidden for everyone else) */
 };
 const NAV_ICON={
   fleet:svg(html`<path d="M10.5 2a3.5 3.5 0 00-3.2 4.9L2.5 11.7a1.3 1.3 0 001.8 1.8l4.8-4.8A3.5 3.5 0 0014 5.5l-2 2-1.8-.3-.3-1.8 2-2c-.4-.3-.9-.4-1.4-.4z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/>`,20),
@@ -2629,11 +2629,13 @@ function NavRail({screen,go,isAdmin,role,data,badge={}}){
       style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
       <span class="relative inline-flex">${NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${s.label}</span>${role==='admin'&&s.preview&&previewOf(data).includes(k)&&html`<span class="-mt-0.5 text-[8.5px] font-bold uppercase tracking-wide px-1 rounded leading-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}} title="Only you can see this while it is in progress">Preview</span>`}</button>`};
   const all=Object.entries(SCREENS).filter(([k])=>screenOK(k,role,data));
-  /* admin-only screens (Ideas) sit at the bottom of the bar */
+  /* bottom of the bar: features still in progress (admin only, until released), then Ideas */
+  const low=([k,s])=>s.bottom||(s.preview&&previewOf(data).includes(k));
+  const order=([k,s])=>s.bottom?1:0;
   return html`<nav class="panel shrink-0 w-[68px] h-full flex flex-col gap-1 p-1.5" aria-label="Screens">
-    ${all.filter(([,s])=>!s.admin).map(btn)}
+    ${all.filter(e=>!low(e)).map(btn)}
     <div class="flex-1"></div>
-    ${all.filter(([,s])=>s.admin).map(btn)}
+    ${all.filter(low).sort((a,b)=>order(a)-order(b)).map(btn)}
   </nav>`;
 }
 /* ---------- settings menu: dark mode, notifications and (live) account ---------- */
