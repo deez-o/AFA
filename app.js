@@ -2998,6 +2998,129 @@ async function buildDailyProgramPdf(data,entries,withPlans=true){
 const programFileName=(data,e)=>{const crew=data.resources.find(r=>r.id===e.crewId);const j=data.jobs.find(x=>x.id===e.b.jobId)||{};const d=parse(e.k);
   return `${[crew&&crew.name,j.customer,j.name].filter(Boolean).join(' - ')} ${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()}`.replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim()+'.pdf'};
 
+/* ---------- upcoming works for subcontractor crews (crews with the SUB tag): a branded PDF ---------- */
+/* every shift a crew works between two dates: its own bookings, plus shifts it covers on other crews' bookings */
+function subWorks(data,crewId,from,to){
+  const out=[];
+  data.blocks.filter(b=>b.kind==='job').forEach(b=>{const ds=shiftDates(b);
+    ds.forEach((k,i)=>{if(k<from||k>to)return;if((coverOf(b,k)||b.resourceId)!==crewId)return;out.push({b,k,idx:i,n:ds.length})})});
+  return out.sort((a,c)=>a.k<c.k?-1:a.k>c.k?1:((a.b.shift==='night')-(c.b.shift==='night'))||(a.b.id<c.b.id?-1:1));
+}
+const subWorkRow=(data,{b,k,idx,n})=>{const job=data.jobs.find(j=>j.id===b.jobId)||{};const q=(b.shiftData||{})[k]||{};
+  const lines=linesOf(q).filter(lineHas);const t=lines.reduce((a,l)=>a+num(l.tonnes),0),a=lines.reduce((s,l)=>s+num(l.area),0);
+  return {job,q,lines,t,a,start:q.start||'',night:b.shift==='night',address:b.address||job.address||'',
+    works:lines.map(l=>[mixLabel(l),num(l.area)?`${fmtN(num(l.area))} m²`:'',num(l.depth)?`@ ${fmtN(num(l.depth))} mm`:'',num(l.tonnes)?`${fmtN(num(l.tonnes))} t`:''].filter(Boolean).join(' ')),
+    notes:[n>1?`Shift ${idx+1} of ${n}`:'',b.quoteNo?`Quote ${b.quoteNo}`:'',(b.projectNo||job.projectNo)?`Project ${b.projectNo||job.projectNo}`:'',
+      b.inductionReq?(b.inductionDone?'Induction: paperwork sent':'Induction required'):'',exbinOf(b,k)?`Exbin${exbinOf(b,k).supplier?' ('+exbinOf(b,k).supplier+')':''}`:'',(b.notes||'').trim()].filter(Boolean)}};
+
+async function buildSubWorksPdf(data,crewIds,from,to){
+  const JsPDF=await loadJsPDF();const doc=new JsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  const PW=297,PH=210,M=12,W=PW-2*M;
+  const clean=t=>String(t??'').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[–—]/g,'-').replace(/²/g,'2').replace(/³/g,'3').replace(/·/g,'-').replace(/…/g,'...');
+  const font=(s,b,c)=>{doc.setFont('helvetica',b?'bold':'normal');doc.setFontSize(s);doc.setTextColor(...(c||[0,0,0]))};
+  const dLong=k=>{const d=parse(k);return `${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]}`};
+  const range=`${dLong(from)} - ${dLong(to)} ${parse(to).getFullYear()}`;
+  const COLS=[['SHIFT',22],['CLIENT / JOB',56],['LOCATION',46],['WORKS',62],['TONNES',17],['SUPERVISOR',34],['NOTES',36]];
+  const firstPageOf=[];
+  crewIds.forEach((cid,ci)=>{const crew=data.resources.find(r=>r.id===cid)||{name:'Crew'};const rows=subWorks(data,cid,from,to).map(e=>({e,r:subWorkRow(data,e)}));
+    if(ci)doc.addPage();firstPageOf.push(doc.getNumberOfPages());
+    let y=0;
+    const header=(first)=>{
+      try{doc.addImage(AFA_LOGO,'PNG',M,8,first?46:34,first?17.8:13.2)}catch(x){}
+      font(first?16:12,true);doc.text('UPCOMING WORKS',PW-M,first?14:12,{align:'right'});
+      font(first?11:9,true,AFA_RED);doc.text(clean(crew.name)+(crew.sub?` - ${clean(crew.sub)}`:''),PW-M,first?20.5:17,{align:'right'});
+      font(8.5,false,[90,90,90]);doc.text(clean(range),PW-M,first?25.5:21.5,{align:'right'});
+      doc.setDrawColor(...AFA_RED);doc.setLineWidth(0.8);doc.line(M,first?29:24.5,PW-M,first?29:24.5);
+      y=first?33:28};
+    const colHead=()=>{doc.setFillColor(...AFA_DARK);doc.rect(M,y,W,6.2,'F');font(7.2,true,[255,255,255]);let x=M;COLS.forEach(([h,w])=>{doc.text(h,x+1.8,y+4.2);x+=w});y+=6.2};
+    header(true);
+    /* summary */
+    const tot=rows.reduce((a,{r})=>({t:a.t+r.t,a:a.a+r.a}),{t:0,a:0});const jobs=new Set(rows.map(({e})=>e.b.jobId)).size;const nights=rows.filter(({r})=>r.night).length;
+    const boxes=[['SHIFTS',String(rows.length)],['JOBS',String(jobs)],['DAY / NIGHT',`${rows.length-nights} / ${nights}`],['ASPHALT',tot.t?`${fmtN(tot.t)} t`:'-'],['AREA',tot.a?`${fmtN(tot.a)} m2`:'-']];
+    const bw=(W-4*3)/5;boxes.forEach(([k,v],i)=>{const x=M+i*(bw+3);doc.setFillColor(244,244,246);doc.setDrawColor(220,220,226);doc.setLineWidth(0.2);doc.roundedRect(x,y,bw,14,1.5,1.5,'FD');
+      font(6.8,true,[110,110,110]);doc.text(k,x+3,y+4.8);font(12,true,k==='ASPHALT'?AFA_RED:[20,20,20]);doc.text(clean(v),x+3,y+11.2)});
+    y+=19;
+    if(!rows.length){font(10,false,[90,90,90]);doc.text('No works booked for this crew in this period.',M,y+6)}
+    else{colHead();
+      let lastDay='';
+      rows.forEach(({e,r},ri)=>{
+        const cells=[[`${r.night?'NIGHT':'DAY'}${r.start?'\n'+fmtTime(r.start):''}`],
+          [`${r.job.customer||''}`,`${r.job.name||''}`],[r.address],[r.works.length?r.works.join('\n'):'-'],[r.t?fmtN(r.t):'-'],
+          [[e.b.supervisor,e.b.supervisorPhone].filter(Boolean).join('\n')||'-'],[r.notes.join('\n')||'-']];
+        const split=cells.map((c,i)=>{font(7.6,i===1);return doc.splitTextToSize(clean(c.filter(Boolean).join('\n')),COLS[i][1]-3.6)});
+        const h=Math.max(...split.map(s=>s.length))*3.4+3.6;
+        const needDay=e.k!==lastDay;
+        if(y+h+(needDay?7:0)>PH-14){doc.addPage();header(false);colHead();lastDay=''}
+        if(e.k!==lastDay){doc.setFillColor(...AFA_RED);doc.rect(M,y,W,5.6,'F');font(7.8,true,[255,255,255]);doc.text(clean(dLong(e.k)).toUpperCase(),M+1.8,y+3.9);
+          const dayRows=rows.filter(x=>x.e.k===e.k);const dt=dayRows.reduce((a,x)=>a+x.r.t,0);
+          font(7.2,false,[255,255,255]);doc.text(`${dayRows.length} shift${dayRows.length===1?'':'s'}${dt?` - ${fmtN(dt)} t`:''}`,PW-M-1.8,y+3.9,{align:'right'});y+=5.6;lastDay=e.k}
+        if(ri%2){doc.setFillColor(248,248,250);doc.rect(M,y,W,h,'F')}
+        doc.setDrawColor(225,225,230);doc.setLineWidth(0.15);doc.line(M,y+h,PW-M,y+h);
+        let x=M;split.forEach((s,i)=>{font(7.6,i===1||i===4,i===0&&r.night?[40,40,110]:i===4?AFA_RED:[25,25,25]);
+          if(i===1&&s.length){font(7.6,true);doc.text(s[0],x+1.8,y+4.3);font(7.6,false,[60,60,60]);if(s.length>1)doc.text(s.slice(1),x+1.8,y+4.3+3.4)}
+          else doc.text(s,x+1.8,y+4.3);x+=COLS[i][1]});
+        y+=h});
+    }
+  });
+  /* footer on every page */
+  const n=doc.getNumberOfPages();const printed=new Date().toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});
+  for(let i=1;i<=n;i++){doc.setPage(i);font(7,false,[130,130,130]);doc.text(`FraserFlow - Alex Fraser Group - printed ${printed}`,M,PH-6);doc.text(`Page ${i} of ${n}`,PW-M,PH-6,{align:'right'})}
+  return doc.output('blob');
+}
+
+function SubWorksDialog({data,onClose,notify}){
+  const subs=data.resources.filter(r=>r.type==='crew'&&r.subbie);
+  const [crew,setCrew]=useState(subs[0]?subs[0].id:'');
+  const [from,setFrom]=useState(()=>iso(TODAY));const [to,setTo]=useState(()=>iso(addDays(TODAY,13)));
+  const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  useEffect(()=>{const h=e=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
+  const ids=crew==='all'?subs.map(c=>c.id):crew?[crew]:[];
+  const ok=from&&to&&to>=from;
+  const preview=ok?ids.map(id=>({c:data.resources.find(r=>r.id===id),list:subWorks(data,id,from,to)})):[];
+  const mon=mondayOf(TODAY);
+  const presets=[['Next 7 days',iso(TODAY),iso(addDays(TODAY,6))],['Next 14 days',iso(TODAY),iso(addDays(TODAY,13))],['Next week',iso(addDays(mon,7)),iso(addDays(mon,13))],['Next 4 weeks',iso(TODAY),iso(addDays(TODAY,27))]];
+  const go=async()=>{setErr('');const dl=window.claude&&window.claude.use?await window.claude.use('downloads').catch(()=>null):null;
+    if(!dl){setErr('Saving files isn’t available in this view.');return}setBusy(true);
+    try{const blob=await buildSubWorksPdf(data,ids,from,to);const f=parse(from),t=parse(to);const nm=crew==='all'?'Subcontractor crews':(data.resources.find(r=>r.id===crew)||{}).name||'Crew';
+      await dl.save({filename:`Upcoming works - ${nm.replace(/[\\/:*?"<>|]+/g,' ').trim()} - ${pad(f.getDate())}.${pad(f.getMonth()+1)} to ${pad(t.getDate())}.${pad(t.getMonth()+1)}.${t.getFullYear()}.pdf`,data:blob});notify('Upcoming works PDF saved');onClose()}
+    catch(e){const c=e&&e.code;setErr(c==='declined'?'Download cancelled.':(e&&e.message)||'The PDF could not be built.')}finally{setBusy(false)}};
+  return html`<div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div class="panel pop w-full max-w-[620px] flex flex-col max-h-full overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="sw-title">
+      <div class="px-5 pt-5 pb-3 border-b border-line flex items-start gap-3">
+        <div class="min-w-0 flex-1"><div id="sw-title" class="font-display text-[18px] font-semibold">Subcontractor upcoming works</div>
+          <div class="text-[12.5px] text-muted">A PDF of every shift a subcontractor crew has booked in a period, to send to them.</div></div>
+        <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button></div>
+      ${!subs.length?html`<div class="p-5 text-[13px] text-muted">No crews are marked as subcontractors yet. In Settings › Crews, edit a crew and tick <b>Subcontractor</b>.</div>`
+      :html`<div class="px-5 py-4 grid gap-3 border-b border-line">
+          <label class="grid gap-1"><span class="label">Crew</span>
+            <select id="sw-crew" class="field" value=${crew} onChange=${e=>setCrew(e.target.value)}>
+              ${subs.map(c=>html`<option key=${c.id} value=${c.id}>${c.name}${c.sub?' · '+c.sub:''}</option>`)}
+              ${subs.length>1&&html`<option value="all">All subcontractor crews (one section each)</option>`}</select></label>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="grid gap-1"><span class="label">From</span><input id="sw-from" type="date" class="field mono" value=${from} onChange=${e=>setFrom(e.target.value)}/></label>
+            <label class="grid gap-1"><span class="label">To</span><input id="sw-to" type="date" class="field mono" value=${to} onChange=${e=>setTo(e.target.value)}/></label></div>
+          <div class="flex flex-wrap gap-1.5">${presets.map(([l,a,b])=>html`<button key=${l} type="button" class=${'text-[12px] rounded-full border px-2.5 py-0.5 '+(from===a&&to===b?'font-semibold':'text-muted hover:text-ink')}
+              style=${from===a&&to===b?{borderColor:'var(--accent)',color:'var(--accent)',background:'var(--accent-soft)'}:{borderColor:'var(--line)'}} onClick=${()=>{setFrom(a);setTo(b)}}>${l}</button>`)}</div>
+          ${!ok&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>The end date is before the start date.</div>`}
+        </div>
+        <div class="flex-1 min-h-0 overflow-y-auto px-5 py-3 grid gap-3 content-start">
+          ${preview.map(({c,list})=>html`<div key=${c.id} class="grid gap-1">
+            ${crew==='all'&&html`<div class="font-semibold text-[13px]">${c.name}</div>`}
+            ${!list.length?html`<div class="text-[12.5px] text-muted">No works booked for ${c.name} in this period.</div>`
+              :list.map(e=>{const r=subWorkRow(data,e);return html`<div key=${e.b.id+e.k} class="grid grid-cols-[96px_1fr_auto] gap-2 text-[12.5px] py-1 border-b border-line last:border-b-0">
+                <span class="mono text-muted">${WD[parse(e.k).getDay()]} ${fmtShort(parse(e.k))}</span>
+                <span class="min-w-0 truncate"><span class="font-medium">${r.job.customer?r.job.customer+' · ':''}${r.job.name||'Job'}</span><span class="text-muted">${r.night?' · night':' · day'}${r.start?' · '+fmtTime(r.start):''}</span></span>
+                <span class="mono tnum">${r.t?fmtN(r.t)+' t':''}</span></div>`})}</div>`)}
+        </div>`}
+      <div class="px-5 py-3 border-t border-line bg-sunken flex flex-wrap items-center gap-2">
+        ${err&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}
+        <span class=${'text-[12px] text-muted'+(err?'':' mr-auto')}>${preview.reduce((a,x)=>a+x.list.length,0)} shift${preview.reduce((a,x)=>a+x.list.length,0)===1?'':'s'}</span>
+        <button type="button" class="btn" onClick=${onClose}>Cancel</button>
+        <button id="sw-pdf" type="button" class="btn btn-primary" disabled=${busy||!ok||!ids.length} onClick=${go}>${Icon.download} ${busy?'Building…':'Export PDF'}</button>
+      </div>
+    </div></div>`;
+}
+
 function DailyProgramDialog({data,onClose,notify}){
   const [day,setDay]=useState(()=>iso(addDays(TODAY,1)));
   const [incPlan,setIncPlan]=useState(true);
@@ -4328,7 +4451,7 @@ function App({boot,live}){
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
   const [importing,setImporting]=useState(false);const [merging,setMerging]=useState(false);const [logOpen,setLogOpen]=useState(false);const [machImport,setMachImport]=useState(false);
-  const [forecast,setForecast]=useState(false);const [suggest,setSuggest]=useState(false);const [program,setProgram]=useState(false);
+  const [forecast,setForecast]=useState(false);const [suggest,setSuggest]=useState(false);const [subWorksOpen,setSubWorksOpen]=useState(false);const [program,setProgram]=useState(false);
   const [changePw,setChangePw]=useState(false);
   const [notifPrefs,setNotifPrefs]=useState(loadNotifPrefs);
   /* dark mode: remembered per person; until chosen, follows the device setting */
@@ -4444,6 +4567,7 @@ function App({boot,live}){
           title=${on?'Hide Jobs':'Jobs: add, edit, complete and import'}
           style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.briefcase} Jobs</button>`)(panel&&tab==='jobs')}
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setProgram(true)} title="Daily program PDFs for each job on a day">${Icon.download} Daily program</button>`}
+        ${screen==='schedule'&&data.resources.some(r=>r.type==='crew'&&r.subbie)&&html`<button id="btn-subworks" class="btn" onClick=${()=>setSubWorksOpen(true)} title="Upcoming works PDF for a subcontractor crew">${Icon.download} Subbie works</button>`}
         <div class="flex items-center gap-2 min-w-0">
           <h1 class=${'font-display font-semibold tracking-tight truncate '+(SCR.title==='FraserFlow'?'text-[24px] leading-none':'text-[20px]')}>${SCR.title==='FraserFlow'?html`Fraser<span style=${{color:'var(--accent)'}}>Flow</span>`:SCR.title}</h1>
           ${!live.canEdit&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change anything">View only</span>`}
@@ -4499,6 +4623,7 @@ function App({boot,live}){
     ${machImport&&html`<${MachineImport} data=${data} setData=${setData} onClose=${()=>setMachImport(false)} notify=${setToast}/>`}
     ${logOpen&&html`<${ChangeLogDialog} data=${data} onClose=${()=>setLogOpen(false)} onOpen=${b=>setEditing(b)}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
+    ${subWorksOpen&&html`<${SubWorksDialog} data=${data} notify=${setToast} onClose=${()=>setSubWorksOpen(false)}/>`}
     ${suggest&&html`<${SuggestDialog} setData=${setData} notify=${setToast} onClose=${()=>setSuggest(false)}/>`}
     ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)} notify=${setToast}
       onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}setEditing(null);goScreen('planning')}}/>`}
