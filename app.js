@@ -178,6 +178,7 @@ const Icon={
   key:svg(html`<circle cx="5.5" cy="10.5" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M7.7 8.3L14 2M11.5 4.5l1.8 1.8M10 6l1.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,16),
   moon:svg(html`<path d="M12.5 10.2A5.5 5.5 0 015.8 3.5a5.5 5.5 0 106.7 6.7z" fill="currentColor"/>`,12),
   wrench:svg(html`<path d="M10.5 2a3.5 3.5 0 00-3.2 4.9L2.5 11.7a1.3 1.3 0 001.8 1.8l4.8-4.8A3.5 3.5 0 0014 5.5l-2 2-1.8-.3-.3-1.8 2-2c-.4-.3-.9-.4-1.4-.4z" fill="currentColor"/>`,11),
+  sap:svg(html`<rect x="1.5" y="3" width="13" height="10" rx="2" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M4.5 6.5h7M4.5 9.5h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M2 14L14 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`,11),
   person:svg(html`<circle cx="8" cy="5" r="2.6" fill="currentColor"/><path d="M3 14c.4-3 2.4-4.6 5-4.6s4.6 1.6 5 4.6z" fill="currentColor"/>`,11),
 };
 
@@ -516,6 +517,11 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
   const [mCol,setMCol]=useState(()=>{try{return JSON.parse(localStorage.getItem(KEY+':res-mcat')||'{}')||{}}catch(e){return {}}});
   const saveMCol=v=>{setMCol(v);try{localStorage.setItem(KEY+':res-mcat',JSON.stringify(v))}catch(e){}};
   const [mdrag,setMdrag]=useState(null);   /* {kind:'cat'|'mach', id, cat, over, after} */
+  const [newCat,setNewCat]=useState(null);   /* text of the "Add category" box while it's open */
+  const addCat=e=>{e&&e.preventDefault();const c=(newCat||'').trim();if(!c)return;
+    if(machineCatsOf(data).some(x=>x.toLowerCase()===c.toLowerCase())){notify&&notify(`“${c}” is already a category`);return}
+    setData(d=>({...d,machineCats:[...machineCatsOf(d),c]}));setNewCat(null);notify&&notify(`Category “${c}” added`)};
+  const removeCat=key=>setData(d=>({...d,machineCats:(d.machineCats||[]).filter(c=>c.toLowerCase()!==key)}));
   const canDragM=tab==='machine'&&!q;
   const mStart=(e,kind,id,cat)=>{if(e.button!==undefined&&e.button!==0)return;e.preventDefault();e.stopPropagation();try{e.currentTarget.setPointerCapture(e.pointerId)}catch(x){}setMdrag({kind,id,cat,over:null,after:false})};
   const mMove=e=>{if(!mdrag)return;const el=document.elementFromPoint(e.clientX,e.clientY);const t=el&&el.closest(mdrag.kind==='cat'?'[data-mcat-head]':'[data-mid]');
@@ -592,11 +598,17 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
     <ul class="flex-1 min-h-0 overflow-y-auto px-2 py-2">
       <datalist id="work-types">${groupCrews(crews).map(g=>html`<option key=${g.key} value=${g.label}></option>`)}</datalist>
       <datalist id="mach-cats">${machineCatsOf(data).map(c=>html`<option key=${c} value=${c}></option>`)}</datalist>
-      ${tab==='machine'&&!q&&list.length>0&&html`<li class="px-2 pt-1 flex items-center gap-3 text-[12px]">
-        <button type="button" class="font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>{const v={};groupMachines(list,data).forEach(g=>{v[g.key]=true});saveMCol(v)}}>Collapse all</button>
-        <button type="button" class="font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>saveMCol({})}>Expand all</button></li>`}
+      ${tab==='machine'&&!q&&html`<li class="px-2 pt-1 flex items-center gap-3 text-[12px]">
+        ${list.length>0&&html`<button type="button" class="font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>{const v={};groupMachines(list,data,true).forEach(g=>{v[g.key]=true});saveMCol(v)}}>Collapse all</button>
+        <button type="button" class="font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>saveMCol({})}>Expand all</button>`}
+        <button id="mcat-add-open" type="button" class="ml-auto font-medium inline-flex items-center gap-1 text-muted hover:text-ink" onClick=${()=>setNewCat(newCat==null?'':null)} aria-expanded=${newCat!=null}>${Icon.plus} Add category</button></li>`}
+      ${tab==='machine'&&!q&&newCat!=null&&html`<li class="px-2 pt-2"><div class="flex items-center gap-2" onKeyDown=${e=>{if(e.key==='Enter'){e.preventDefault();addCat()}else if(e.key==='Escape'){e.stopPropagation();setNewCat(null)}}}>
+        <label class="sr-only" for="mcat-new">New category name</label>
+        <input id="mcat-new" class="field field-sm flex-1" style=${{height:30}} placeholder="e.g. Water carts" value=${newCat} autoFocus=${true} onInput=${e=>setNewCat(e.target.value)}/>
+        <button id="mcat-add" type="button" class="btn btn-primary" style=${{height:30}} disabled=${!newCat.trim()} onClick=${addCat}>Add</button>
+        <button type="button" class="btn btn-ghost" style=${{height:30}} onClick=${()=>setNewCat(null)}>Cancel</button></div></li>`}
       ${(tab==='crew'?groupCrews(list).flatMap(g=>g.rows.map((r,i)=>({r,head:i===0?g:null})))
-        :tab==='machine'?groupMachines(list,data).flatMap(g=>g.rows.map((r,i)=>({r,head:i===0?g:null})))
+        :tab==='machine'?groupMachines(list,data,!q).flatMap(g=>g.empty?[{r:null,head:g}]:g.rows.map((r,i)=>({r,head:i===0?g:null})))
         :list.map(r=>({r,head:null}))).map(({r,head})=>{
         const hdr=head&&html`<li key=${'h-'+head.key} class="px-2 pt-3 pb-1 flex items-center gap-2" data-mcat-head=${tab==='machine'&&head.key!=='~'?head.key:undefined}
             style=${tab==='machine'?{boxShadow:mLine('cat',head.key),opacity:mdrag&&mdrag.kind==='cat'&&mdrag.id===head.key?.45:1}:null}>
@@ -605,6 +617,9 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
               <span class="text-muted inline-flex transition-transform shrink-0" style=${{transform:mCol[head.key]&&!q?'rotate(-90deg)':'none'}}>${Icon.chevD}</span>
               <span class="label truncate" style=${{color:'var(--ink)'}}>${head.label}</span></button>`
             :html`<span class="label" style=${{color:'var(--ink)'}}>${head.label}</span>`}<span class="mono text-[11px] text-faint">${head.rows.length}</span><span class="flex-1 h-px bg-line"></span></li>`;
+        if(!r)return [hdr,!mCol[head.key]&&html`<li key=${'e-'+head.key} class="px-3 py-2 flex items-center gap-2 text-[12px] text-muted">
+            <span class="flex-1">No machines yet. Choose this category when adding or editing a machine.</span>
+            <button type="button" class="font-medium underline underline-offset-2 hover:text-ink" onClick=${()=>removeCat(head.key)} aria-label=${'Remove category '+head.label}>Remove</button></li>`];
         if(tab==='machine'&&!q&&mCol[machCatOf(r).toLowerCase()||'~']&&renameId!==r.id)return [hdr];   /* category collapsed */
         const s=rowStats(r,data,days);
         let meta;
@@ -678,7 +693,7 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
                 <button class="p-1 rounded text-muted hover:text-ink" onClick=${()=>patch(r.id,{visible:!r.visible})} aria-label=${(r.visible?'Hide ':'Show ')+r.name} title=${r.visible?'Hide from board':'Show on board'}>${r.visible?Icon.eye:Icon.eyeOff}</button>
                 <button class="p-1 rounded text-muted hover:text-ink" onClick=${()=>setConfirmId(r.id)} aria-label=${'Remove '+r.name} title="Remove">${Icon.x}</button></div>`}
         </li>`];})}
-      ${list.length===0&&html`<li class="px-3 py-6 text-center text-muted text-[13px]">${q?`Nothing matches “${q}”.`:`No ${TYPES[tab].label.toLowerCase()} yet. Add one below.`}</li>`}
+      ${list.length===0&&!(tab==='machine'&&!q&&(data.machineCats||[]).length)&&html`<li class="px-3 py-6 text-center text-muted text-[13px]">${q?`Nothing matches “${q}”.`:`No ${TYPES[tab].label.toLowerCase()} yet. Add one below.`}</li>`}
     </ul>
     <form class="border-t border-line px-4 py-3 flex flex-col gap-2 bg-sunken" onSubmit=${add}>
       <div class="flex items-center gap-2"><div class="label mr-auto">Add ${TYPES[tab].one}</div>
@@ -880,7 +895,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             style=${{...blockStyle(it.b,data),top:10+it.lane*32,left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
               borderTopLeftRadius:it.cutL?0:6,borderBottomLeftRadius:it.cutL?0:6,borderTopRightRadius:it.cutR?0:6,borderBottomRightRadius:it.cutR?0:6,
               justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined}}
-            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
+            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.kind==='job'&&!it.b.sapEntered?'\nNot entered into SAP':''}${it.b.kind==='job'&&it.b.creditIssue?'\nCredit issue':''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
             onPointerDown=${e=>v?e.stopPropagation():startDrag(e,it.b)}
             onClick=${v?()=>onEdit(it.b.parent):undefined}
             onKeyDown=${e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onEdit(v?it.b.parent:it.b)}
@@ -890,6 +905,9 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
                 return html`<span key=${'w'+i} class=${'wkoff'+(cov?' cov':'')} aria-hidden="true" style=${{left:`${i/span*100}%`,width:`${100/span}%`}}></span>`})}
             ${it.cutL&&html`<span aria-hidden="true">‹</span>`}
             ${night&&html`<span class="shrink-0 inline-flex" title="Night works">${Icon.moon}</span>`}
+            ${(src=>src&&src.kind==='job'&&html`
+              ${!src.sapEntered&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:13,background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">${Icon.sap}</span>`}
+              ${src.creditIssue&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-full font-bold" style=${{width:14,height:14,fontSize:10,lineHeight:1,background:'hsl(0 75% 46%)',color:'#fff',boxShadow:'0 0 0 1.5px #fff'}} title="Credit issue">$</span>`}`)(v?(it.b.cover?it.b.parent:null):it.b)}
             ${!v&&quoteFresh.has(it.b.id)&&html`<span class="shrink-0 w-2 h-2 rounded-full" style=${{background:'var(--accent)',boxShadow:'0 0 0 2px var(--surface)'}} title="Quote number changed in the last 48 hours"></span>`}
             ${v&&!compact&&!it.b.cover&&html`<span class="shrink-0 inline-flex opacity-80">${Icon.pin}</span>`}
             ${compact
@@ -1461,7 +1479,12 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
             <div class="seg w-max">
               <button type="button" aria-pressed=${(f.shift||'day')==='day'} onClick=${()=>set({shift:'day'})}>Day works</button>
               <button type="button" aria-pressed=${f.shift==='night'} onClick=${()=>set({shift:'night'})}>Night works</button>
-            </div></div>`
+            </div></div>
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-sap" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!f.sapEntered} onChange=${e=>set({sapEntered:e.target.checked})}/>Entered into SAP</label>
+            <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-credit" type="checkbox" class="w-4 h-4" style=${{accentColor:'hsl(0 72% 48%)'}} checked=${!!f.creditIssue} onChange=${e=>set({creditIssue:e.target.checked})}/>Credit issue</label>
+          </div>
+          <span class="text-[11.5px] text-faint -mt-2">The bar shows a small SAP icon until this booking is entered into SAP, and a red $ while there's a credit issue.</span>`
         :html`<label class="grid gap-1"><span class="label">Note</span>
             <input id="ed-label" class="field" placeholder=${KINDS[f.kind].hint||(rtype==='machine'?'e.g. 500 hr service, hydraulic leak':KINDS[f.kind].label)} value=${f.title||''} onInput=${e=>set({title:e.target.value})}/></label>
           ${f.kind==='plantmaint'&&html`<div class="grid gap-1"><span class="label">Plant unavailable for</span>
@@ -2053,6 +2076,8 @@ function bookingDiff(a,b,p,x,rname,jname,when){
   if(p.start!==x.start||p.end!==x.end)ch('Dates',when(p),when(x));
   if((p.shift||'day')!==(x.shift||'day'))ch('Shift',p.shift==='night'?'Night':'Day',x.shift==='night'?'Night':'Day');
   if(p.jobId!==x.jobId)ch('Job',jname(a,p.jobId),jname(b,x.jobId));
+  if(!!p.sapEntered!==!!x.sapEntered)ch('Entered into SAP',p.sapEntered?'Yes':'No',x.sapEntered?'Yes':'No');
+  if(!!p.creditIssue!==!!x.creditIssue)ch('Credit issue',p.creditIssue?'Yes':'No',x.creditIssue?'Yes':'No');
   [['address','Site address'],['projectNo','Project number'],['quoteNo','Quote number'],['supervisor','Supervisor'],['siteContact','Site contact'],['sitePhone','Contact phone'],['title','Label'],['maintShift','Maintenance shift'],['notes','Notes']]
     .forEach(([f,l])=>{if((p[f]||'')!==(x[f]||''))ch(l,cut(p[f]),cut(x[f]))});
   const pa=p.plantIds||[],pb=x.plantIds||[];
@@ -2809,9 +2834,11 @@ const machCatOf=r=>((r&&r.category)||'').trim();
 const MACHINE_CATS_BUILTIN=['Brooms'];   /* always offered in the category box */
 const machineCatsOf=d=>{const out=[];const add=c=>{c=(c||'').trim();if(c&&!out.some(x=>x.toLowerCase()===c.toLowerCase()))out.push(c)};
   (d.machineCats||[]).forEach(add);d.resources.forEach(r=>{if(r.type==='machine')add(r.category)});MACHINE_CATS_BUILTIN.forEach(add);return out};
-function groupMachines(rows,d){
+function groupMachines(rows,d,withEmpty=false){
   const ord=machineCatsOf(d).map(x=>x.toLowerCase());const m=new Map();
   rows.forEach(r=>{const c=machCatOf(r);const k=c.toLowerCase()||'~';if(!m.has(k))m.set(k,{key:k,label:c||'No category',rows:[]});m.get(k).rows.push(r)});
+  /* categories added by hand (or emptied) still show, so machines can be put in them */
+  if(withEmpty)(d.machineCats||[]).forEach(c=>{c=(c||'').trim();const k=c.toLowerCase();if(c&&!m.has(k))m.set(k,{key:k,label:c,rows:[],empty:true})});
   return [...m.values()].sort((a,b)=>a.key==='~'?1:b.key==='~'?-1:(ord.indexOf(a.key)<0?999:ord.indexOf(a.key))-(ord.indexOf(b.key)<0?999:ord.indexOf(b.key)));
 }
 function loadSheetJS(){
