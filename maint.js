@@ -8,6 +8,7 @@
 (function(){
 const MT=['asset_profiles','meter_readings','service_plans','service_records','work_orders'];
 const P3=['prestart_templates','maintenance_files'];
+const P5=['servicem8_jobs','servicem8_settings'];   /* the ServiceM8 link (supabase/servicem8.sql): optional until that script is run */
 const P4=['defects','restrictions'];   /* Phase 4 (supabase/defects.sql): optional until that script is run */   /* Phase 3 (supabase/prestarts.sql): optional until that script is run */
 const WO_STATUS={open:'Open',scheduled:'Scheduled',in_progress:'In progress',awaiting_parts:'Awaiting parts',completed:'Completed',closed:'Verified & closed',cancelled:'Cancelled'};
 const WO_OPEN=s=>!['completed','closed','cancelled'].includes(s);
@@ -37,11 +38,13 @@ function useMaint(sb){
       catch(e){P3.forEach(t=>o[t]=[]);o.prestarts=[];o.p3=false;o.p3err=errMsg(e)}
       try{const r4=await Promise.all(P4.map(t=>fetchAll(sb,t)));P4.forEach((t,i)=>o[t]=r4[i]);o.p4=true}
       catch(e){P4.forEach(t=>o[t]=[]);o.p4=false;o.p4err=errMsg(e)}
+      try{const r5=await Promise.all(P5.map(t=>fetchAll(sb,t)));P5.forEach((t,i)=>o[t]=r5[i]);o.sm8=true}
+      catch(e){P5.forEach(t=>o[t]=[]);o.sm8=false}
       setDb(o);setErr('');if(window.ffStore)window.ffStore.set('maint',{...o,savedAt:Date.now()})}   /* kept on this device for working without reception */
     catch(e){const saved=window.isNetErr&&window.isNetErr(e)&&window.ffStore?await window.ffStore.get('maint'):null;
       if(saved){setDb(d=>d&&!d.offline?d:{...saved,offline:true});setErr('')}else setErr(errMsg(e))}};
   useEffect(()=>{load();let t=null;let ch=null;
-    try{ch=sb.channel('maint-'+uid());[...MT,...P3,'prestarts',...P4].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,350)}));ch.subscribe()}catch(e){}
+    try{ch=sb.channel('maint-'+uid());[...MT,...P3,'prestarts',...P4,...P5].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,350)}));ch.subscribe()}catch(e){}
     return()=>{clearTimeout(t);try{if(ch)sb.removeChannel(ch)}catch(e){}}},[]);
   return {db,err,reload:load};
 }
@@ -144,6 +147,108 @@ function PartsEditor({parts,onChange,disabled}){
 const cleanParts=ps=>(ps||[]).filter(p=>(p.part||'').trim()).map(p=>({part:p.part.trim(),qty:(String(p.qty??'').trim())||'1'}));
 const partsTxt=ps=>(ps||[]).map(p=>`${p.qty&&p.qty!=='1'?p.qty+' × ':''}${p.part}`).join(', ');
 
+/* ---------- ServiceM8: the contract mechanic's job software (api/servicem8.js, supabase/servicem8.sql) ---------- */
+const SM8_ST={pending:'Waiting to send',sending:'Sending…',sent:'In ServiceM8',held:'Not sent to ServiceM8',error:'Couldn’t send to ServiceM8',skipped:'Not sent: finished before it went',removed:'Deleted in ServiceM8'};
+async function sm8Call(sb,body){const {data:{session}}=await sb.auth.getSession();
+  let r;try{r=await fetch('/api/servicem8',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(session&&session.access_token||'')},body:JSON.stringify(body)})}
+  catch(e){throw new Error('No connection: try again when you have reception.')}
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('The ServiceM8 link didn’t answer ('+r.status+')'));return j}
+const sm8Cfg=db=>(db&&db.sm8&&db.servicem8_settings[0])||{};
+const sm8On=db=>!!sm8Cfg(db).enabled;
+const sm8Of=(db,id)=>db&&db.sm8?db.servicem8_jobs.find(l=>l.work_order_id===id)||null:null;
+/* send what's waiting and pass on changes, quietly: a problem shows on the work order itself */
+function sm8Flush(ctx){if(sm8On(ctx.db))sm8Call(ctx.sb,{action:'flush'}).catch(()=>{})}
+const agoTxt=t=>{if(!t)return '';const m=Math.round((Date.now()-new Date(t))/60000);return m<1?'just now':m<60?`${m} min ago`:m<1440?`${Math.round(m/60)} h ago`:fmtTs(t)};
+/* the little mark on the work orders list */
+const sm8Mark=l=>!l||l.state==='held'||l.state==='skipped'?null:html`<span class="ml-1.5 text-[10.5px] font-semibold px-1 py-px rounded mono" title=${SM8_ST[l.state]+(l.job_no?' · job '+l.job_no:'')+(l.last_error?': '+l.last_error:'')}
+  style=${{background:'var(--sunken)',color:l.state==='error'||l.state==='removed'?'var(--bad)':l.state==='sent'?'var(--ink)':'var(--muted)',boxShadow:'inset 0 0 0 1px var(--line)'}}>SM8${l.state==='error'?' !':l.state==='sent'?'':' …'}</span>`;
+
+/* on a work order: where it is with ServiceM8, and what can be done */
+function Sm8Panel({ctx,wo}){
+  const {db,sb,notify,reload,perms}=ctx;const l=sm8Of(db,wo.id);const cfg=sm8Cfg(db);
+  const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  if(!db.sm8||(!cfg.enabled&&!l))return null;
+  const act=async(fn,msg)=>{setBusy(true);setErr('');try{await fn();if(msg)notify(msg);reload()}catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
+  const request=send=>act(async()=>{const {error}=await sb.rpc('servicem8_request',{p_wo:wo.id,p_send:send});if(error)throw error;
+    if(send){const r=await sm8Call(sb,{action:'flush'});const mine=(r.errors||[]).find(x=>x.wo===wo.id);if(mine)throw new Error(mine.error)}},send?`${woNo(wo)} sent to ServiceM8`:`${woNo(wo)} won’t go to ServiceM8`);
+  const sync=()=>act(()=>sm8Call(sb,{action:'sync',wo:wo.id}),`${woNo(wo)} updated from ServiceM8`);
+  const st=l?l.state:'held';const open=WO_OPEN(wo.status);const who=cfg.contractor_name||'The contractor';
+  const btn=(id,label,fn,danger)=>html`<button id=${id} type="button" class="btn" style=${{height:28,fontSize:12.5,...(danger?{color:'var(--bad)'}:{})}} disabled=${busy} onClick=${fn}>${label}</button>`;
+  return html`<div id="wo-sm8" class="sm:col-span-2 rounded-lg border border-line p-3 grid gap-1.5" data-state=${st}>
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="label">ServiceM8</span>
+      <span class="text-[13px] font-medium" style=${{color:st==='error'||st==='removed'?'var(--bad)':'var(--ink)'}}>${st==='sent'?`Job${l.job_no?' '+l.job_no:''} · ${l.sm8_status||'Work Order'}`:SM8_ST[st]}</span>
+      <span class="flex-1"></span>
+      ${perms.work&&html`
+        ${st==='sent'&&btn('sm8-sync','Refresh now',sync)}
+        ${(st==='pending'||st==='error')&&open&&btn('sm8-send',st==='error'?'Try again':'Send now',()=>request(true))}
+        ${(st==='pending'||st==='error')&&open&&btn('sm8-hold','Don’t send',()=>request(false),true)}
+        ${(st==='held'||st==='skipped'||st==='removed')&&open&&cfg.enabled&&btn('sm8-send','Send to ServiceM8',()=>request(true))}`}
+    </div>
+    <div class="text-[12px] text-muted">${st==='sent'?`${who} works this job in ServiceM8: when it’s booked, started, waiting on parts, completed or abandoned there, this work order follows.${l.synced_at?' Last heard '+agoTxt(l.synced_at)+'.':''}`
+      :st==='error'?(l.last_error||'')
+      :st==='removed'?'The job was deleted in ServiceM8. Send it again, or carry on here.'
+      :st==='pending'||st==='sending'?'It goes to ServiceM8 in a moment.'
+      :open&&cfg.enabled?'This work order is handled here, not in ServiceM8.':''}</div>
+    ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+  </div>`;
+}
+
+/* administrators: connecting ServiceM8 and how it's used */
+function Sm8Settings({ctx,onClose}){
+  const {db,sb,notify,reload}=ctx;const c0=sm8Cfg(db);
+  const [f,setF]=useState({enabled:!!c0.enabled,auto_send:c0.auto_send!==false,client_name:c0.client_name||'AFA',contractor_name:c0.contractor_name||'',job_address:c0.job_address||'',parts_queue_uuid:c0.parts_queue_uuid||'',parts_queue_name:c0.parts_queue_name||''});
+  const [st,setSt]=useState(null);const [queues,setQueues]=useState(null);const [busy,setBusy]=useState('');const [err,setErr]=useState('');
+  useEffect(()=>{sm8Call(sb,{action:'status'}).then(setSt).catch(e=>setSt({mode:'?',connected:false,error:errMsg(e)}))},[]);
+  const run=async(k,fn)=>{setBusy(k);setErr('');try{await fn()}catch(e){setErr(errMsg(e))}finally{setBusy('')}};
+  const row=()=>({enabled:f.enabled,auto_send:f.auto_send,client_name:f.client_name.trim()||'AFA',contractor_name:f.contractor_name.trim()||null,job_address:f.job_address.trim()||null,
+    parts_queue_uuid:f.parts_queue_uuid||null,parts_queue_name:f.parts_queue_uuid?f.parts_queue_name||null:null,...((f.client_name.trim()||'AFA')!==(c0.client_name||'AFA')?{company_uuid:null}:{})});
+  const store=async extra=>{const {error}=await sb.from('servicem8_settings').update({...row(),...(extra||{})}).eq('id',1);if(error)throw error};
+  const ready=!!(st&&st.connected);const hooked=!!(c0.hooks_on_at||(st&&st.hooksOn));
+  const save=()=>run('save',async()=>{if(f.enabled&&!ready)throw new Error('Connect ServiceM8 first.');if(f.enabled&&!hooked)throw new Error('Click “Set up in ServiceM8” first.');
+    await store();notify('ServiceM8 settings saved');reload();if(f.enabled)sm8Call(sb,{action:'flush'}).catch(()=>{});onClose()});
+  const connect=()=>run('connect',async()=>{const r=await sm8Call(sb,{action:'connect'});window.location.href=r.url});
+  const disconnect=()=>run('disconnect',async()=>{if(!confirm('Disconnect ServiceM8? Work orders stop going to it until it is connected again.'))return;await sm8Call(sb,{action:'disconnect'});setF({...f,enabled:false});setSt({...st,connected:false});reload();notify('ServiceM8 disconnected')});
+  const setup=()=>run('setup',async()=>{await store({enabled:c0.enabled&&f.enabled});const r=await sm8Call(sb,{action:'setup'});setSt({...st,hooksOn:true});reload();
+    notify(r.hooks==='full'?'ServiceM8 is set up':'ServiceM8 is set up (bookings and parts are picked up by the regular check, not the moment they change)')});
+  const loadQ=()=>run('q',async()=>{const r=await sm8Call(sb,{action:'queues'});setQueues(r.queues||[])});
+  const conn=!st?'Checking…':st.mode==='?'?st.error:st.mode==='key'?(st.connected?'Connected with an API key from his ServiceM8.':'API key set, but ServiceM8 refused it.')
+    :st.mode==='oauth'?(st.connected?'Connected.':st.error||'Not connected yet.')
+    :'Not set up on the server yet: add SERVICEM8_APP_ID and SERVICEM8_APP_SECRET (or SERVICEM8_API_KEY) in Vercel → Settings → Environment Variables, then redeploy. The README has the steps.';
+  const qList=queues||(f.parts_queue_uuid?[{uuid:f.parts_queue_uuid,name:f.parts_queue_name||'(saved queue)'}]:[]);
+  return html`<${Modal} title="ServiceM8" sub="Work orders go to the contract mechanic’s ServiceM8 as jobs, and their progress comes back" onClose=${onClose}
+    foot=${html`${err&&html`<span id="sm8-err" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span>
+      <button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="sm8-save" type="button" class="btn btn-primary" disabled=${!!busy} onClick=${save}>Save</button>`}>
+    <div class="grid gap-4">
+      <section class="grid gap-1.5"><div class="font-semibold text-[13.5px]">1. Connect his ServiceM8</div>
+        <div id="sm8-conn" class="text-[13px]">${conn}</div>
+        ${st&&st.mode==='oauth'&&!st.connected&&html`<div class="text-[12px] text-muted">He signs in to his own ServiceM8 on the next page and approves FraserFlow. He can disconnect it from ServiceM8 at any time.</div>
+          <div><button id="sm8-connect" type="button" class="btn" disabled=${!!busy} onClick=${connect}>Connect ServiceM8</button></div>`}
+        ${st&&st.mode==='oauth'&&st.connected&&html`<div><button id="sm8-disconnect" type="button" class="btn" style=${{color:'var(--bad)'}} disabled=${!!busy} onClick=${disconnect}>Disconnect</button></div>`}
+      </section>
+      <section class="grid sm:grid-cols-2 gap-3"><div class="sm:col-span-2 font-semibold text-[13.5px]">2. How AFA appears in his ServiceM8</div>
+        <${Fld} label="AFA’s client name in his ServiceM8"><input id="sm8-client" class="field" style=${fs} value=${f.client_name} onInput=${e=>setF({...f,client_name:e.target.value})}/><//>
+        <${Fld} label="Contractor (shown as Assigned)"><input id="sm8-contractor" class="field" style=${fs} placeholder="e.g. Smith Mechanical" value=${f.contractor_name} onInput=${e=>setF({...f,contractor_name:e.target.value})}/><//>
+        <${Fld} label="Job address (where the machines are)" span=${true}><input id="sm8-address" class="field" style=${fs} placeholder="e.g. the depot’s street address" value=${f.job_address} onInput=${e=>setF({...f,job_address:e.target.value})}/><//>
+        <div class="sm:col-span-2 flex flex-wrap items-center gap-2"><button id="sm8-setup" type="button" class="btn" disabled=${!!busy||!ready} onClick=${setup}>${busy==='setup'?'Setting up…':'Set up in ServiceM8'}</button>
+          <span class="text-[12px] text-muted">${hooked?`Done${c0.hooks_on_at?' '+fmtTs(c0.hooks_on_at):''}. Run it again if you change the client name.`:'Finds (or makes) AFA’s client record, and asks ServiceM8 to report changes to AFA’s jobs.'}</span></div>
+      </section>
+      <section class="grid gap-1.5"><div class="font-semibold text-[13.5px]">3. His “awaiting parts” queue (optional)</div>
+        <div class="flex flex-wrap items-center gap-2">
+          <select id="sm8-queue" class="field" style=${{...fs,minWidth:220}} value=${f.parts_queue_uuid} onChange=${e=>{const q=qList.find(x=>x.uuid===e.target.value);setF({...f,parts_queue_uuid:e.target.value,parts_queue_name:q?q.name:''})}}>
+            <option value="">None</option>${qList.map(x=>html`<option key=${x.uuid} value=${x.uuid}>${x.name}</option>`)}</select>
+          ${!queues&&html`<button id="sm8-queues" type="button" class="btn" disabled=${!!busy||!ready} onClick=${loadQ}>Load his queues</button>`}</div>
+        <div class="text-[12px] text-muted">When he puts an AFA job in this queue, its work order shows Awaiting parts.</div>
+      </section>
+      <section class="grid gap-2"><div class="font-semibold text-[13.5px]">4. Switch it on</div>
+        <label class="flex items-start gap-2 text-[13px] cursor-pointer"><input id="sm8-enabled" type="checkbox" class="w-4 h-4 mt-0.5" checked=${f.enabled} onChange=${e=>setF({...f,enabled:e.target.checked})}/>
+          <span>Send work orders to ServiceM8<span class="block text-[12px] text-muted">Work orders made before this aren’t sent unless you open one and choose Send to ServiceM8.</span></span></label>
+        <label class="flex items-start gap-2 text-[13px] cursor-pointer"><input id="sm8-auto" type="checkbox" class="w-4 h-4 mt-0.5" checked=${f.auto_send} disabled=${!f.enabled} onChange=${e=>setF({...f,auto_send:e.target.checked})}/>
+          <span>Send every new work order automatically<span class="block text-[12px] text-muted">Each new work order can still be kept back with “Don’t send”. Untick to send them one at a time instead.</span></span></label>
+      </section>
+    </div><//>`;
+}
+
 /* ---------- dialogs ---------- */
 function ServiceDialog({ctx,a,plan,baseline,onClose}){
   const {sb,notify,reload,staff}=ctx;const px=plan&&!baseline&&a.plans.find(y=>y.plan.id===plan.id);const stg=px&&px.stage;
@@ -218,6 +323,7 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
   const a=M.byId.get(f.asset_id);
   const [svc,setSvc]=useState(()=>({done_on:iso(TODAY),hours:a&&a.mt!=='km'&&a.cur.hours?String(a.cur.hours.value):'',km:a&&a.mt!=='hours'&&a.cur.km?String(a.cur.km.value):''}));
   const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const sm8c=sm8Cfg(ctx.db);const [toSm8,setToSm8]=useState(()=>sm8On(ctx.db)&&sm8c.auto_send!==false);
   const D=window.FFD&&ctx.db.p4?window.FFD:null;
   const linked0=D&&!isNew?ctx.db.defects.filter(d=>d.work_order_id===wo.id).map(d=>d.id):((init&&init.defect_ids)||[]);
   const [dsel,setDsel]=useState(()=>new Set(linked0));
@@ -232,7 +338,9 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
   const save=async status=>{const c=check();if(c){setErr(c);return}setErr('');setBusy(true);
     try{
       if(isNew){const r=row();const st=status||(r.start_date?'scheduled':'open');const {data:made,error}=await sb.from('work_orders').insert({...r,asset_id:f.asset_id,status:st}).select('id').single();if(error)throw error;
-        await linkDefects(made.id);notify(dsel.size?`Work order created for ${dsel.size} defect${dsel.size===1?'':'s'}`:'Work order created')}
+        await linkDefects(made.id);
+        if(sm8On(ctx.db)&&toSm8!==(sm8c.auto_send!==false)){const {error:e3}=await sb.rpc('servicem8_request',{p_wo:made.id,p_send:toSm8});if(e3)throw e3}
+        notify(dsel.size?`Work order created for ${dsel.size} defect${dsel.size===1?'':'s'}`:'Work order created')}
       else{const r=row();if(WO_OPEN(wo.status))await linkDefects(wo.id);const next=status||(wo.status==='open'&&r.start_date?'scheduled':wo.status);
         if(next==='completed'&&wo.status!=='completed'){
           if(!r.completion_notes)throw new Error('Add completion notes: what was done.');
@@ -244,7 +352,7 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
         }
         const {error}=await sb.from('work_orders').update({...r,status:next}).eq('id',wo.id);if(error)throw error;
         notify(next!==wo.status?`${woNo(wo)}: ${WO_STATUS[next]}`:`${woNo(wo)} saved`)}
-      reload();onClose()}
+      sm8Flush(ctx);reload();onClose()}
     catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
   const cur=isNew?null:wo.status;
   const acts=isNew?[]:[
@@ -274,6 +382,9 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
       <${Fld} label="Assigned mechanic or contractor"><${Combo} id="wo-assign" className="field" style=${fs} label="Assigned to" value=${f.assigned_to} onChange=${v=>setF({...f,assigned_to:v})} options=${staff}/><//>
       <${Fld} label="Scheduled from"><input id="wo-start" type="date" class="field mono" style=${fs} value=${f.start_date} onChange=${e=>setF({...f,start_date:e.target.value,end_date:f.end_date&&f.end_date>=e.target.value?f.end_date:e.target.value})}/><//>
       <${Fld} label="Until"><input id="wo-end" type="date" class="field mono" style=${fs} value=${f.end_date} min=${f.start_date||undefined} onChange=${e=>setF({...f,end_date:e.target.value})}/><//>
+      ${isNew&&sm8On(ctx.db)&&html`<label class="sm:col-span-2 flex items-center gap-2 text-[13px] cursor-pointer"><input id="wo-sm8" type="checkbox" class="w-4 h-4" checked=${toSm8} onChange=${e=>setToSm8(e.target.checked)}/>
+        Send to ServiceM8${sm8c.contractor_name?` (${sm8c.contractor_name})`:''}</label>`}
+      ${!isNew&&html`<${Sm8Panel} ctx=${ctx} wo=${wo}/>`}
       ${f.start_date&&html`<p class="sm:col-span-2 text-[12px] text-muted -mt-1">Scheduled dates show on the schedule board as ${f.wo_type==='service'?'a scheduled service':'a breakdown / repair'} for this machine, so it isn’t booked for jobs.</p>`}
       ${f.wo_type==='breakdown'&&f.safe_to_operate!=null&&html`<p class="sm:col-span-2 text-[12.5px] font-medium" style=${{color:f.safe_to_operate?'var(--ink)':'hsl(0 72% 47%)'}}>${f.safe_to_operate?'Reported as safe to operate.':'Reported as NOT safe to operate: shown as out of service until this is completed.'}</p>`}
       ${!isNew&&html`<div class="sm:col-span-2 grid gap-1"><span class="label">Parts replaced or used</span><${PartsEditor} parts=${f.parts} disabled=${locked} onChange=${v=>setF({...f,parts:v})}/></div>
@@ -308,7 +419,7 @@ function BreakdownDialog({ctx,a,onClose}){
         priority:f.priority,safe_to_operate:f.safe,reported_hours:n0(f.hours),reported_km:n0(f.km),start_date:f.safe?null:iso(TODAY),end_date:f.safe?null:iso(TODAY),status:f.safe?'open':'scheduled'});
       if(error)throw error;
       let warn='';for(const [k,v] of [['hours',f.hours],['km',f.km]])if(v!==''){const {error:e2}=await sb.from('meter_readings').insert({asset_id:a.m.id,kind:k,value:+v,source:'manual',note:'Breakdown report'});if(e2)warn=' (the meter reading wasn’t saved: '+errMsg(e2)+')'}
-      notify('Breakdown reported'+warn);reload();onClose()}
+      notify('Breakdown reported'+warn);sm8Flush(ctx);reload();onClose()}
     catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
   return html`<${Modal} title="Report a breakdown" sub=${`${a.m.name} · ${a.m.sub||''}`} onClose=${onClose}
     foot=${html`${err&&html`<span id="bd-err" class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="bd-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>Report breakdown</button>`}>
@@ -549,7 +660,8 @@ function Dashboard({ctx,open}){
 }
 
 function WorkOrders({ctx,open}){
-  const {M,perms}=ctx;const [view,setView]=useState('open');const [q,setQ]=useState('');
+  const {M,perms}=ctx;
+  useEffect(()=>{if(perms.work)sm8Flush(ctx)},[]);   /* catch up on anything ServiceM8 didn't report */const [view,setView]=useState('open');const [q,setQ]=useState('');
   const ql=q.trim().toLowerCase();
   const rows=ctx.db.work_orders.filter(w=>(view==='all'||(view==='open'?WO_OPEN(w.status):!WO_OPEN(w.status)))).filter(w=>{const a=M.byId.get(w.asset_id);return !ql||[w.number,w.title,w.assigned_to,a&&a.m.name].join(' ').toLowerCase().includes(ql)})
     .sort((a,b)=>view==='open'?(['urgent','high','medium','low'].indexOf(a.priority)-['urgent','high','medium','low'].indexOf(b.priority))||(a.start_date||'9').localeCompare(b.start_date||'9')||b.number-a.number:b.number-a.number);
@@ -557,7 +669,7 @@ function WorkOrders({ctx,open}){
     <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
       <div class="seg" role="group" aria-label="Show"><button type="button" aria-pressed=${view==='open'} onClick=${()=>setView('open')}>Open</button><button type="button" aria-pressed=${view==='done'} onClick=${()=>setView('done')}>Completed & closed</button><button type="button" aria-pressed=${view==='all'} onClick=${()=>setView('all')}>All</button></div>
       <input id="wo-search" class="field" style=${{...fs,width:220}} placeholder="Search number, title, machine, mechanic" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search work orders"/>
-      <span class="flex-1"></span>${perms.work&&html`<button id="wo-new" type="button" class="btn btn-primary" onClick=${()=>open({k:'wo'})}>${Icon.plus} New work order</button>`}
+      <span class="flex-1"></span>${perms.mgr&&ctx.db.sm8&&html`<button id="wo-sm8-settings" type="button" class="btn" onClick=${()=>open({k:'sm8'})}>ServiceM8${sm8On(ctx.db)?'':' (off)'}</button>`}${perms.work&&html`<button id="wo-new" type="button" class="btn btn-primary" onClick=${()=>open({k:'wo'})}>${Icon.plus} New work order</button>`}
     </div>
     <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="wo-table">
       <thead><tr class="text-left">${['No.','Machine','Type','Title','Priority','Status','Assigned','Scheduled'].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
@@ -568,7 +680,7 @@ function WorkOrders({ctx,open}){
           <td class="py-2 px-3 min-w-[200px]">${w.title}</td>
           <td class="py-2 px-3 whitespace-nowrap font-medium" style=${{color:PRI_COL[w.priority]}}>${PRI[w.priority]}</td>
           <td class="py-2 px-3 whitespace-nowrap">${woChip(w.status)}</td>
-          <td class="py-2 px-3 whitespace-nowrap">${w.assigned_to||html`<span class="text-faint">–</span>`}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${w.assigned_to||html`<span class="text-faint">–</span>`}${sm8Mark(sm8Of(ctx.db,w.id))}</td>
           <td class="py-2 px-3 mono whitespace-nowrap">${w.start_date?`${fmtShort(parse(w.start_date))}${w.end_date&&w.end_date!==w.start_date?' – '+fmtShort(parse(w.end_date)):''}`:html`<span class="text-faint">–</span>`}</td></tr>`})}
         ${!rows.length&&html`<tr><td colspan="8" class="px-3 py-6 text-center text-muted">${view==='open'?'No open work orders.':'Nothing here yet.'}</td></tr>`}</tbody></table></div>
   </section>`;
@@ -765,6 +877,7 @@ function FleetScreen({data,live,notify,setData,tab:tab0,onCounts,assetReq,onImpo
     ${dlg&&dlg.k==='profile'&&html`<${ProfileDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='machine'&&html`<${MachineDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='breakdown'&&html`<${BreakdownDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
+    ${dlg&&dlg.k==='sm8'&&html`<${Sm8Settings} ctx=${ctx} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='plan'&&html`<${PlanDialog} ctx=${ctx} plan=${dlg.plan} onClose=${()=>setDlg(null)}/>`}
     ${D&&dlg&&dlg.k==='defect'&&html`<${D.DefectDialog} ctx=${ctx} d=${(db.defects||[]).find(x=>x.id===dlg.d.id)||dlg.d} open=${open} onClose=${()=>setDlg(null)}/>`}
     ${D&&dlg&&dlg.k==='newdefect'&&html`<${D.NewDefectDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
