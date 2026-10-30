@@ -5063,7 +5063,6 @@ function App({boot,live}){
           ...(data.resources.some(r=>r.type==='crew'&&r.subbie)?[{id:'exp-subworks',label:'Subbie works',desc:'Upcoming works for a subcontractor crew',run:()=>setSubWorksOpen(true)}]:[])]}/>`}
         <div class="flex items-center gap-2 min-w-0">
           <h1 class="font-display font-semibold tracking-tight truncate text-[22px] leading-none">Fraser<span style=${{color:'var(--accent)'}}>Flow</span><span class="text-faint font-normal"> - </span>${SCR.title}</h1>
-          ${screen==='staff'&&html`<div class="seg shrink-0 ml-1" role="tablist" aria-label="Staff views"><button id="sv-leave" type="button" role="tab" aria-selected=${!peopleView} aria-pressed=${!peopleView} onClick=${()=>setStaffView('leave')}>Leave calendar</button><button id="sv-people" type="button" role="tab" aria-selected=${peopleView} aria-pressed=${peopleView} onClick=${()=>setStaffView('people')}>People</button></div>`}
           ${!live.canEdit&&screen!=='prestarts'&&screen!=='fleet'&&!peopleView&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change the schedule">View only</span>`}
         </div>
         <div class="flex-1"></div>
@@ -5087,6 +5086,9 @@ function App({boot,live}){
       </header>
 
       ${live.offline&&html`<${OfflineBar} at=${live.offline.at}/>`}
+      ${screen==='staff'&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg" role="tablist" aria-label="Staff sections">
+        <button id="sv-leave" type="button" role="tab" aria-selected=${!peopleView} aria-pressed=${!peopleView} onClick=${()=>setStaffView('leave')}>Leave calendar</button>
+        <button id="sv-people" type="button" role="tab" aria-selected=${peopleView} aria-pressed=${peopleView} onClick=${()=>setStaffView('people')}>People</button></div></div>`}
       ${leaveDlg&&html`<${LeaveDialog} data=${data} setData=${setData} notify=${setToast} personId=${leaveDlg.personId} onClose=${()=>setLeaveDlg(null)}/>`}
       ${peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:screen==='fleet'||screen==='prestarts'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
       ${screen==='staff'?(()=>{const L=leaveStats(data);return html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3" id="leave-stats">
