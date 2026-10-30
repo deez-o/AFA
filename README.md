@@ -79,7 +79,9 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 | `operator` | View | Prestarts (coming next) |
 | `viewer` | View | None |
 
-**Features in progress:** Fleet & Maintenance and Ideas start out visible to the `admin` only (marked *Preview* in the left menu). Release each one from the settings menu (top right) under *Features in progress*.
+**Ideas** is for the `admin` only, never superusers.
+
+**Features in progress:** Fleet & Maintenance starts out visible to the `admin` only (marked *Preview* in the left menu). Release each one from the settings menu (top right) under *Features in progress*.
 
 After pulling this version, run `supabase/schema.sql` and then `supabase/maintenance.sql` again in the SQL Editor: both are safe to re-run and add the new roles.
 

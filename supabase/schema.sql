@@ -126,12 +126,12 @@ begin
 end $$;
 
 -- 4. Ideas board and suggestions ---------------------------------------------
---    Only administrators can read or change the Ideas board (kind 'idea') and
---    suggestions. Everyone signed in (viewers too) can send a suggestion.
+--    Only the administrator (role 'admin', not superusers) can read or change the
+--    Ideas board (kind 'idea') and suggestions. Everyone signed in can send a suggestion.
 drop policy if exists "signed-in people read the roster" on public.items;
 create policy "signed-in people read the roster" on public.items
   for select to authenticated
-  using (kind not in ('idea','suggestion') or public.is_admin());
+  using (kind not in ('idea','suggestion') or public.my_role() = 'admin');
 
 drop policy if exists "everyone suggests" on public.items;
 create policy "everyone suggests" on public.items
@@ -141,16 +141,16 @@ create policy "everyone suggests" on public.items
 drop policy if exists "planners add" on public.items;
 create policy "planners add" on public.items
   for insert to authenticated
-  with check (public.is_admin()
-    or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));
+  with check (public.my_role() = 'admin'
+    or (public.my_role() in ('superuser','planner') and kind not in ('idea','suggestion')));
 
 drop policy if exists "planners change" on public.items;
 create policy "planners change" on public.items
   for update to authenticated
-  using (public.is_admin() or (public.my_role() = 'planner' and kind not in ('idea','suggestion')))
-  with check (public.is_admin() or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));
+  using (public.my_role() = 'admin' or (public.my_role() in ('superuser','planner') and kind not in ('idea','suggestion')))
+  with check (public.my_role() = 'admin' or (public.my_role() in ('superuser','planner') and kind not in ('idea','suggestion')));
 
 drop policy if exists "planners delete" on public.items;
 create policy "planners delete" on public.items
   for delete to authenticated
-  using (public.is_admin() or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));
+  using (public.my_role() = 'admin' or (public.my_role() in ('superuser','planner') and kind not in ('idea','suggestion')));

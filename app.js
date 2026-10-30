@@ -2601,7 +2601,7 @@ function LazyFleet(props){
 }
 /* ---------- screens: the left menu ---------- */
 /* features still being worked on: only the admin sees them until they are released to everyone with access (Settings menu) */
-const PREVIEW_DEFAULT=['fleet','ideas'];
+const PREVIEW_DEFAULT=['fleet'];
 const previewOf=d=>d&&Array.isArray(d.previewOnly)?d.previewOnly:PREVIEW_DEFAULT;
 const screenOK=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=role==='admin'||role==='superuser';
   return (!s.admin||admin)&&(!s.roles||s.roles.includes(role))&&(!s.preview||role==='admin'||!previewOf(d).includes(k))};
@@ -2612,7 +2612,7 @@ const SCREENS={
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
   fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',roles:['admin','superuser','planner','supervisor','mechanic'],preview:true},   /* maintenance: not for operators or viewers */
   planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
-  ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',admin:true,preview:true},   /* administrators only (button hidden for everyone else) */
+  ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',roles:['admin']},   /* the administrator only, never superusers */   /* administrators only (button hidden for everyone else) */
 };
 const NAV_ICON={
   fleet:svg(html`<path d="M10.5 2a3.5 3.5 0 00-3.2 4.9L2.5 11.7a1.3 1.3 0 001.8 1.8l4.8-4.8A3.5 3.5 0 0014 5.5l-2 2-1.8-.3-.3-1.8 2-2c-.4-.3-.9-.4-1.4-.4z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/>`,20),
@@ -2673,7 +2673,7 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview}){
         ${NOTIF_TYPES.map(t=>html`<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
         ${preview&&html`${sectionLabel('Features in progress')}
           <div class="px-2 pb-1 text-[12px] text-muted">Only you see these until you release them. Then everyone whose role allows it sees them.</div>
-          ${Object.entries(SCREENS).filter(([,s])=>s.preview).map(([k,s])=>html`<${SwitchRow} key=${k} id=${'pv-'+k} label=${'Release '+s.title} desc=${preview.list.includes(k)?'In progress: only you can see it':'Released'+(k==='ideas'?' to superusers':' to everyone with access')}
+          ${Object.entries(SCREENS).filter(([,s])=>s.preview).map(([k,s])=>html`<${SwitchRow} key=${k} id=${'pv-'+k} label=${'Release '+s.title} desc=${preview.list.includes(k)?'In progress: only you can see it':'Released to everyone with access'}
             on=${!preview.list.includes(k)} onChange=${v=>preview.set(v?preview.list.filter(x=>x!==k):[...preview.list,k])}/>`)}`}
         ${onLog&&html`${sectionLabel('Administration')}
           <button class="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);onLog()}}>${Icon.list} Change log</button>`}
