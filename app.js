@@ -2243,20 +2243,158 @@ function ChangeLogDialog({data,onClose,onOpen}){
   </div>`;
 }
 
+/* =====================================================================
+   Ideas: an admin-only board for planning what to add to FraserFlow.
+   Locked with its own password. The board is encrypted in the browser
+   (AES-GCM, key from the password with PBKDF2) and only the encrypted
+   copy is saved, so it can't be read without the password, even from
+   the database. The password can't be recovered.
+   ===================================================================== */
+const VAULT_ITER=250000;
+const vB64=u=>{const a=new Uint8Array(u);let s='';for(let i=0;i<a.length;i+=0x8000)s+=String.fromCharCode.apply(null,a.subarray(i,i+0x8000));return btoa(s)};
+const vBytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function vaultKey(pw,salt){
+  const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:VAULT_ITER,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function vaultSeal(key,salt,obj){const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(JSON.stringify(obj)));
+  return {v:1,salt:vB64(salt),iv:vB64(iv),ct:vB64(ct)}}
+async function vaultOpen(key,vault){const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:vBytes(vault.iv)},key,vBytes(vault.ct));return JSON.parse(new TextDecoder().decode(pt))}
+
+const IDEA_COLS=[['idea','Ideas','Things worth doing one day'],['planned','Planned','Decided, not started'],['doing','In progress','Being built now'],['done','Done','Shipped']];
+const IDEA_PRI={high:['High','hsl(352 70% var(--blk-l))','hsl(352 60% var(--blk-fg-l))'],med:['Medium','hsl(38 85% var(--blk-l))','hsl(30 60% var(--blk-fg-l))'],low:['Low','var(--sunken)','var(--muted)']};
+const IDEA_LOCK_MS=15*60*1000;   /* locks itself after 15 minutes without changes */
+
+function IdeasScreen({data,setData,notify}){
+  const vault=data.ideasVault&&data.ideasVault.ct?data.ideasVault:null;
+  const [key,setKey]=useState(null);const saltRef=useRef(null);const lastCt=useRef(null);
+  const [items,setItems]=useState([]);const [pw,setPw]=useState('');const [pw2,setPw2]=useState('');
+  const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
+  const [q,setQ]=useState('');const [open,setOpen]=useState(null);const [confirmDel,setConfirmDel]=useState(null);
+  const [draft,setDraft]=useState({title:'',priority:'med'});const [chg,setChg]=useState(null);
+  const dirty=useRef(false);
+  const lock=msg=>{setKey(null);setItems([]);saltRef.current=null;lastCt.current=null;setOpen(null);setPw('');setPw2('');setChg(null);if(msg)setErr(msg)};
+  /* save (encrypted) a moment after the last change */
+  useEffect(()=>{if(!key||!dirty.current)return;const t=setTimeout(async()=>{dirty.current=false;
+      try{const v=await vaultSeal(key,saltRef.current,{items});lastCt.current=v.ct;setData(d=>({...d,ideasVault:v}))}catch(e){notify&&notify('The ideas board could not be saved.')}},500);
+    return()=>clearTimeout(t)},[items,key]);
+  /* lock after a while with no changes */
+  useEffect(()=>{if(!key)return;const t=setTimeout(()=>lock('Locked after 15 minutes without changes.'),IDEA_LOCK_MS);return()=>clearTimeout(t)},[items,key]);
+  /* changed by another administrator: open the new copy (or lock if the password was changed) */
+  useEffect(()=>{if(!key||!vault||vault.ct===lastCt.current||dirty.current)return;
+    vaultOpen(key,vault).then(o=>{lastCt.current=vault.ct;saltRef.current=vBytes(vault.salt);setItems((o&&o.items)||[])}).catch(()=>lock('The password was changed. Enter the new one.'))},[vault&&vault.ct]);
+  const upd=fn=>{dirty.current=true;setItems(fn)};
+
+  const create=async e=>{e.preventDefault();setErr('');
+    if(pw.length<8){setErr('Use at least 8 characters.');return}if(pw!==pw2){setErr('The two passwords don’t match.');return}
+    setBusy(true);try{const salt=crypto.getRandomValues(new Uint8Array(16));const k=await vaultKey(pw,salt);const v=await vaultSeal(k,salt,{items:[]});
+      saltRef.current=salt;lastCt.current=v.ct;setData(d=>({...d,ideasVault:v}));setItems([]);setKey(k);setPw('');setPw2('');notify&&notify('Ideas board created and locked with your password')}
+    catch(x){setErr('This browser can’t encrypt the board. Open FraserFlow over https in an up-to-date browser.')}finally{setBusy(false)}};
+  const unlock=async e=>{e.preventDefault();setErr('');if(!pw)return;setBusy(true);
+    try{const salt=vBytes(vault.salt);const k=await vaultKey(pw,salt);const o=await vaultOpen(k,vault);saltRef.current=salt;lastCt.current=vault.ct;setItems((o&&o.items)||[]);setKey(k);setPw('')}
+    catch(x){setErr('That password is wrong.')}finally{setBusy(false)}};
+  const changePw=async e=>{e.preventDefault();setErr('');const a=chg.a||'',b=chg.b||'';
+    if(a.length<8){setErr('Use at least 8 characters.');return}if(a!==b){setErr('The two passwords don’t match.');return}
+    setBusy(true);try{const salt=crypto.getRandomValues(new Uint8Array(16));const k=await vaultKey(a,salt);const v=await vaultSeal(k,salt,{items});
+      saltRef.current=salt;lastCt.current=v.ct;setData(d=>({...d,ideasVault:v}));setKey(k);setChg(null);notify&&notify('Ideas password changed')}
+    catch(x){setErr('The password could not be changed.')}finally{setBusy(false)}};
+
+  const add=e=>{e.preventDefault();const t=draft.title.trim();if(!t)return;const now=Date.now();
+    upd(xs=>[{id:'i'+uid(),title:t,notes:'',status:'idea',priority:draft.priority,created:now,updated:now},...xs]);setDraft({...draft,title:''})};
+  const patch=(id,p)=>upd(xs=>xs.map(x=>x.id===id?{...x,...p,updated:Date.now()}:x));
+  const move=(it,dir)=>{const i=IDEA_COLS.findIndex(c=>c[0]===it.status);const n=IDEA_COLS[i+dir];if(n)patch(it.id,{status:n[0]})};
+
+  const lockIcon=svg(html`<rect x="3" y="7" width="10" height="7" rx="1.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2" stroke="currentColor" stroke-width="1.5" fill="none"/>`,15);
+  const gate=(title,sub,onSubmit,fields,btn)=>html`<div class="flex-1 min-h-0 flex items-start justify-center pt-10 px-4">
+    <form class="panel w-full max-w-[400px] p-6 grid gap-3" onSubmit=${onSubmit}>
+      <div class="flex items-center gap-2"><span class="inline-flex w-9 h-9 rounded-lg items-center justify-center" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>${lockIcon}</span>
+        <div class="font-display text-[18px] font-semibold">${title}</div></div>
+      <p class="text-[13px] text-muted">${sub}</p>
+      ${fields}
+      ${err&&html`<div id="ideas-err" role="alert" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+      <button id="ideas-go" type="submit" class="btn btn-primary justify-center" disabled=${busy}>${busy?'Working…':btn}</button>
+    </form></div>`;
+
+  if(!vault&&!key)return gate('Set up the Ideas board','Only administrators see this page. Choose a password for it: the board is encrypted with it, so nobody can read it without the password. Keep it somewhere safe, because it can’t be recovered.',create,
+    html`<label class="grid gap-1"><span class="label">Password</span><input id="ideas-pw" type="password" autocomplete="new-password" class="field" value=${pw} onInput=${e=>setPw(e.target.value)} autoFocus=${true}/></label>
+      <label class="grid gap-1"><span class="label">Password again</span><input id="ideas-pw2" type="password" autocomplete="new-password" class="field" value=${pw2} onInput=${e=>setPw2(e.target.value)}/></label>`,'Create the board');
+  if(!key)return gate('Ideas board is locked','Enter the Ideas password to open it.',unlock,
+    html`<label class="grid gap-1"><span class="label">Password</span><input id="ideas-pw" type="password" autocomplete="current-password" class="field" value=${pw} onInput=${e=>setPw(e.target.value)} autoFocus=${true}/></label>`,'Unlock');
+
+  const ql=q.trim().toLowerCase();
+  const shown=items.filter(x=>!ql||(x.title+' '+(x.notes||'')).toLowerCase().includes(ql));
+  const pri={high:0,med:1,low:2};
+  return html`<div class="flex-1 min-h-0 flex flex-col gap-3">
+    <section class="panel px-4 py-3 flex flex-wrap items-center gap-3">
+      <span class="inline-flex items-center gap-1.5 text-[12.5px] text-muted" title="Encrypted with the Ideas password">${lockIcon} Only administrators · encrypted</span>
+      <form class="flex flex-1 min-w-[300px] items-center gap-2" onSubmit=${add}>
+        <input id="idea-new" class="field flex-1 min-w-0" placeholder="Add an idea for FraserFlow…" value=${draft.title} onInput=${e=>setDraft({...draft,title:e.target.value})} aria-label="New idea"/>
+        <select id="idea-new-pri" class="field shrink-0" style=${{width:110}} value=${draft.priority} onChange=${e=>setDraft({...draft,priority:e.target.value})} aria-label="Priority">
+          ${Object.entries(IDEA_PRI).map(([k,v])=>html`<option key=${k} value=${k}>${v[0]}</option>`)}</select>
+        <button id="idea-add" class="btn btn-primary shrink-0" type="submit" disabled=${!draft.title.trim()}>${Icon.plus} Add</button>
+      </form>
+      <input id="idea-search" class="field shrink-0" style=${{width:200}} placeholder="Search ideas" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search ideas"/>
+      <button id="idea-chpw" type="button" class="btn" onClick=${()=>{setErr('');setChg(chg?null:{a:'',b:''})}}>${Icon.key} Password</button>
+      <button id="idea-lock" type="button" class="btn" onClick=${()=>lock('')}>${lockIcon} Lock</button>
+    </section>
+    ${chg&&html`<form class="panel px-4 py-3 flex flex-wrap items-end gap-3" onSubmit=${changePw}>
+      <label class="grid gap-1"><span class="label">New password</span><input id="idea-npw" type="password" autocomplete="new-password" class="field" value=${chg.a} onInput=${e=>setChg({...chg,a:e.target.value})}/></label>
+      <label class="grid gap-1"><span class="label">New password again</span><input id="idea-npw2" type="password" autocomplete="new-password" class="field" value=${chg.b} onInput=${e=>setChg({...chg,b:e.target.value})}/></label>
+      <button type="submit" class="btn btn-primary" disabled=${busy}>Change password</button><button type="button" class="btn btn-ghost" onClick=${()=>setChg(null)}>Cancel</button>
+      ${err&&html`<span class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}
+      <span class="w-full text-[12px] text-muted">Other administrators will need the new password. It can’t be recovered if it’s lost.</span></form>`}
+    <div class="flex-1 min-h-0 overflow-auto">
+      <div class="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4 min-h-full items-start">
+        ${IDEA_COLS.map(([st,label,hint],ci)=>{const col=shown.filter(x=>x.status===st).sort((a,b)=>(pri[a.priority]??1)-(pri[b.priority]??1)||b.updated-a.updated);
+          return html`<section key=${st} id=${'ideas-col-'+st} class="panel p-3 grid gap-2 content-start" aria-label=${label}>
+            <div class="flex items-baseline gap-2 px-1"><span class="font-display text-[15px] font-semibold">${label}</span><span class="mono text-[12px] text-faint">${col.length}</span>
+              <span class="flex-1"></span><span class="text-[11.5px] text-faint">${hint}</span></div>
+            ${col.length===0&&html`<div class="text-[12.5px] text-faint px-1 py-3">${ql?'Nothing matches.':st==='idea'?'Add your first idea above.':'Nothing here yet.'}</div>`}
+            ${col.map(it=>{const P=IDEA_PRI[it.priority]||IDEA_PRI.med;const ed=open===it.id;
+              return html`<article key=${it.id} class="rounded-lg border border-line bg-surface p-2.5 grid gap-1.5" style=${ed?{boxShadow:'0 0 0 1.5px var(--accent)'}:null}>
+                ${ed?html`<input class="field field-sm font-semibold" aria-label="Title" value=${it.title} onInput=${e=>patch(it.id,{title:e.target.value})}/>
+                    <textarea class="field" style=${{height:'auto',minHeight:90,padding:'8px 10px',resize:'vertical',fontSize:13}} rows="4" placeholder="Details, why it matters, how it should work…" aria-label="Notes" value=${it.notes||''} onInput=${e=>patch(it.id,{notes:e.target.value})}></textarea>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <select class="field field-sm w-auto" aria-label="Status" value=${it.status} onChange=${e=>patch(it.id,{status:e.target.value})}>${IDEA_COLS.map(c=>html`<option key=${c[0]} value=${c[0]}>${c[1]}</option>`)}</select>
+                      <select class="field field-sm w-auto" aria-label="Priority" value=${it.priority} onChange=${e=>patch(it.id,{priority:e.target.value})}>${Object.entries(IDEA_PRI).map(([k,v])=>html`<option key=${k} value=${k}>${v[0]} priority</option>`)}</select>
+                      <span class="flex-1"></span>
+                      ${confirmDel===it.id
+                        ?html`<button type="button" class="text-[12px] font-semibold" style=${{color:'var(--bad)'}} onClick=${()=>{upd(xs=>xs.filter(x=>x.id!==it.id));setConfirmDel(null);setOpen(null)}}>Delete</button><button type="button" class="text-[12px] text-muted" onClick=${()=>setConfirmDel(null)}>Keep</button>`
+                        :html`<button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>setConfirmDel(it.id)}>Delete</button>`}
+                      <button type="button" class="btn btn-primary" style=${{height:28}} onClick=${()=>{setOpen(null);setConfirmDel(null)}}>Done</button></div>`
+                  :html`<button type="button" class="text-left grid gap-1" onClick=${()=>{setOpen(it.id);setConfirmDel(null)}} title="Edit">
+                      <span class="font-medium text-[13.5px] leading-snug">${it.title}</span>
+                      ${it.notes&&html`<span class="text-[12.5px] text-muted whitespace-pre-line" style=${{display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical',overflow:'hidden'}}>${it.notes}</span>`}</button>
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-[10.5px] font-semibold px-1.5 py-0.5 rounded" style=${{background:P[1],color:P[2]}}>${P[0]}</span>
+                      <span class="text-[11px] text-faint">${new Date(it.updated||it.created).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</span>
+                      <span class="flex-1"></span>
+                      <button type="button" class="w-6 h-6 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken disabled:opacity-30" disabled=${ci===0} onClick=${()=>move(it,-1)} aria-label=${'Move to '+(IDEA_COLS[ci-1]||[])[1]}>${Icon.chevL}</button>
+                      <button type="button" class="w-6 h-6 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken disabled:opacity-30" disabled=${ci===IDEA_COLS.length-1} onClick=${()=>move(it,1)} aria-label=${'Move to '+(IDEA_COLS[ci+1]||[])[1]}>${Icon.chevR}</button></div>`}
+              </article>`})}
+          </section>`})}
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ---------- screens: the left menu ---------- */
 const SCREENS={
   schedule:{label:'Schedule',title:'FraserFlow',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
+  ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',admin:true},   /* administrators only, password locked */
 };
 const NAV_ICON={
+  ideas:svg(html`<path d="M8 1.8a4.4 4.4 0 00-2.6 7.9c.5.4.8 1 .8 1.6v.4h3.6v-.4c0-.6.3-1.2.8-1.6A4.4 4.4 0 008 1.8z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M6.4 13.6h3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,20),
   schedule:svg(html`<rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M5 9h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`,20),
   staff:svg(html`<circle cx="8" cy="5.2" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M3 14c.6-2.7 2.6-4.2 5-4.2s4.4 1.5 5 4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,20),
   machines:svg(html`<path d="M2 11.5V8.5l2-3h4l1.5 3H14v3" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="4.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/><circle cx="11.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/>`,20),
 };
-function NavRail({screen,go}){
+function NavRail({screen,go,isAdmin}){
   return html`<nav class="panel shrink-0 w-[68px] h-full flex flex-col gap-1 p-1.5" aria-label="Screens">
-    ${Object.entries(SCREENS).map(([k,s])=>{const on=screen===k;
+    ${Object.entries(SCREENS).filter(([,s])=>!s.admin||isAdmin).map(([k,s])=>{const on=screen===k;
       return html`<button key=${k} class=${'flex flex-col items-center gap-1 rounded-lg py-2.5 text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
         style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
         ${NAV_ICON[k]}<span>${s.label}</span></button>`})}
@@ -3402,7 +3540,9 @@ function App({boot,live}){
     const t=setInterval(chk,60000);document.addEventListener('visibilitychange',chk);window.addEventListener('focus',chk);
     return()=>{clearInterval(t);document.removeEventListener('visibilitychange',chk);window.removeEventListener('focus',chk)}},[]);
   /* which screen of the left menu is open (remembered in this browser) */
-  const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return SCREENS[v]?v:'schedule'}catch(e){return 'schedule'}});
+  const isAdmin=live.role==='admin';
+  const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return SCREENS[v]&&(!SCREENS[v].admin||isAdmin)?v:'schedule'}catch(e){return 'schedule'}});
+  const boardScreen=screen!=='planning'&&screen!=='ideas';   /* the date controls and + Booking belong to the board screens */
   const goScreen=k=>{setScreen(k);try{localStorage.setItem(KEY+':screen',k)}catch(e){}
     const t=SCREENS[k].tab;if(t)setTab(t);else if(tab==='person'||tab==='machine')setTab('crew')};
   useEffect(()=>{const t=SCREENS[screen].tab;if(t&&tab!==t)setTab(t);else if(!t&&(tab==='person'||tab==='machine'))setTab('crew')},[screen,tab]);
@@ -3507,8 +3647,8 @@ function App({boot,live}){
   const legend=[['Crews',['job','standby','crewtraining']],['Asphalt plant',['plantmaint','plantreduced']],['Machines',['onjob','service','repair','inspection']],['Staff',['leave','sick','rdo','training']]];
 
   return html`<div class="shell h-full flex gap-4">
-    <${NavRail} screen=${screen} go=${goScreen}/>
-    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
+    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin}/>
+    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
         <${Sidebar} screen=${screen} notify=${setToast} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
@@ -3519,7 +3659,7 @@ function App({boot,live}){
           <img src=${BRAND_OVAL} alt="Alex Fraser Group" class="block h-[50px] w-auto select-none" draggable="false"/>
           <img src=${BRAND_TAG} alt="Building greener roads" class="brand-tag hidden xl:block h-[30px] w-auto select-none" draggable="false"/>
         </div>
-        ${(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
+        ${screen!=='ideas'&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
           title=${on?'Hide Settings':'Crews, plant, mixes, seal, trucks and subcontractors'}
           style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.gear} Settings</button>`)(panel&&tab!=='jobs')}
         ${screen==='schedule'&&(on=>html`<button id="btn-jobs" class="btn" onClick=${toggleJobs} aria-pressed=${on} aria-controls="resources-panel"
@@ -3531,7 +3671,7 @@ function App({boot,live}){
           ${!live.canEdit&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change anything">View only</span>`}
         </div>
         <div class="flex-1"></div>
-        <div class="seg" role="group" aria-label="View length">
+        ${boardScreen&&html`<div class="seg" role="group" aria-label="View length">
           <button aria-pressed=${view===7} onClick=${()=>pickView(7)}>Week</button>
           <button aria-pressed=${view===14} onClick=${()=>pickView(14)}>14 days</button>
           <button aria-pressed=${view===30} onClick=${()=>pickView(30)}>30 days</button>
@@ -3541,13 +3681,13 @@ function App({boot,live}){
           <button class="btn px-2" onClick=${()=>move(-1)} aria-label=${view===60?'Previous month':'Previous'}>${Icon.chevL}</button>
           <button class="btn" onClick=${()=>setAnchor(mondayOf(TODAY))} disabled=${atToday}>Today</button>
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
-        </div>
+        </div>`}
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
-        <button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>
+        ${boardScreen&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
         <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${live.role==='admin'?()=>setLogOpen(true):null}/>
       </header>
-
+      ${screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:html`
       <section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
         <${Stat} k="Crews on jobs today" v=${`${crewsOnJob.length}/${vis('crew').length}`} sub=${`${util}% of crew-days booked`}/>
         <${Stat} k="Machines down today" v=${downToday.length} sub=${downToday.length?downToday.map(m=>m.name).join(', '):'all available'} tone=${downToday.length?'var(--bad)':null}/>
@@ -3568,7 +3708,7 @@ function App({boot,live}){
           <span class="flex-1"></span>
           <span>Signed in as ${live.user.email}${live.canEdit?'':' · view only'}</span>
         </div>
-      </section>
+      </section>`}
     </main>
 
     ${changePw&&html`<${SetPassword} sb=${live.sb} onDone=${()=>{setChangePw(false);setToast('Password changed')}} onCancel=${()=>setChangePw(false)}/>`}
@@ -3595,7 +3735,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
