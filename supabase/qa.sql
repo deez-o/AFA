@@ -36,7 +36,9 @@ create table if not exists public.qa_packs (
   submitted_by   uuid,
   submitted_name text
 );
-alter table public.qa_packs add column if not exists label text;   -- e.g. "Second work area"; the first pack usually has none
+alter table public.qa_packs add column if not exists label text;
+-- the rest of the QA pack, each form added when it's needed: { lot:{...}, aqr, hold, diagram, laying, env, costs }
+alter table public.qa_packs add column if not exists forms jsonb not null default '{}'::jsonb;   -- e.g. "Second work area"; the first pack usually has none
 alter table public.qa_packs drop constraint if exists qa_packs_block_id_shift_date_key;   -- (an earlier version allowed one pack per shift)
 create index if not exists qa_packs_date on public.qa_packs (shift_date);
 create index if not exists qa_packs_shift on public.qa_packs (block_id, shift_date);
@@ -71,7 +73,7 @@ create trigger qa_packs_rules before insert or update on public.qa_packs for eac
 create table if not exists public.qa_signatures (
   id         uuid primary key,                 -- made on the phone (signing works without reception)
   pack_id    uuid not null references public.qa_packs(id) on delete cascade,
-  form       text not null check (form in ('jsa','toolbox')),
+  form       text not null,
   user_id    uuid,
   name       text not null,
   company    text,
@@ -79,6 +81,9 @@ create table if not exists public.qa_signatures (
   signed_at  timestamptz not null default now(),
   added_by   uuid default auth.uid()
 );
+-- which form a signature is on: jsa, toolbox, aqr_afa, aqr_client, hold_afa, hold_client, env, laying, diagram …
+alter table public.qa_signatures drop constraint if exists qa_signatures_form_check;
+alter table public.qa_signatures add constraint qa_signatures_form_check check (form ~ '^[a-z][a-z_]{1,29}$');
 create unique index if not exists qa_signatures_once on public.qa_signatures (pack_id, form, user_id) where user_id is not null;
 create index if not exists qa_signatures_pack on public.qa_signatures (pack_id);
 

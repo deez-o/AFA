@@ -64,15 +64,15 @@ const crewName=(data,id)=>(data.resources.find(r=>r.id===id)||{}).name||'Crew';
 function prestartHint(data,b,k){const ids=b.plantIds||[];if(!ids.length)return null;const A=data.alerts||{};
   const done=ids.filter(id=>A[id]&&A[id].last_prestart_at&&iso(new Date(A[id].last_prestart_at))===k).length;return {done,of:ids.length}}
 function newPack(data,e,myName){const b=e.b,j=jobOf(data,b)||{};const crew=data.resources.find(r=>r.id===e.crewId);
-  return {id:newId(),block_id:b.id,shift_date:e.k,job_id:b.jobId||null,crew_id:e.crewId,status:'draft',toolbox:null,
+  return {id:newId(),block_id:b.id,shift_date:e.k,job_id:b.jobId||null,crew_id:e.crewId,status:'draft',toolbox:null,forms:{},
     jsa:{v:JSA_VERSION,type:isSealCrew(crew)?'seal':'asphalt',night:b.shift==='night',
       head:{job_no:j.projectNo||'',location:j.address||j.name||'',customer:j.customer||'',date:e.k,time:hhmm(),foreman:'',supervisor:myName||'',client_rep:'',truck_controller:'',uhf:'',first_aid:''},
       ticks:{},quality:{serial:''},extra:[],checks:{}}}}
 /* another pack for the same shift: a copy of the latest one (not its signatures), as a new draft */
 const packsFor=(packs,e)=>packs.filter(p=>p.block_id===e.b.id&&p.shift_date===e.k).sort((a,b)=>String(a.created_at||'9').localeCompare(String(b.created_at||'9')));
 const packName=(p,list)=>p.label||(list.length>1?`Pack ${list.indexOf(p)+1}`:'QA pack');
-function copyPack(prev,n){const c=JSON.parse(JSON.stringify({jsa:prev.jsa||{},toolbox:prev.toolbox||null}));c.jsa.head={...(c.jsa.head||{}),time:hhmm()};
-  return {id:newId(),block_id:prev.block_id,shift_date:prev.shift_date,job_id:prev.job_id,crew_id:prev.crew_id,status:'draft',label:`Pack ${n+1}`,jsa:c.jsa,toolbox:c.toolbox}}
+function copyPack(prev,n){const c=JSON.parse(JSON.stringify({jsa:prev.jsa||{},toolbox:prev.toolbox||null,forms:prev.forms||{}}));c.jsa.head={...(c.jsa.head||{}),time:hhmm()};
+  return {id:newId(),block_id:prev.block_id,shift_date:prev.shift_date,job_id:prev.job_id,crew_id:prev.crew_id,status:'draft',label:`Pack ${n+1}`,jsa:c.jsa,toolbox:c.toolbox,forms:c.forms}}
 const newToolbox=(pack,myName)=>({location:(pack.jsa.head||{}).location||'',whs_rep:'',supervisor:myName||'',manager:'',topics:[{topic:'',action:'',date:'',who:''}],training:'',meeting_point:''});
 
 /* ---------- waiting on this phone until there's reception ---------- */
@@ -132,16 +132,16 @@ function SignPad({padRef,onInk}){
   return html`<canvas id="qa-pad" ref=${cv} class="w-full rounded-lg border border-line block" style=${{height:170,background:'#fff',touchAction:'none',cursor:'crosshair'}}
     aria-label="Sign here" onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onPointerLeave=${up}></canvas>`;
 }
-function SignDialog({title,mine,myName,onSave,onClose}){
-  const pad=useRef(null);const [ink,setInk]=useState(false);const [f,setF]=useState({name:'',company:''});const [err,setErr]=useState('');
+function SignDialog({title,mine,myName,onSave,onClose,sub,note,company=''}){
+  const pad=useRef(null);const [ink,setInk]=useState(false);const [f,setF]=useState({name:'',company});const [err,setErr]=useState('');
   const save=()=>{if(!mine&&!f.name.trim()){setErr('Enter their name.');return}if(!pad.current||pad.current.empty()){setErr('Sign in the box.');return}
     onSave({name:mine?myName:f.name.trim(),company:mine?AFA:(f.company.trim()||AFA),signature:pad.current.png()})};
-  return html`<${Modal} title=${title} sub=${mine?`Signing as ${myName} · ${AFA}`:'A visitor or subbie signs here, on your phone'} onClose=${onClose}
+  return html`<${Modal} title=${title} sub=${mine?`Signing as ${myName} · ${AFA}`:(sub||'A visitor or subbie signs here, on your phone')} onClose=${onClose}
     foot=${html`${err&&html`<span id="qa-sign-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="qa-sign-save" type="button" class="btn btn-primary" onClick=${save}>Sign</button>`}>
     <div class="grid gap-3">
       ${!mine&&html`<div class="grid sm:grid-cols-2 gap-3"><${Fld} label="Name"><input id="qa-v-name" class="field" style=${fs} value=${f.name} onInput=${e=>setF({...f,name:e.target.value})}/><//>
         <${Fld} label="Company"><input id="qa-v-company" class="field" style=${fs} placeholder=${AFA} value=${f.company} onInput=${e=>setF({...f,company:e.target.value})}/><//></div>`}
-      <p class="text-[12px] text-muted">${AGREE}</p>
+      ${note!==null&&html`<p class="text-[12px] text-muted">${note||AGREE}</p>`}
       <div class="grid gap-1"><div class="flex items-center"><span class="label flex-1">Sign here</span>${ink&&html`<button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>pad.current.clear()}>Clear</button>`}</div>
         <${SignPad} padRef=${pad} onInk=${setInk}/></div>
     </div><//>`;
@@ -161,19 +161,19 @@ const statusOf=(p,sigs)=>!p?['Not started','var(--muted)']:p.status==='submitted
 const chip=([t,c])=>html`<span class="inline-flex items-center text-[11.5px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap qa-status" style=${{color:c,background:'var(--sunken)',boxShadow:`inset 0 0 0 1px ${c}`}}>${t}</span>`;
 
 /* ---------- signatures for one form ---------- */
-function SignOff({form,pack,sigs,ctx,canEdit,open}){
+function SignOff({form,pack,sigs,ctx,canEdit,open,me:allowMe=true,other='Visitor / subbie signs',max=0,empty='Nobody has signed yet.'}){
   const {me,myName,canFill,save}=ctx;const list=sigs.filter(s=>s.pack_id===pack.id&&s.form===form).sort((a,b)=>String(a.signed_at).localeCompare(String(b.signed_at)));
   const mine=list.find(s=>s.user_id===me);const live=pack.status==='draft';
   return html`<div class="grid grid-cols-[minmax(0,1fr)] gap-2" id=${'qa-signoff-'+form}>
-    ${list.length===0?html`<div class="text-[12.5px] text-muted">Nobody has signed yet.</div>`
+    ${list.length===0?html`<div class="text-[12.5px] text-muted">${empty}</div>`
       :html`<div class="grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2">${list.map(s=>html`<div key=${s.id} class="rounded-lg border border-line p-2 flex items-center gap-3 qa-sig">
         <img src=${s.signature} alt=${'Signature of '+s.name} class="h-12 w-28 object-contain rounded bg-white border border-line shrink-0"/>
         <div class="min-w-0 flex-1"><div class="text-[13px] font-medium truncate">${s.name}${s.pending?html` <span class="text-[11px] font-normal" style=${{color:'hsl(38 90% 40%)'}}>· waiting to send</span>`:''}</div>
           <div class="text-[11.5px] text-muted truncate">${s.company||AFA} · ${fmtDT(s.signed_at)}</div></div>
         ${live&&(s.user_id===me||(canFill&&!s.user_id))&&html`<button type="button" class="text-[12px] text-muted hover:text-ink qa-unsign" onClick=${()=>save({t:'unsig',id:s.id})}>Remove</button>`}</div>`)}</div>`}
-    ${live&&html`<div class="flex flex-wrap gap-2">
-      ${!mine&&html`<button type="button" class="btn btn-primary qa-sign-me" style=${{height:40}} onClick=${()=>open({k:'sign',form,mine:true})}>Sign as ${myName}</button>`}
-      ${canEdit&&html`<button type="button" class="btn qa-sign-visitor" style=${{height:40}} onClick=${()=>open({k:'sign',form,mine:false})}>${Icon.plus} Visitor / subbie signs</button>`}</div>`}
+    ${live&&!(max&&list.length>=max)&&html`<div class="flex flex-wrap gap-2">
+      ${allowMe&&!mine&&html`<button type="button" class="btn btn-primary qa-sign-me" style=${{height:40}} onClick=${()=>open({k:'sign',form,mine:true})}>Sign as ${myName}</button>`}
+      ${canEdit&&other&&html`<button type="button" class="btn qa-sign-visitor" style=${{height:40}} onClick=${()=>open({k:'sign',form,mine:false,label:other})}>${Icon.plus} ${other}</button>`}</div>`}
   </div>`;
 }
 
@@ -184,7 +184,7 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
   useEffect(()=>{if(!tm.current)setP(pack)},[pack]);   /* someone else's change arrives (not while we're typing) */
   const canEdit=canFill&&p.status==='draft';
   const upd=fn=>setP(x=>{const n=fn(x);clearTimeout(tm.current);tm.current=setTimeout(()=>{tm.current=null;save({t:'pack',row:rowOf(n)})},600);return n});
-  const rowOf=x=>({id:x.id,block_id:x.block_id,shift_date:x.shift_date,job_id:x.job_id,crew_id:x.crew_id,status:x.status,label:x.label||null,jsa:x.jsa,toolbox:x.toolbox});
+  const rowOf=x=>({id:x.id,block_id:x.block_id,shift_date:x.shift_date,job_id:x.job_id,crew_id:x.crew_id,status:x.status,label:x.label||null,jsa:x.jsa,toolbox:x.toolbox,forms:x.forms||{}});
   const J=p.jsa||{};const setJ=f=>upd(x=>({...x,jsa:{...x.jsa,...f(x.jsa)}}));
   const ticks=J.ticks||{};const nT=allTicks().filter(k=>ticks[k]).length;
   const hint=prestartHint(data,e.b,e.k);
@@ -194,6 +194,11 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
   const reopen=()=>{const n={...p,status:'draft'};setP(n);save({t:'pack',row:rowOf(n)})};
   const pdf=async()=>{setBusy(true);try{await packPdf(data,e,p,sigs)}catch(x){setMsg(errMsg(x))}finally{setBusy(false)}};
   const T=p.toolbox;const setT=f=>upd(x=>({...x,toolbox:{...x.toolbox,...f(x.toolbox)}}));
+  const FF=window.FFQF;const forms=p.forms||{};
+  const fctx={data,e,pack:p,sigs,ctx,canEdit,open:setDlg,set:(id,f)=>upd(x=>({...x,forms:{...(x.forms||{}),[id]:typeof f==='function'?f((x.forms||{})[id]):f}})),
+    add:id=>upd(x=>{const fs0=x.forms||{};const lot=fs0.lot||FF.newLot(data,e,x);return {...x,forms:{...fs0,lot,[id]:FF.byId[id].make(data,e,x,ctx)}}}),
+    remove:id=>upd(x=>{const n={...(x.forms||{})};delete n[id];return {...x,forms:n}})};
+  const added=FF?FF.FORMS.filter(f=>forms[f.id]):[];const missing=FF?FF.FORMS.filter(f=>!forms[f.id]):[];
   const head=J.head||{};
   const body=html`<div class="grid grid-cols-[minmax(0,1fr)] gap-3 pb-4" id="qa-pack">
     <div class="panel px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -241,6 +246,13 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
       <p class="text-[12px] text-muted">${AGREE}</p>
       <${SignOff} form="jsa" pack=${p} sigs=${sigs} ctx=${ctx} canEdit=${canEdit} open=${setDlg}/><//>
 
+    ${FF&&(added.length>0||canEdit)&&html`<section class="panel px-4 py-3 grid gap-2" id="qa-forms">
+      <div class="flex flex-wrap items-baseline gap-2"><span class="font-display text-[15.5px] font-semibold">Other QA forms</span><span class="text-[12px] text-muted">${added.length?added.map(f=>f.short).join(' · '):'Add the forms this shift needs'}</span></div>
+      ${canEdit&&missing.length>0&&html`<div class="flex flex-wrap gap-1.5">${missing.map(f=>html`<button key=${f.id} type="button" id=${'qa-add-'+f.id} class="btn" style=${{height:34,fontSize:12.5}} onClick=${()=>fctx.add(f.id)}>${Icon.plus} ${f.label}</button>`)}</div>`}
+    </section>`}
+    ${FF&&added.length>0&&html`<${FF.LotCard} f=${fctx}/>`}
+    ${FF&&added.map(f=>html`<${f.Editor} key=${f.id} f=${fctx}/>`)}
+
     ${T?html`<${Card} title="Toolbox meeting" id="qa-toolbox" sub=${`${sigs.filter(s=>s.pack_id===p.id&&s.form==='toolbox').length} attended`}>
         <fieldset disabled=${!canEdit} class="m-0 p-0 border-0 min-w-0 grid gap-3">
           <div class="grid grid-cols-2 gap-3">${[['location','Location'],['whs_rep','WHS&E rep'],['supervisor','Supervisor'],['manager','Manager']].map(([k,l])=>html`<${Fld} key=${k} label=${l}><input id=${'qa-tb-'+k} class="field" style=${fs} value=${T[k]||''} onInput=${ev=>setT(()=>({[k]:ev.target.value}))}/><//>`)}</div>
@@ -267,7 +279,8 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
       ${canEdit&&html`<button id="qa-submit" type="button" class="btn btn-primary" onClick=${submit}>Submit pack</button>`}
       ${isManager&&p.status==='submitted'&&html`<button id="qa-reopen" type="button" class="btn" onClick=${reopen}>Reopen</button>`}
     </div>
-    ${dlg&&dlg.k==='sign'&&html`<${SignDialog} title=${dlg.form==='jsa'?'Sign the JSA':'Sign the toolbox meeting'} mine=${dlg.mine} myName=${myName}
+    ${dlg&&dlg.k==='sign'&&html`<${SignDialog} key=${dlg.form+(dlg.mine?':me':':other')} title=${dlg.title||(dlg.form==='jsa'?'Sign the JSA':dlg.form==='toolbox'?'Sign the toolbox meeting':(FF&&FF.signTitle(dlg.form))||'Sign')} mine=${dlg.mine} myName=${myName}
+      sub=${dlg.label&&dlg.form!=='jsa'&&dlg.form!=='toolbox'?dlg.label+', on your phone':null} note=${dlg.form==='jsa'||dlg.form==='toolbox'?'':((FF&&FF.signNote(dlg.form))||null)} company=${dlg.form&&/client/.test(dlg.form)?((forms.lot||{}).client||''):''}
       onClose=${()=>setDlg(null)} onSave=${s=>{save({t:'sig',row:{id:newId(),pack_id:p.id,form:dlg.form,user_id:dlg.mine?ctx.me:null,name:s.name,company:s.company,signature:s.signature,signed_at:new Date().toISOString()}});setDlg(null)}}/>`}
   </div>`;
   return body;
@@ -402,6 +415,8 @@ async function packPdf(data,e,p,sigs){
       doc.setFont('helvetica','normal');doc.setFontSize(8.2);txt(s.name,M+1.2,y+6.5);txt(s.company||AFA,M+cw3[0]+1.2,y+6.5);doc.setFontSize(7.2);txt(fmtDT(s.signed_at),M+cw3[0]+cw3[1]+1.2,y+6.5);
       img(s.signature,M+cw3[0]+cw3[1]+cw3[2]+2,y+.6,26,9.8,'sig-'+s.id);y+=11})};
   y+=2;sigTable('jsa','Sign-off');
+  /* the other forms, in the order of the paper pack */
+  if(window.FFQF)for(const f of window.FFQF.FORMS)if((p.forms||{})[f.id]&&f.pdf){f.pdf({doc,J:p,p,data,e,sigs,M,txt,img,box,page,newPage:o=>{doc.addPage('a4',o||'l');},AFA,fmtDT})}
   /* toolbox meeting (optional), portrait like the paper */
   const T=p.toolbox;
   if(T){doc.addPage('a4','p');const w=210;page('TOOLBOX MEETING RECORD FORM');doc.setFontSize(8.5);doc.setTextColor(22,24,29);
@@ -427,5 +442,5 @@ async function packPdf(data,e,p,sigs){
 
 window.QaScreen=QaScreen;
 window.QaBookingTab=QaBookingTab;
-window.FFQ={JSA_SECTIONS,packPdf,allTicks};
+window.FFQ={JSA_SECTIONS,packPdf,allTicks,Card,Tick,SignOff,SignPad,newId,AFA,chip};
 })();

@@ -84,6 +84,7 @@ select pg_temp.refused($$insert into public.qa_signatures (id, pack_id, form, us
 select pg_temp.refused($$insert into public.qa_signatures (id, pack_id, form, user_id, name, signature) values ('20000000-0000-0000-0000-000000000006','10000000-0000-0000-0000-000000000001','jsa','00000000-0000-0000-0000-0000000000b3','x','not a picture')$$, 'a signature that isn’t a picture');
 insert into public.qa_signatures (id, pack_id, form, user_id, name, signature) select '20000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-000000000001','toolbox','00000000-0000-0000-0000-0000000000b3','x',png from sig;
 select pg_temp.ok(true, 'the same operator also signs the toolbox meeting');
+select pg_temp.refused($$insert into public.qa_signatures (id, pack_id, form, user_id, name, signature) select '20000000-0000-0000-0000-00000000000a','10000000-0000-0000-0000-000000000001','Not a form!','00000000-0000-0000-0000-0000000000b3','x',png from sig$$, 'a signature on a made-up form name');
 delete from public.qa_signatures where id = '20000000-0000-0000-0000-000000000007';
 select pg_temp.ok(not exists (select 1 from public.qa_signatures where id = '20000000-0000-0000-0000-000000000007'), 'an operator can take back their own signature before it’s submitted');
 delete from public.qa_signatures where id = '20000000-0000-0000-0000-000000000001';
