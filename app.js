@@ -1672,7 +1672,7 @@ async function buildTonnesWorkbook(data,startKey,endKey){
   }
   const mixes=[...new Set(rows.flatMap(r=>[...r.mix.keys()]))].sort(sortMix);
   const nCols=2+mixes.length;
-  const wb=new ExcelJS.Workbook();wb.creator='Crew & Plant Roster';wb.created=new Date();
+  const wb=new ExcelJS.Workbook();wb.creator='FraserFlow';wb.created=new Date();
   const ws=wb.addWorksheet('Paving tonnes',{views:[{state:'frozen',ySplit:4,xSplit:2}],
     pageSetup:{orientation:mixes.length>5?'landscape':'portrait',fitToPage:true,fitToWidth:1,fitToHeight:0}});
   ws.mergeCells(1,1,1,Math.max(nCols,3));ws.mergeCells(2,1,2,Math.max(nCols,3));
@@ -1704,7 +1704,7 @@ async function buildTonnesWorkbook(data,startKey,endKey){
 async function buildWeeklyTonnagesWorkbook(data,startKey,endKey){
   const rapOf=mix=>num((data.mixRap||{})[mix]);
   const ExcelJS=await loadExcelJS();
-  const wb=new ExcelJS.Workbook();wb.creator='Crew & Plant Roster';wb.created=new Date();
+  const wb=new ExcelJS.Workbook();wb.creator='FraserFlow';wb.created=new Date();
   const ARGB=h=>'FF'+h;
   const DAY_COL={0:'4472C4',1:'ED7D31',2:'FFC000',3:'70AD47',4:'C00000',5:'00B0F0',6:'7030A0'}; /* Sun..Sat header colours */
   const DAYNAMES=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -1964,7 +1964,7 @@ async function buildForecastWorkbook(data,months){
   const C={ink:'FF1F2329',muted:'FF5E636E',accent:'FFE0670F',soft:'FFFDEBDB',line:'FFDADDE2',white:'FFFFFFFF',band:'FFF4F5F7',ok:'FF2F855A'};
   const thin={style:'thin',color:{argb:C.line}};const box={top:thin,left:thin,bottom:thin,right:thin};
   const fill=c=>({type:'pattern',pattern:'solid',fgColor:{argb:c}});
-  const wb=new ExcelJS.Workbook();wb.creator='Crew & Plant Roster';wb.created=new Date();
+  const wb=new ExcelJS.Workbook();wb.creator='FraserFlow';wb.created=new Date();
   const T=months.map(([y,m])=>monthTotals(data,y,m));
   const span=`${T[0].label} – ${T[T.length-1].label}`;
   const title=(ws,text,n)=>{ws.mergeCells(1,1,1,n);ws.mergeCells(2,1,2,n);
@@ -2245,7 +2245,7 @@ function ChangeLogDialog({data,onClose,onOpen}){
 
 /* ---------- screens: the left menu ---------- */
 const SCREENS={
-  schedule:{label:'Schedule',title:'Crew & Plant Roster',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
+  schedule:{label:'Schedule',title:'FraserFlow',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
 };
@@ -3520,7 +3520,7 @@ function App({boot,live}){
           style=${panel?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.list} Resources</button>
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setProgram(true)} title="Daily program PDFs for each job on a day">${Icon.download} Daily program</button>`}
         <div class="flex items-center gap-2 min-w-0">
-          <h1 class="font-display text-[20px] font-semibold tracking-tight truncate">${SCR.title}</h1>
+          <h1 class="font-display text-[20px] font-semibold tracking-tight truncate">${SCR.title==='FraserFlow'?html`Fraser<span style=${{color:'var(--accent)'}}>Flow</span>`:SCR.title}</h1>
           ${!live.canEdit&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change anything">View only</span>`}
         </div>
         <div class="flex-1"></div>
@@ -3675,7 +3675,7 @@ window.claude=window.claude||{use:async name=>name==='downloads'?{save:async({fi
 function Centered({children}){
   return html`<div class="min-h-full flex items-center justify-center p-6"><div class="panel w-full max-w-[400px] p-6 flex flex-col gap-4">
     <div class="flex items-center gap-3"><img src=${BRAND_OVAL} alt="Alex Fraser Group" class="block h-[44px] w-auto"/>
-      <span class="font-display text-[19px] font-semibold">Crew & Plant Roster</span></div>
+      <span class="font-display text-[19px] font-semibold">Fraser<span style=${{color:'var(--accent)'}}>Flow</span></span></div>
     ${children}</div></div>`;
 }
 function Login({sb}){
