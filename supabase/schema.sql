@@ -3,15 +3,20 @@
 -- It is safe to run again: it only creates what is missing.
 
 -- 1. People who can sign in, and what they may do --------------------------
---    admin:   everything, and can change other people's roles
+--    admin:     everything, and can change other people's roles; also sees features still in progress
+--    superuser: the same as admin, except features the admin keeps to themselves while working on them
 --    planner: can add, change and delete anything on the roster
 --    viewer:  can look but not change anything (the default for new people)
 create table if not exists public.profiles (
   id         uuid primary key references auth.users(id) on delete cascade,
   email      text,
-  role       text not null default 'viewer' check (role in ('admin','planner','viewer')),
+  role       text not null default 'viewer' check (role in ('admin','superuser','planner','supervisor','mechanic','operator','viewer')),
   created_at timestamptz not null default now()
 );
+
+-- the full list of roles (for databases set up before superuser, supervisor, mechanic and operator existed)
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check check (role in ('admin','superuser','planner','supervisor','mechanic','operator','viewer'));
 
 -- every new sign-in account gets a profile automatically
 create or replace function public.handle_new_user()
@@ -38,18 +43,24 @@ returns text language sql stable security definer set search_path = public as $$
   select role from public.profiles where id = auth.uid()
 $$;
 
+-- administrators and superusers have the same powers
+create or replace function public.is_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(public.my_role() in ('admin','superuser'), false)
+$$;
+
 alter table public.profiles enable row level security;
 
 drop policy if exists "read own profile, admins read all" on public.profiles;
 create policy "read own profile, admins read all" on public.profiles
   for select to authenticated
-  using (id = auth.uid() or public.my_role() = 'admin');
+  using (id = auth.uid() or public.is_admin());
 
 drop policy if exists "admins change roles" on public.profiles;
 create policy "admins change roles" on public.profiles
   for update to authenticated
-  using (public.my_role() = 'admin')
-  with check (public.my_role() = 'admin');
+  using (public.is_admin())
+  with check (public.is_admin());
 
 -- 2. The roster ------------------------------------------------------------
 --    One row per record. kind is one of:
@@ -90,18 +101,18 @@ create policy "signed-in people read the roster" on public.items
 drop policy if exists "planners add" on public.items;
 create policy "planners add" on public.items
   for insert to authenticated
-  with check (public.my_role() in ('admin','planner'));
+  with check (public.my_role() in ('admin','superuser','planner'));
 
 drop policy if exists "planners change" on public.items;
 create policy "planners change" on public.items
   for update to authenticated
-  using (public.my_role() in ('admin','planner'))
-  with check (public.my_role() in ('admin','planner'));
+  using (public.my_role() in ('admin','superuser','planner'))
+  with check (public.my_role() in ('admin','superuser','planner'));
 
 drop policy if exists "planners delete" on public.items;
 create policy "planners delete" on public.items
   for delete to authenticated
-  using (public.my_role() in ('admin','planner'));
+  using (public.my_role() in ('admin','superuser','planner'));
 
 -- 3. Live updates: other people's changes appear without refreshing ----------
 do $$
@@ -120,7 +131,7 @@ end $$;
 drop policy if exists "signed-in people read the roster" on public.items;
 create policy "signed-in people read the roster" on public.items
   for select to authenticated
-  using (kind not in ('idea','suggestion') or public.my_role() = 'admin');
+  using (kind not in ('idea','suggestion') or public.is_admin());
 
 drop policy if exists "everyone suggests" on public.items;
 create policy "everyone suggests" on public.items
@@ -130,16 +141,16 @@ create policy "everyone suggests" on public.items
 drop policy if exists "planners add" on public.items;
 create policy "planners add" on public.items
   for insert to authenticated
-  with check (public.my_role() = 'admin'
+  with check (public.is_admin()
     or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));
 
 drop policy if exists "planners change" on public.items;
 create policy "planners change" on public.items
   for update to authenticated
-  using (public.my_role() = 'admin' or (public.my_role() = 'planner' and kind not in ('idea','suggestion')))
-  with check (public.my_role() = 'admin' or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));
+  using (public.is_admin() or (public.my_role() = 'planner' and kind not in ('idea','suggestion')))
+  with check (public.is_admin() or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));
 
 drop policy if exists "planners delete" on public.items;
 create policy "planners delete" on public.items
   for delete to authenticated
-  using (public.my_role() = 'admin' or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));
+  using (public.is_admin() or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));

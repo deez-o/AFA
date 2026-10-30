@@ -508,7 +508,7 @@ function Plans({ctx,open}){
 /* ---------- the screen ---------- */
 function FleetScreen({data,live,notify}){
   const sb=live.sb;const role=live.role;
-  const perms={work:['admin','supervisor','mechanic'].includes(role),verify:['admin','supervisor'].includes(role),mgr:role==='admin'};
+  const perms={work:['admin','superuser','supervisor','mechanic'].includes(role),verify:['admin','superuser','supervisor'].includes(role),mgr:role==='admin'||role==='superuser'};
   const {db,err,reload}=useMaint(sb);
   const [tab,setTab]=useState(()=>{try{return localStorage.getItem(KEY+':fleet-tab')||'dash'}catch(e){return 'dash'}});
   const pickTab=t=>{setTab(t);try{localStorage.setItem(KEY+':fleet-tab',t)}catch(e){}};

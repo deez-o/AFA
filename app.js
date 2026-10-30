@@ -2600,14 +2600,19 @@ function LazyFleet(props){
   return html`<${window.FleetScreen} ...${props}/>`;
 }
 /* ---------- screens: the left menu ---------- */
+/* features still being worked on: only the admin sees them until they are released to everyone with access (Settings menu) */
+const PREVIEW_DEFAULT=['fleet','ideas'];
+const previewOf=d=>d&&Array.isArray(d.previewOnly)?d.previewOnly:PREVIEW_DEFAULT;
+const screenOK=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=role==='admin'||role==='superuser';
+  return (!s.admin||admin)&&(!s.roles||s.roles.includes(role))&&(!s.preview||role==='admin'||!previewOf(d).includes(k))};
 const SCREENS={
   schedule:{label:'Schedule',title:'FraserFlow',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   jobs:{label:'Jobs',title:'Jobs',only:[],legend:[],head:''},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
-  fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',roles:['admin','planner','supervisor','mechanic']},   /* maintenance: not for operators or viewers */
+  fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',roles:['admin','superuser','planner','supervisor','mechanic'],preview:true},   /* maintenance: not for operators or viewers */
   planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
-  ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',admin:true},   /* administrators only (button hidden for everyone else) */
+  ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',admin:true,preview:true},   /* administrators only (button hidden for everyone else) */
 };
 const NAV_ICON={
   fleet:svg(html`<path d="M10.5 2a3.5 3.5 0 00-3.2 4.9L2.5 11.7a1.3 1.3 0 001.8 1.8l4.8-4.8A3.5 3.5 0 0014 5.5l-2 2-1.8-.3-.3-1.8 2-2c-.4-.3-.9-.4-1.4-.4z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/>`,20),
@@ -2618,12 +2623,12 @@ const NAV_ICON={
   planning:svg(html`<path d="M4 2.5h6l2.5 2.5v8.5H4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 7h4.5M6 9.5h4.5M6 12h2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`,20),
   machines:svg(html`<path d="M2 11.5V8.5l2-3h4l1.5 3H14v3" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="4.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/><circle cx="11.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/>`,20),
 };
-function NavRail({screen,go,isAdmin,role,badge={}}){
+function NavRail({screen,go,isAdmin,role,data,badge={}}){
   const btn=([k,s])=>{const on=screen===k;
     return html`<button key=${k} class=${'flex flex-col items-center gap-1 rounded-lg py-2.5 text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
       style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
-      <span class="relative inline-flex">${NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${s.label}</span></button>`};
-  const all=Object.entries(SCREENS).filter(([,s])=>(!s.admin||isAdmin)&&(!s.roles||s.roles.includes(role)));
+      <span class="relative inline-flex">${NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${s.label}</span>${role==='admin'&&s.preview&&previewOf(data).includes(k)&&html`<span class="-mt-0.5 text-[8.5px] font-bold uppercase tracking-wide px-1 rounded leading-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}} title="Only you can see this while it is in progress">Preview</span>`}</button>`};
+  const all=Object.entries(SCREENS).filter(([k])=>screenOK(k,role,data));
   /* admin-only screens (Ideas) sit at the bottom of the bar */
   return html`<nav class="panel shrink-0 w-[68px] h-full flex flex-col gap-1 p-1.5" aria-label="Screens">
     ${all.filter(([,s])=>!s.admin).map(btn)}
@@ -2642,7 +2647,7 @@ function SwitchRow({id,label,desc,on,onChange}){
     </span>
   </label>`;
 }
-function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog}){
+function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview}){
   const [open,setOpen]=useState(false);
   const ref=React.useRef(null);
   useEffect(()=>{if(!open)return;
@@ -2659,13 +2664,17 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog}){
       ${account&&html`<div class="px-4 py-3 border-b border-line">
         <div class="text-[12px] text-muted">Signed in as</div>
         <div class="text-[13.5px] font-semibold truncate">${account.email}</div>
-        <div class="text-[11.5px] text-muted mt-0.5">${({admin:'Administrator',planner:'Planner (can edit)',supervisor:'Supervisor (maintenance)',mechanic:'Mechanic (maintenance)',operator:'Operator'})[account.role]||'View only'}</div>
+        <div class="text-[11.5px] text-muted mt-0.5">${({admin:'Administrator',superuser:'Superuser (full access)',planner:'Planner (can edit)',supervisor:'Supervisor (maintenance)',mechanic:'Mechanic (maintenance)',operator:'Operator'})[account.role]||'View only'}</div>
       </div>`}
       <div class="p-2">
         ${sectionLabel('Appearance')}
         <${SwitchRow} id="set-dark" label="Dark mode" on=${theme==='dark'} onChange=${()=>toggleTheme()}/>
         ${sectionLabel('Notifications')}
         ${NOTIF_TYPES.map(t=>html`<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
+        ${preview&&html`${sectionLabel('Features in progress')}
+          <div class="px-2 pb-1 text-[12px] text-muted">Only you see these until you release them. Then everyone whose role allows it sees them.</div>
+          ${Object.entries(SCREENS).filter(([,s])=>s.preview).map(([k,s])=>html`<${SwitchRow} key=${k} id=${'pv-'+k} label=${'Release '+s.title} desc=${preview.list.includes(k)?'In progress: only you can see it':'Released'+(k==='ideas'?' to superusers':' to everyone with access')}
+            on=${!preview.list.includes(k)} onChange=${v=>preview.set(v?preview.list.filter(x=>x!==k):[...preview.list,k])}/>`)}`}
         ${onLog&&html`${sectionLabel('Administration')}
           <button class="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-[13px] text-left" onClick=${()=>{setOpen(false);onLog()}}>${Icon.list} Change log</button>`}
       </div>
@@ -4631,12 +4640,13 @@ function App({boot,live}){
     const t=setInterval(chk,60000);document.addEventListener('visibilitychange',chk);window.addEventListener('focus',chk);
     return()=>{clearInterval(t);document.removeEventListener('visibilitychange',chk);window.removeEventListener('focus',chk)}},[]);
   /* which screen of the left menu is open (remembered in this browser) */
-  const isAdmin=live.role==='admin';
-  const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return SCREENS[v]&&(!SCREENS[v].admin||isAdmin)&&(!SCREENS[v].roles||SCREENS[v].roles.includes(live.role))?v:'schedule'}catch(e){return 'schedule'}});
+  const isAdmin=live.role==='admin'||live.role==='superuser';   /* superusers have the admin's powers */
+  const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return screenOK(v,live.role,boot)?v:'schedule'}catch(e){return 'schedule'}});
   const boardScreen=screen!=='planning'&&screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet';   /* the date controls and + Booking belong to the board screens */
   const goScreen=k=>{setScreen(k);try{localStorage.setItem(KEY+':screen',k)}catch(e){}
     const t=SCREENS[k].tab;if(t)setTab(t);else if(tab==='person'||tab==='machine')setTab('crew')};
   useEffect(()=>{const t=SCREENS[screen].tab;if(t&&tab!==t)setTab(t);else if(!t&&(tab==='person'||tab==='machine'))setTab('crew')},[screen,tab]);
+  useEffect(()=>{if(!screenOK(screen,live.role,data))goScreen('schedule')},[screen,data.previewOnly]);
   const SCR=SCREENS[screen];
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
@@ -4738,11 +4748,11 @@ function App({boot,live}){
   const legend=[['Crews',['job','standby','crewtraining']],['Asphalt plant',['plantmaint','plantreduced']],['Machines',['onjob','service','repair','inspection']],['Staff',['leave','sick','rdo','training']]];
 
   return html`<div class="shell h-full flex gap-4">
-    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} badge=${{ideas:(data.suggestions||[]).length}}/>
-    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onMaint=${['admin','planner','supervisor','mechanic'].includes(live.role)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
+    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} data=${data} badge=${{ideas:(data.suggestions||[]).length}}/>
+    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onMaint=${screenOK('fleet',live.role,data)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
-        <${Sidebar} screen=${screen} notify=${setToast} onMaint=${['admin','planner','supervisor','mechanic'].includes(live.role)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
+        <${Sidebar} screen=${screen} notify=${setToast} onMaint=${screenOK('fleet',live.role,data)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
 
     <main class="flex-1 min-w-0 h-full flex flex-col gap-3">
       <header class="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -4775,7 +4785,7 @@ function App({boot,live}){
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
         ${boardScreen&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
-        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${live.role==='admin'?()=>setLogOpen(true):null}/>
+        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l}))}:null}/>
       </header>
 
       ${screen==='fleet'?html`<${LazyFleet} data=${data} live=${live} notify=${setToast}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
@@ -4829,7 +4839,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion'],['ideas','idea'],['plans','plan'],['planImgs','plan_img']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault','ideasPub','planQuick','planSteps'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault','ideasPub','previewOnly','planQuick','planSteps'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
@@ -5019,7 +5029,7 @@ function Root(){
   if(phase==='login')return html`<${Login} sb=${sb}/>`;
   if(phase==='setpw')return html`<${SetPassword} sb=${sb} first=${true} onDone=${()=>setPhase('loading')}/>`;
   if(phase==='empty')return html`<${FirstRun} canEdit=${role!=='viewer'} onStart=${start}/>`;
-  return html`<${App} boot=${boot} live=${{sb,user:session.user,role,canEdit:role==='admin'||role==='planner'}}/>`;
+  return html`<${App} boot=${boot} live=${{sb,user:session.user,role,canEdit:role==='admin'||role==='superuser'||role==='planner'}}/>`;
 }
 
 

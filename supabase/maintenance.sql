@@ -8,7 +8,7 @@
 -- No costs, rates or prices are stored anywhere in this module.
 
 -- 1. Roles ------------------------------------------------------------------
---    admin:      everything, and authorises maintenance (service plans, closing work orders, corrections)
+--    admin / superuser: everything, and authorises maintenance (service plans, closing work orders, corrections)
 --    planner:    the schedule, as before; can see maintenance
 --    supervisor: reviews and verifies maintenance work, allocates work orders
 --    mechanic:   records services, meter readings and work order progress
@@ -16,19 +16,19 @@
 --    viewer:     look only
 alter table public.profiles drop constraint if exists profiles_role_check;
 alter table public.profiles add constraint profiles_role_check
-  check (role in ('admin','planner','supervisor','mechanic','operator','viewer'));
+  check (role in ('admin','superuser','planner','supervisor','mechanic','operator','viewer'));
 
 create or replace function public.maint_can_work()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','supervisor','mechanic'), false)
+  select coalesce(public.my_role() in ('admin','superuser','supervisor','mechanic'), false)
 $$;
 create or replace function public.maint_can_verify()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','supervisor'), false)
+  select coalesce(public.my_role() in ('admin','superuser','supervisor'), false)
 $$;
 create or replace function public.maint_is_manager()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() = 'admin', false)
+  select coalesce(public.my_role() in ('admin','superuser'), false)
 $$;
 
 -- a maintenance record must point at a machine on the roster when it is created

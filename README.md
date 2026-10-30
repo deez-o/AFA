@@ -71,11 +71,16 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 ### Roles
 | Role | Schedule | Maintenance |
 | --- | --- | --- |
-| `admin` | Everything | Everything: service plans, verify & close, meter corrections |
+| `admin` | Everything | Everything: service plans, verify & close, meter corrections. Also sees features still in progress |
+| `superuser` | Everything | Everything an admin can do, except features the admin hasn't released yet |
 | `planner` | Edit | View |
 | `supervisor` | View | Record work, verify & close work orders |
 | `mechanic` | View | Record services, readings and work order progress |
 | `operator` | View | Prestarts (coming next) |
 | `viewer` | View | None |
+
+**Features in progress:** Fleet & Maintenance and Ideas start out visible to the `admin` only (marked *Preview* in the left menu). Release each one from the settings menu (top right) under *Features in progress*.
+
+After pulling this version, run `supabase/schema.sql` and then `supabase/maintenance.sql` again in the SQL Editor: both are safe to re-run and add the new roles.
 
 Set a role the same way as before, e.g. `update public.profiles set role = 'mechanic' where email = 'name@yourcompany.com.au';`
