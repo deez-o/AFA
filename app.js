@@ -2674,7 +2674,7 @@ const screenOK0=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=r
   return (!s.admin||admin)&&(!s.roles||s.roles.includes(role))&&(!s.preview||role==='admin'||!previewOf(d).includes(k))};
 /* operators only see Prestarts, once it is released to them */
 const screenOK=(k,role,d)=>screenOK0(k,role,d)&&!(role==='prestart'&&k!=='prestarts'&&screenOK0('prestarts',role,d))
-  &&!(k==='machines'&&screenOK0('fleet',role,d));   /* with Fleet, machines are managed and booked there (Fleet › Machines and Calendar) */
+  &&k!=='machines';   /* machines are managed and booked in Fleet (Fleet › Machines and Calendar); the old Machines screen is gone */
 /* Fleet's sections; the Calendar is the machines' schedule board */
 const FLEET_TABS=[['dash','Dashboard'],['mc','Machines'],['cal','Calendar'],['wo','Work orders'],['df','Defects'],['plans','Service plans'],['ps','Prestarts'],['cl','Checklists'],['rp','Reports']];
 const homeScreen=(role,d)=>role==='prestart'&&screenOK('prestarts',role,d)?'prestarts':'schedule';
