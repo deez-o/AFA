@@ -53,6 +53,10 @@ function buildModel(data,db){
   const meters=new Map();
   [...db.meter_readings].sort((a,b)=>a.read_at<b.read_at?-1:a.read_at>b.read_at?1:(a.created_at<b.created_at?-1:1))
     .forEach(r=>{const m=meters.get(r.asset_id)||{};m[r.kind]={value:+r.value,at:r.read_at};meters.set(r.asset_id,m)});
+  /* every reading per machine and meter, oldest first: for the history and the yearly average */
+  const readsBy=new Map();
+  [...db.meter_readings].sort((a,b)=>a.read_at<b.read_at?-1:a.read_at>b.read_at?1:(a.created_at<b.created_at?-1:1))
+    .forEach(r=>{const o=readsBy.get(r.asset_id)||{hours:[],km:[]};o[r.kind].push(r);readsBy.set(r.asset_id,o)});
   const recs=[...db.service_records].sort((a,b)=>a.done_on<b.done_on?1:a.done_on>b.done_on?-1:(a.created_at<b.created_at?1:-1));
   const machines=data.resources.filter(r=>r.type==='machine');
   const lastPs=new Map();(db.prestarts||[]).forEach(p=>{if(!lastPs.has(p.asset_id))lastPs.set(p.asset_id,p)});   /* newest first */
@@ -84,10 +88,18 @@ function buildModel(data,db){
     const status=out?'out':serv?'service':due?'due':'ok';
     const next=plans.filter(x=>x.first).sort((a,b)=>({overdue:0,soon:1,ok:2}[a.state]-{overdue:0,soon:1,ok:2}[b.state])||((a.first.left/Math.max(a.first.warn,1))-(b.first.left/Math.max(b.first.warn,1))))[0]||null;
     const crew=m.crewId?data.resources.find(r=>r.id===m.crewId):null;
-    return {m,p,mt:meterType(m),cur:meters.get(m.id)||{},plans,wos,open,status,next,crew,retired:!!(p&&p.retired),ps:lastPs.get(m.id)||null,restr,defects,
+    const rd=readsBy.get(m.id)||{hours:[],km:[]};
+    return {m,p,mt:meterType(m),cur:meters.get(m.id)||{},reads:rd,use:{hours:usageOf(rd.hours),km:usageOf(rd.km)},plans,wos,open,status,next,crew,retired:!!(p&&p.retired),ps:lastPs.get(m.id)||null,restr,defects,
       overdue:plans.filter(x=>x.state==='overdue').length,soon:plans.filter(x=>x.state==='soon').length,last:recs.find(r=>r.asset_id===m.id)||null}});
   return {assets,byId:new Map(assets.map(a=>[a.m.id,a])),recs,meters,today}
 }
+/* average use per year from a meter's readings (since its last replacement): needs two readings at least 30 days apart */
+function usageOf(rs){
+  const i=rs.map(r=>r.source).lastIndexOf('replacement');const xs=i>=0?rs.slice(i):rs;if(xs.length<2)return null;
+  const a=xs[0],b=xs[xs.length-1];const days=(new Date(b.read_at)-new Date(a.read_at))/864e5;const d=+b.value- +a.value;
+  if(days<30||d<0)return null;return {perYear:d/days*365.25,days,from:a,to:b,n:xs.length}}
+const perYrTxt=(a,k)=>{const u=a.use[k];if(!u)return null;return k==='hours'?`${fmtN(Math.round(u.perYear))} h/yr`:`${fmtN(Math.round(u.perYear/100)*100)} km/yr`};
+const useTxt=a=>[a.mt!=='km'&&(perYrTxt(a,'hours')||'– h/yr'),a.mt!=='hours'&&(perYrTxt(a,'km')||'– km/yr')].filter(Boolean).join(' · ');
 const stDot=(s,size=10)=>html`<span class="inline-block rounded-full shrink-0" style=${{width:size,height:size,background:ST[s][1]}} title=${ST[s][0]}></span>`;
 const stChip=s=>html`<span class="inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap" style=${{color:ST[s][1],background:'var(--sunken)',boxShadow:`inset 0 0 0 1px ${ST[s][1]}`}}>${stDot(s,7)} ${ST[s][0]}</span>`;
 const planChip=s=>html`<span class="text-[11px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap" style=${{color:PLAN_ST[s][1],background:'var(--sunken)',boxShadow:`inset 0 0 0 1px ${PLAN_ST[s][1]}`}}>${PLAN_ST[s][0]}</span>`;
@@ -173,7 +185,7 @@ function ProfileDialog({ctx,a,onClose}){
     setBusy(false);if(error){setErr(errMsg(error));return}notify('Machine details saved');reload();onClose()};
   return html`<${Modal} title="Machine details" sub=${`${a.m.name} · ${a.m.sub||''}${a.m.rego?' · '+a.m.rego:''}`} onClose=${onClose}
     foot=${html`${err&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="pf-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>Save</button>`}>
-    <p class="text-[12px] text-muted mb-3">Fleet number, description, category and rego come from Settings › Machines and aren’t changed here.</p>
+    
     <div class="grid sm:grid-cols-2 gap-3">
       <${Fld} label="Make"><input id="pf-make" class="field" style=${fs} placeholder="e.g. Dynapac" value=${f.make} onInput=${e=>setF({...f,make:e.target.value})}/><//>
       <${Fld} label="Model"><input class="field" style=${fs} placeholder="e.g. CC1200" value=${f.model} onInput=${e=>setF({...f,model:e.target.value})}/><//>
@@ -364,13 +376,14 @@ function AssetPanel({ctx,a,onClose,open,behind}){
       ${window.FFD&&html`<${window.FFD.RestrictionBanner} ctx=${ctx} a=${a}/>`}
       <div class="grid gap-3 md:grid-cols-3">
         <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
-          <div class="flex items-center gap-2"><span class="label flex-1">Machine details</span>${perms.work&&html`<button id="ap-profile" type="button" class="text-[12px] text-muted hover:text-ink inline-flex items-center gap-1" onClick=${()=>open({k:'profile',a})}>${Icon.pencil} Edit</button>`}</div>
-          ${[['Make / model',[p.make,p.model].filter(Boolean).join(' ')],['Year',p.year],['Serial',p.serial],['Meters',a.mt==='both'?'Hours and km':a.mt==='km'?'Kilometres':'Engine hours']].map(([k,v])=>html`<div key=${k} class="flex gap-2 text-[12.5px]"><span class="text-muted w-[92px] shrink-0">${k}</span><span class=${v?'':'text-faint'}>${v||'–'}</span></div>`)}
+          <div class="flex items-center gap-2"><span class="label flex-1">Machine details</span>${(perms.work||ctx.canEdit)&&html`<button id="ap-profile" type="button" class="text-[12px] text-muted hover:text-ink inline-flex items-center gap-1" onClick=${()=>open({k:'machine',a})}>${Icon.pencil} Edit</button>`}</div>
+          ${[['Make / model',[p.make,p.model].filter(Boolean).join(' ')],['Year',p.year],['Serial',p.serial],['Meters',a.mt==='both'?'Hours and km':a.mt==='km'?'Kilometres':'Engine hours'],['Notes',p.notes]].map(([k,v])=>html`<div key=${k} class="flex gap-2 text-[12.5px]"><span class="text-muted w-[92px] shrink-0">${k}</span><span class=${v?'':'text-faint'}>${v||'–'}</span></div>`)}
         </section>
         <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
           <div class="flex items-center gap-2"><span class="label flex-1">Meters</span>${perms.work&&html`<button id="ap-reading" type="button" class="text-[12px] text-muted hover:text-ink inline-flex items-center gap-1" onClick=${()=>open({k:'reading',a})}>${Icon.plus} Reading</button>`}</div>
           ${a.mt!=='km'&&html`<div class="font-display text-[20px] font-semibold tnum">${a.cur.hours?fmtN(a.cur.hours.value)+' h':'–'}</div><div class="text-[11.5px] text-muted -mt-1">${a.cur.hours?'read '+fmtTs(a.cur.hours.at):'no hours reading yet'}</div>`}
           ${a.mt!=='hours'&&html`<div class="font-display text-[20px] font-semibold tnum">${a.cur.km?fmtN(a.cur.km.value)+' km':'–'}</div><div class="text-[11.5px] text-muted -mt-1">${a.cur.km?'read '+fmtTs(a.cur.km.at):'no km reading yet'}</div>`}
+          <div class="text-[12px] mt-1" id="ap-use"><span class="text-muted">Average:</span> ${(a.use.hours||a.use.km)?useTxt(a):html`<span class="text-faint">needs two readings 30+ days apart</span>`}</div>
         </section>
         <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
           <span class="label">Next service</span>
@@ -395,6 +408,8 @@ function AssetPanel({ctx,a,onClose,open,behind}){
                 <button type="button" class="btn" style=${{height:30}} onClick=${()=>open({k:'service',a,plan:x.plan})}>Record service</button></div>`}
             </div>`})}</div>`}
       </section>
+
+      <${ReadingsHistory} a=${a}/>
 
       ${a.open.length>0&&html`<section class="grid gap-2"><h3 class="font-display text-[15px] font-semibold">Open work orders</h3>
         <div class="rounded-lg border border-line divide-y" style=${{borderColor:'var(--line)'}}>${a.open.map(w=>html`<button key=${w.id} type="button" class="w-full text-left px-3 py-2 flex flex-wrap items-center gap-2 hover:bg-sunken" style=${{borderColor:'var(--line)'}} onClick=${()=>open({k:'wo',wo:w})}>
@@ -454,7 +469,7 @@ function Dashboard({ctx,open}){
         <span class="hidden lg:inline-flex items-center gap-3 text-[11.5px] text-muted">${Object.entries(ST).map(([k,v])=>html`<span key=${k} class="inline-flex items-center gap-1">${stDot(k,8)} ${v[0]}</span>`)}</span>
       </div>
       <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="fl-table">
-        <thead><tr class="text-left">${['','Machine','Category','Rego','Crew','Meters','Next service','Work orders & defects',...(ctx.db.p3?['Last prestart']:[])].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+        <thead><tr class="text-left">${['','Machine','Category','Rego','Crew','Meters','Avg / year','Next service','Work orders & defects',...(ctx.db.p3?['Last prestart']:[])].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
         <tbody>${list.map(a=>html`<tr key=${a.m.id} class="border-t border-line cursor-pointer hover:bg-sunken" tabindex="0" onClick=${()=>open({k:'asset',id:a.m.id})} onKeyDown=${e=>{if(e.key==='Enter')open({k:'asset',id:a.m.id})}}>
             <td class="py-2 pl-3 pr-1">${stDot(a.status)}</td>
             <td class="py-2 px-3"><div class="font-medium">${a.m.name}</div><div class="text-[11.5px] text-muted truncate max-w-[240px]">${a.m.sub||''}${a.p&&(a.p.make||a.p.model)?' · '+[a.p.make,a.p.model].filter(Boolean).join(' '):''}</div></td>
@@ -462,10 +477,11 @@ function Dashboard({ctx,open}){
             <td class="py-2 px-3 mono whitespace-nowrap">${a.m.rego||html`<span class="text-faint">–</span>`}</td>
             <td class="py-2 px-3 whitespace-nowrap">${a.crew?a.crew.name:html`<span class="text-faint">–</span>`}</td>
             <td class="py-2 px-3 mono tnum whitespace-nowrap">${meterTxt(a)}</td>
+            <td class="py-2 px-3 tnum whitespace-nowrap fl-use" title=${(['hours','km'].map(k=>a.use[k]&&`${k==='hours'?'Hours':'Km'}: ${fmtN(+a.use[k].from.value)} → ${fmtN(+a.use[k].to.value)} over ${Math.round(a.use[k].days)} days (${a.use[k].n} readings)`).filter(Boolean).join('\n'))||'Needs two readings at least 30 days apart'}>${(a.use.hours||a.use.km)?useTxt(a):html`<span class="text-faint">–</span>`}</td>
             <td class="py-2 px-3">${a.next?html`<div class="whitespace-nowrap">${a.next.plan.name} ${planChip(a.next.state)}</div><div class="text-[11.5px] text-muted whitespace-nowrap">${a.next.first.dueTxt} · ${a.next.first.leftTxt}</div>`:html`<span class="text-faint">${a.plans.length?'Last service not set':'No plan'}</span>`}</td>
             <td class="py-2 px-3 whitespace-nowrap">${a.open.length?html`<span class="font-medium">${a.open.length} open</span>`:html`<span class="text-faint">–</span>`}${a.restr.length?html` <span class="text-[10.5px] font-bold uppercase tracking-wide px-1 rounded" style=${{background:'hsl(0 72% 47%)',color:'#fff'}} title="Restricted: must not be used">Restricted</span>`:a.defects.length?html` <span class="text-[11.5px] text-muted">· ${a.defects.length} defect${a.defects.length===1?'':'s'}</span>`:''}</td>
             ${ctx.db.p3&&html`<td class="py-2 px-3 whitespace-nowrap">${a.ps?html`<span class="inline-flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full" style=${{background:window.FFP?window.FFP.RES[a.ps.result][1]:'var(--muted)'}}></span>${localDay(a.ps.submitted_at)===M.today?new Date(a.ps.submitted_at).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'}):fmtShort(new Date(a.ps.submitted_at))}${a.ps.result!=='pass'?html` <span class="text-[11px] font-semibold" style=${{color:window.FFP?window.FFP.RES[a.ps.result][1]:''}}>${a.ps.result==='unsafe'?'do not operate':a.ps.failed+' failed'}</span>`:''}</span>`:html`<span class="text-faint">–</span>`}</td>`}</tr>`)}
-          ${!list.length&&html`<tr><td colspan="9" class="px-3 py-6 text-center text-muted">No machines match.</td></tr>`}</tbody></table></div>
+          ${!list.length&&html`<tr><td colspan="10" class="px-3 py-6 text-center text-muted">No machines match.</td></tr>`}</tbody></table></div>
     </section>
   </div>`;
 }
@@ -496,35 +512,131 @@ function WorkOrders({ctx,open}){
   </section>`;
 }
 
-function Calendar({ctx,open}){
-  const {M,data}=ctx;const [mon,setMon]=useState(()=>{const d=new Date(TODAY);d.setDate(1);return iso(d)});
-  const first=parse(mon);const start=mondayOf(first);const days=[...Array(42)].map((_,i)=>iso(addDays(start,i)));
-  const month=first.getMonth();
-  const ev=new Map();const put=(k,e)=>{if(!ev.has(k))ev.set(k,[]);ev.get(k).push(e)};
-  ctx.db.work_orders.filter(w=>w.start_date&&w.status!=='cancelled').forEach(w=>{const a=M.byId.get(w.asset_id);for(let d=parse(w.start_date);iso(d)<=(w.end_date||w.start_date);d=addDays(d,1))
-    put(iso(d),{t:`${a?a.m.name:'?'} · ${w.title}`,c:w.wo_type==='service'?'hsl(252 60% 55%)':'hsl(318 55% 50%)',done:!WO_OPEN(w.status),go:()=>open({k:'wo',wo:w})})});
-  data.blocks.filter(b=>!b.fromMaintenance&&KINDS[b.kind]&&KINDS[b.kind].for==='machine'&&b.kind!=='onjob').forEach(b=>{const m=M.byId.get(b.resourceId);if(!m)return;
-    for(let d=parse(b.start);iso(d)<=b.end;d=addDays(d,1))put(iso(d),{t:`${m.m.name} · ${b.title||KINDS[b.kind].label}`,c:b.kind==='inspection'?'hsl(170 55% 38%)':'hsl(252 40% 60%)',go:()=>open({k:'asset',id:m.m.id})})});
-  M.assets.filter(a=>!a.retired).forEach(a=>a.plans.forEach(x=>{const d=x.parts.find(p=>p.k==='days');if(d&&!a.open.some(w=>w.plan_id===x.plan.id))put(d.due,{t:`Due: ${a.m.name} · ${x.plan.name}`,c:x.state==='overdue'?'hsl(0 72% 47%)':'hsl(30 90% 46%)',due:true,go:()=>open({k:'asset',id:a.m.id})})}));
-  const step=n=>{const d=parse(mon);d.setMonth(d.getMonth()+n);setMon(iso(d))};
-  return html`<section class="panel p-3 grid gap-2">
-    <div class="flex items-center gap-2"><button type="button" class="btn px-2" onClick=${()=>step(-1)} aria-label="Previous month">${Icon.chevL}</button>
-      <div class="font-display text-[16px] font-semibold min-w-[160px] text-center">${MONTHS_LONG[month]} ${first.getFullYear()}</div>
-      <button type="button" class="btn px-2" onClick=${()=>step(1)} aria-label="Next month">${Icon.chevR}</button>
-      <button type="button" class="btn" onClick=${()=>{const d=new Date(TODAY);d.setDate(1);setMon(iso(d))}}>This month</button>
-      <span class="flex-1"></span>
-      <span class="hidden md:inline-flex gap-3 text-[11.5px] text-muted">${[['Scheduled service','hsl(252 60% 55%)'],['Repair / breakdown','hsl(318 55% 50%)'],['Inspection','hsl(170 55% 38%)'],['Service due (by date)','hsl(30 90% 46%)']].map(([l,c])=>html`<span key=${l} class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm" style=${{background:c}}></span>${l}</span>`)}</span></div>
-    <div class="grid grid-cols-7 gap-px rounded-lg overflow-hidden border border-line" style=${{background:'var(--line)'}}>
-      ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>html`<div key=${d} class="label text-center py-1.5" style=${{background:'var(--sunken)'}}>${d}</div>`)}
-      ${days.map(k=>{const d=parse(k);const es=ev.get(k)||[];const isT=k===M.today;
-        return html`<div key=${k} class="min-h-[96px] p-1.5 grid content-start gap-1" style=${{background:d.getMonth()===month?'var(--surface)':'var(--sunken)',opacity:d.getMonth()===month?1:.65}}>
-          <div class="text-[11.5px] font-semibold mono" style=${isT?{color:'var(--accent)'}:null}>${d.getDate()}</div>
-          ${es.slice(0,4).map((e,i)=>html`<button key=${i} type="button" class="text-left text-[11px] leading-tight rounded px-1 py-0.5 truncate" title=${e.t}
-              style=${{background:e.due?'transparent':e.c,color:e.due?e.c:'#fff',boxShadow:e.due?`inset 0 0 0 1px ${e.c}`:null,opacity:e.done?.55:1}} onClick=${e.go}>${e.t}</button>`)}
-          ${es.length>4&&html`<span class="text-[11px] text-muted">+${es.length-4} more</span>`}</div>`})}
-    </div>
-    <p class="text-[12px] text-muted">Services due by hours or km aren’t on the calendar: their date depends on use. They show on the dashboard as they get close.</p>
+/* every meter reading for a machine: a small chart per meter, and the list */
+const SRC={manual:'Entered',service:'Service',prestart:'Prestart',work_order:'Work order',correction:'Correction',replacement:'New meter'};
+function ReadingsChart({rs,unit}){
+  const W=600,H=110,P=6;const pts=rs.map(r=>({t:new Date(r.read_at).getTime(),v:+r.value,r}));
+  const t0=pts[0].t,t1=pts[pts.length-1].t||t0+1,v0=Math.min(...pts.map(p=>p.v)),v1=Math.max(...pts.map(p=>p.v));
+  const x=t=>P+(t1===t0?W/2:(t-t0)/(t1-t0)*(W-2*P)),y=v=>H-P-(v1===v0?(H-2*P)/2:(v-v0)/(v1-v0)*(H-2*P));
+  return html`<svg viewBox=${`0 0 ${W} ${H}`} class="w-full h-[110px] block" preserveAspectRatio="none" role="img" aria-label=${`${unit==='h'?'Hours':'Km'} readings over time`}>
+    <polyline fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke" points=${pts.map(p=>`${x(p.t)},${y(p.v)}`).join(' ')}/>
+    ${pts.map((p,i)=>html`<circle key=${i} cx=${x(p.t)} cy=${y(p.v)} r="3" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"><title>${fmtTs(p.r.read_at)}: ${fmtN(p.v)} ${unit}</title></circle>`)}</svg>`;
+}
+function ReadingsHistory({a}){
+  const kinds=['hours','km'].filter(k=>a.reads[k].length&&(a.mt==='both'||a.mt===k||a.reads[k].length));
+  const [k,setK]=useState(kinds[0]||'hours');const [all,setAll]=useState(false);
+  const kk=kinds.includes(k)?k:kinds[0];
+  if(!kk)return html`<section class="grid gap-2" id="ap-readings"><h3 class="font-display text-[15px] font-semibold">Meter readings</h3><div class="text-[12.5px] text-muted">No readings yet. Readings come from prestarts, services and the + Reading button.</div></section>`;
+  const rs=a.reads[kk];const unit=kk==='hours'?'h':'km';const desc=[...rs].reverse();const shown=all?desc:desc.slice(0,8);const u=a.use[kk];
+  return html`<section class="grid gap-2" id="ap-readings">
+    <div class="flex flex-wrap items-center gap-2"><h3 class="font-display text-[15px] font-semibold">Meter readings</h3><span class="text-[12px] text-muted">${rs.length} reading${rs.length===1?'':'s'}${u?` · average ${perYrTxt(a,kk)} over ${u.days>=730?Math.round(u.days/365.25)+' years':Math.round(u.days/30.4)+' months'}`:''}</span>
+      <span class="flex-1"></span>${kinds.length>1&&html`<div class="seg"><button type="button" aria-pressed=${kk==='hours'} onClick=${()=>setK('hours')}>Hours</button><button type="button" aria-pressed=${kk==='km'} onClick=${()=>setK('km')}>Km</button></div>`}</div>
+    <div class="rounded-lg border border-line p-2">${rs.length>1?html`<${ReadingsChart} rs=${rs} unit=${unit}/>`:html`<div class="text-[12px] text-muted p-2">One reading so far. The chart starts with the second.</div>`}</div>
+    <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="ap-read-table"><thead><tr class="text-left">${['Date','Reading','Change','Source','Note'].map(h=>html`<th key=${h} class="label font-normal py-1.5 px-2 whitespace-nowrap">${h}</th>`)}</tr></thead>
+      <tbody>${shown.map((r,i)=>{const prev=desc[desc.indexOf(r)+1];const ch=prev&&r.source!=='replacement'?+r.value- +prev.value:null;
+        return html`<tr key=${r.id||i} class="border-t border-line"><td class="py-1.5 px-2 whitespace-nowrap">${fmtTs(r.read_at)}</td><td class="py-1.5 px-2 tnum whitespace-nowrap font-medium">${fmtN(+r.value)} ${unit}</td>
+          <td class="py-1.5 px-2 tnum whitespace-nowrap text-muted">${ch==null?'–':(ch>=0?'+':'')+fmtN(ch)}</td><td class="py-1.5 px-2 whitespace-nowrap">${SRC[r.source]||r.source}</td><td class="py-1.5 px-2 text-muted">${r.note||''}</td></tr>`})}</tbody></table></div>
+    ${desc.length>8&&html`<div><button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>setAll(!all)}>${all?'Show fewer':`Show all ${desc.length}`}</button></div>`}
   </section>`;
+}
+
+/* Machines: the fleet list, added, changed and removed here (they are the schedule's machine rows) */
+function MachinesTab({ctx,open}){
+  const {M,data,perms,canEdit}=ctx;
+  const [q,setQ]=useState('');const [cat,setCat]=useState('');const [ret,setRet]=useState(false);const [dlg,setDlg]=useState(null);
+  const ql=q.trim().toLowerCase();const nRet=M.assets.filter(a=>a.retired).length;
+  const hit=a=>(ret||!a.retired)&&(!cat||machCatOf(a.m).toLowerCase()===cat.toLowerCase())&&(!ql||[a.m.name,a.m.sub,a.m.rego,machCatOf(a.m),a.crew&&a.crew.name,a.p&&a.p.make,a.p&&a.p.model,a.p&&a.p.serial].join(' ').toLowerCase().includes(ql));
+  const shown=data.resources.filter(r=>r.type==='machine').filter(r=>{const a=M.byId.get(r.id);return a&&hit(a)});
+  const groups=groupMachines(shown,data);
+  const canAdd=canEdit;const canDel=perms.mgr;
+  return html`<section class="panel flex flex-col min-h-0" id="fl-machines">
+    <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
+      <input id="mc-search" class="field" style=${{...fs,width:240}} placeholder="Search machine, rego, make, serial" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search machines"/>
+      <select class="field w-auto" style=${fs} value=${cat} onChange=${e=>setCat(e.target.value)} aria-label="Category"><option value="">All categories</option>${machineCatsOf(data).map(c=>html`<option key=${c} value=${c}>${c}</option>`)}</select>
+      ${nRet>0&&html`<label class="inline-flex items-center gap-1.5 text-[12.5px] cursor-pointer"><input type="checkbox" class="w-4 h-4" checked=${ret} onChange=${e=>setRet(e.target.checked)}/>Show retired (${nRet})</label>`}
+      <span class="text-[12.5px] text-muted">${shown.length} machine${shown.length===1?'':'s'}</span><span class="flex-1"></span>
+      ${canAdd&&ctx.onImportMachines&&html`<button id="mc-import" type="button" class="btn" onClick=${ctx.onImportMachines}>${Icon.download} Import list</button>`}
+      ${canAdd&&html`<button id="mc-add" type="button" class="btn btn-primary" onClick=${()=>setDlg({isNew:true})}>${Icon.plus} Add machine</button>`}
+    </div>
+    <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="mc-table">
+      <thead><tr class="text-left">${['','Machine','Rego','Crew','Make / model','Year','Meters','Avg / year',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+      ${groups.map(g=>html`<tbody key=${g.key}><tr class="border-t border-line bg-sunken"><td colspan="9" class="py-1.5 px-3 label">${g.label} <span class="text-faint font-normal">${g.rows.length}</span></td></tr>
+        ${g.rows.map(r=>{const a=M.byId.get(r.id);const p=a.p||{};return html`<tr key=${r.id} class="border-t border-line hover:bg-sunken" data-machine=${r.name}>
+          <td class="py-2 pl-3 pr-1 w-0">${stDot(a.status)}</td>
+          <td class="py-2 px-3"><button type="button" class="text-left mc-open" onClick=${()=>open({k:'asset',id:r.id})}><span class="block font-medium hover:underline">${r.name}${a.retired?html` <span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted">Retired</span>`:''}</span><span class="block text-[11.5px] text-muted truncate max-w-[280px]">${r.sub||''}</span></button></td>
+          <td class="py-2 px-3 mono whitespace-nowrap">${r.rego||html`<span class="text-faint">–</span>`}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${a.crew?a.crew.name:html`<span class="text-faint">–</span>`}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${[p.make,p.model].filter(Boolean).join(' ')||html`<span class="text-faint">–</span>`}</td>
+          <td class="py-2 px-3 tnum">${p.year||html`<span class="text-faint">–</span>`}</td>
+          <td class="py-2 px-3 tnum whitespace-nowrap">${meterTxt(a)}</td>
+          <td class="py-2 px-3 tnum whitespace-nowrap">${(a.use.hours||a.use.km)?useTxt(a):html`<span class="text-faint">–</span>`}</td>
+          <td class="py-2 pr-3 text-right whitespace-nowrap w-0">
+            ${(canEdit||perms.work)&&html`<button type="button" class="mc-edit w-8 h-8 inline-flex items-center justify-center rounded-md text-muted hover:text-ink" title=${'Edit '+r.name} aria-label=${'Edit '+r.name} onClick=${()=>setDlg({a})}>${Icon.pencil}</button>`}
+            ${canDel&&html`<button type="button" class="mc-del w-8 h-8 inline-flex items-center justify-center rounded-md hover:opacity-70" style=${{color:'var(--bad)'}} title=${'Delete '+r.name} aria-label=${'Delete '+r.name} onClick=${()=>setDlg({a,del:true})}>${Icon.trash}</button>`}</td></tr>`})}</tbody>`)}
+      ${!shown.length&&html`<tbody><tr><td colspan="9" class="px-3 py-6 text-center text-muted">${M.assets.length?'No machines match.':'No machines yet.'+(canAdd?' Add one, or import your fleet list.':'')}</td></tr></tbody>`}
+    </table></div>
+    ${dlg&&html`<${MachineDialog} key=${dlg.isNew?'new':dlg.a.m.id+(dlg.del?':del':'')} ctx=${ctx} a=${dlg.a} isNew=${!!dlg.isNew} startDel=${!!dlg.del} onClose=${()=>setDlg(null)}/>`}
+  </section>`;
+}
+
+/* add or change a machine: its schedule details (planners and administrators) and its fleet details (maintenance staff) in one place */
+function MachineDialog({ctx,a,isNew,startDel,onClose}){
+  const {sb,data,setData,perms,canEdit,notify,reload}=ctx;const m=a?a.m:{};const p=a&&a.p||{};
+  const crews=data.resources.filter(r=>r.type==='crew');const cats=machineCatsOf(data);
+  const [f,setF]=useState({name:m.name||'',sub:m.sub||'',category:m.category||'',rego:m.rego||'',crewId:m.crewId||'',
+    make:p.make||'',model:p.model||'',year:p.year?String(p.year):'',serial:p.serial||'',meter_type:a?a.mt:'hours',retired:!!p.retired,notes:p.notes||''});
+  const [err,setErr]=useState('');const [busy,setBusy]=useState(false);const [del,setDel]=useState(!!startDel);
+  const canR=canEdit;const canP=perms.work;
+  const bookings=a?data.blocks.filter(b=>b.resourceId===m.id).length:0;
+  const profRow=id=>({asset_id:id,make:f.make.trim()||null,model:f.model.trim()||null,year:f.year?+f.year:null,serial:f.serial.trim()||null,meter_type:f.meter_type,retired:f.retired,notes:f.notes.trim()||null});
+  const profChanged=()=>{const r=profRow(m.id),o={make:p.make||null,model:p.model||null,year:p.year||null,serial:p.serial||null,meter_type:a?a.mt:'hours',retired:!!p.retired,notes:p.notes||null};
+    return Object.keys(o).some(k=>(r[k]==null?null:r[k])!==(o[k]==null?null:o[k]))||(!a||!a.p)&&(r.make||r.model||r.year||r.serial||r.notes||r.retired||(isNew&&r.meter_type!=='hours'))};
+  const saveProf=async id=>{const row=profRow(id);
+    for(let i=0;i<10;i++){   /* a new machine reaches the database a moment after it's added */
+      const {error}=a&&a.p?await sb.from('asset_profiles').update(row).eq('asset_id',id):await sb.from('asset_profiles').insert(row);
+      if(!error)return null;if(!isNew||!/roster|23503/.test(errMsg(error)+(error.code||'')))return errMsg(error);await new Promise(r=>setTimeout(r,700))}
+    return 'The machine was added, but its fleet details couldn’t be saved yet. Open it again to add them.'};
+  const save=async()=>{setErr('');const name=f.name.trim();
+    if(canR){if(!name){setErr('Enter the machine’s fleet number.');return}
+      if(data.resources.some(r=>r.type==='machine'&&r.id!==m.id&&r.name.trim().toLowerCase()===name.toLowerCase())){setErr(`There’s already a machine called ${name}.`);return}}
+    const id=isNew?'m'+uid():m.id;
+    if(canR){const ros={name,sub:f.sub.trim()||'Machine',category:f.category.trim(),rego:f.rego.trim().toUpperCase(),crewId:f.crewId||null};
+      if(isNew)setData(d=>({...d,resources:[...d.resources,{id,type:'machine',...ros,hue:HUES[d.resources.length%HUES.length],visible:true}]}));
+      else if(['name','sub','category','rego','crewId'].some(k=>(m[k]||'')!==(ros[k]||'')))setData(d=>({...d,resources:d.resources.map(r=>r.id===id?{...r,...ros}:r)}))}
+    if(canP&&profChanged()){setBusy(true);const e=await saveProf(id);setBusy(false);if(e){setErr(e);if(!isNew)return}else reload()}
+    notify(isNew?`${name} added`:'Machine saved');onClose()};
+  const remove=async()=>{if(!perms.mgr)return;
+    setData(d=>({...d,resources:d.resources.filter(r=>r.id!==m.id),blocks:d.blocks.filter(b=>b.resourceId!==m.id).map(b=>b.plantIds&&b.plantIds.includes(m.id)?{...b,plantIds:b.plantIds.filter(x=>x!==m.id)}:b)}));
+    if(a&&a.p)try{await sb.from('asset_profiles').delete().eq('asset_id',m.id)}catch(e){}
+    notify(`${m.name} deleted`);reload();onClose()};
+  const T=(id,label,k,ph,cls='',dis=!canR)=>html`<${Fld} label=${label}><input id=${id} class=${'field '+cls} style=${fs} placeholder=${ph||''} value=${f[k]} disabled=${dis} onInput=${e=>setF({...f,[k]:e.target.value})}/><//>`;
+  return html`<${Modal} title=${isNew?'Add a machine':m.name} sub=${isNew?'It appears on the schedule and in Fleet straight away':[m.sub,machCatOf(m)].filter(Boolean).join(' · ')} onClose=${onClose}
+    foot=${del?html`<div class="flex-1 min-w-0 grid gap-0.5" id="mc-del-confirm"><span class="text-[12.5px] font-medium" style=${{color:'var(--bad)'}}>Delete ${m.name}${bookings?` and its ${bookings} booking${bookings===1?'':'s'} on the schedule`:''}? This can’t be undone.</span>
+        <span class="text-[12px] text-muted">To keep its maintenance history in view, tick Retired instead.</span></div>
+      <button type="button" class="btn" onClick=${()=>startDel?onClose():setDel(false)}>Cancel</button><button id="mc-del-go" type="button" class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${remove}>Yes, delete</button>`
+      :html`${!isNew&&perms.mgr&&html`<button id="mc-remove" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>${Icon.trash} Delete</button>`}${err&&html`<span id="mc-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span>
+        <button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="mc-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Saving…':isNew?'Add machine':'Save'}</button>`}>
+    <div class="grid gap-4">
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div class="sm:col-span-2 label">On the schedule${!canR?html` <span class="normal-case font-normal tracking-normal text-muted">· planners and administrators change these</span>`:''}</div>
+        ${T('mc-name','Fleet number','name','e.g. PV010','mono')}
+        ${T('mc-sub','Description','sub','e.g. Vogele Paver 1900-3')}
+        <${Fld} label="Category"><input id="mc-cat" list="mc-cats" class="field" style=${fs} placeholder="e.g. Pavers" value=${f.category} disabled=${!canR} onInput=${e=>setF({...f,category:e.target.value})}/><datalist id="mc-cats">${cats.map(c=>html`<option key=${c} value=${c}/>`)}</datalist><//>
+        ${T('mc-rego','Rego','rego','e.g. 123ABC','mono uppercase')}
+        <${Fld} label="Crew"><select id="mc-crew" class="field" style=${fs} value=${f.crewId} disabled=${!canR} onChange=${e=>setF({...f,crewId:e.target.value})}><option value="">No crew</option>${crews.map(c=>html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select><//>
+      </div>
+      <div class="grid sm:grid-cols-2 gap-3 border-t border-line pt-3">
+        <div class="sm:col-span-2 label">Fleet details${!canP?html` <span class="normal-case font-normal tracking-normal text-muted">· mechanics, supervisors and administrators change these</span>`:''}</div>
+        ${T('mc-make','Make','make','e.g. Dynapac','',!canP)}
+        ${T('mc-model','Model','model','e.g. CC1200','',!canP)}
+        <${Fld} label="Year"><input id="mc-year" type="number" min="1950" max="2100" class="field" style=${fs} value=${f.year} disabled=${!canP} onInput=${e=>setF({...f,year:e.target.value})}/><//>
+        ${T('mc-serial','Serial / VIN','serial','','mono',!canP)}
+        <${Fld} label="Meters"><select id="mc-meter" class="field" style=${fs} value=${f.meter_type} disabled=${!canP} onChange=${e=>setF({...f,meter_type:e.target.value})}>
+          <option value="hours">Engine hours</option><option value="km">Kilometres</option><option value="both">Hours and kilometres</option></select><//>
+        ${T('mc-notes','Notes','notes','e.g. owner, hire, tyre size','',!canP)}
+        ${!isNew&&html`<label class="inline-flex items-center gap-2 text-[13px] cursor-pointer sm:col-span-2"><input id="mc-retired" type="checkbox" class="w-4 h-4" checked=${f.retired} disabled=${!canP} onChange=${e=>setF({...f,retired:e.target.checked})}/>Retired (kept for history, left out of the fleet counts)</label>`}
+      </div>
+    </div><//>`;
 }
 
 function Plans({ctx,open}){
@@ -551,40 +663,38 @@ function Plans({ctx,open}){
 }
 
 /* ---------- the screen ---------- */
-function FleetScreen({data,live,notify}){
+function FleetScreen({data,live,notify,setData,tab:tab0,onCounts,assetReq,onImportMachines}){
   const sb=live.sb;const role=live.role;
   const perms={work:['admin','superuser','supervisor','mechanic'].includes(role),verify:['admin','superuser','supervisor'].includes(role),mgr:role==='admin'||role==='superuser'};
   const {db,err,reload}=useMaint(sb);
-  const [tab,setTab]=useState(()=>{try{return localStorage.getItem(KEY+':fleet-tab')||'dash'}catch(e){return 'dash'}});
-  const pickTab=t=>{setTab(t);try{localStorage.setItem(KEY+':fleet-tab',t)}catch(e){}};
+  const tab=tab0||'dash';
   const [dlg,setDlg]=useState(null);const [asset,setAsset]=useState(null);
   useEffect(()=>{try{const id=localStorage.getItem(KEY+':fleetAsset');if(id){localStorage.removeItem(KEY+':fleetAsset');setAsset(id)}}catch(e){}},[]);
+  useEffect(()=>{if(assetReq&&assetReq.id)setAsset(assetReq.id)},[assetReq&&assetReq.n]);
+  useEffect(()=>{if(db&&onCounts)onCounts({wo:db.work_orders.filter(w=>WO_OPEN(w.status)).length,df:db.p4?db.defects.filter(d=>!['closed','dismissed'].includes(d.status)).length:null})},[db]);
   const M=useMemo(()=>db?buildModel(data,db):null,[db,data.resources,data.blocks]);
   if(err&&!db)return html`<div class="panel p-6 grid gap-2 max-w-[640px]"><div class="font-display text-[17px] font-semibold">Fleet & Maintenance isn’t set up yet</div>
     <p class="text-[13px] text-muted">The maintenance tables aren’t in the database yet. An administrator needs to run <span class="mono">supabase/maintenance.sql</span> once in Supabase → SQL Editor.</p><p class="text-[12px] text-faint mono">${err}</p>
     <div><button type="button" class="btn" onClick=${reload}>Try again</button></div></div>`;
   if(!M)return html`<div class="panel p-6 text-[13px] text-muted">Loading maintenance…</div>`;
   const staff=[...new Set(data.resources.filter(r=>r.type==='person').map(r=>r.name))].sort();
-  const ctx={sb,db,data,M,perms,notify,reload,staff,plans:db.service_plans,me:live.user&&live.user.id,role};
+  const ctx={sb,db,data,M,perms,notify,reload,staff,plans:db.service_plans,me:live.user&&live.user.id,role,setData,canEdit:!!live.canEdit&&!!setData,onImportMachines};
   const open=o=>{if(o.k==='asset'){setAsset(o.id);return}setDlg(o)};
   const a=asset&&M.byId.get(asset);
   const P=window.FFP;
   const D=window.FFD;
-  const TABS=[['dash','Dashboard'],['wo','Work orders'],...(D?[['df','Defects']]:[]),['cal','Calendar'],['plans','Service plans'],...(P?[['ps','Prestarts'],['cl','Checklists']]:[]),...(window.FFR?[['rp','Reports']]:[]),];
-  const tabOk=TABS.some(x=>x[0]===tab)?tab:'dash';
+  const tabOk=['dash','mc','wo','plans',...(D?['df']:[]),...(P?['ps','cl']:[]),...(window.FFR?['rp']:[])].includes(tab)?tab:'dash';
   return html`<div class="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto pr-1">
-    <div class="flex flex-wrap items-center gap-2">
-      <div class="seg" role="tablist" aria-label="Fleet sections">${TABS.map(([k,l])=>html`<button key=${k} id=${'fl-tab-'+k} type="button" role="tab" aria-selected=${tabOk===k} aria-pressed=${tabOk===k} onClick=${()=>pickTab(k)}>${l}${k==='wo'?html` <span class="mono text-[11px] text-faint">${db.work_orders.filter(w=>WO_OPEN(w.status)).length}</span>`:k==='df'&&db.p4?html` <span class="mono text-[11px] text-faint">${db.defects.filter(d=>D.OPEN(d.status)).length}</span>`:''}</button>`)}</div>
-      <span class="flex-1"></span>${err&&html`<span class="text-[12px]" style=${{color:'var(--bad)'}}>${err}</span>`}
-      ${!perms.work&&html`<span class="text-[12px] text-muted">View only: mechanics, supervisors and administrators record maintenance</span>`}
-    </div>
-    ${tabOk==='dash'?html`<${Dashboard} ctx=${ctx} open=${open}/>`:tabOk==='wo'?html`<${WorkOrders} ctx=${ctx} open=${open}/>`:tabOk==='cal'?html`<${Calendar} ctx=${ctx} open=${open}/>`
+    ${(err||!perms.work)&&html`<div class="flex flex-wrap items-center gap-2 -mt-1"><span class="flex-1"></span>${err&&html`<span class="text-[12px]" style=${{color:'var(--bad)'}}>${err}</span>`}
+      ${!perms.work&&html`<span class="text-[12px] text-muted">View only: mechanics, supervisors and administrators record maintenance</span>`}</div>`}
+    ${tabOk==='dash'?html`<${Dashboard} ctx=${ctx} open=${open}/>`:tabOk==='mc'?html`<${MachinesTab} ctx=${ctx} open=${open}/>`:tabOk==='wo'?html`<${WorkOrders} ctx=${ctx} open=${open}/>`
       :tabOk==='df'?html`<${D.DefectsTab} ctx=${ctx} open=${open}/>`:tabOk==='ps'?html`<${P.PrestartsTab} ctx=${ctx} open=${open}/>`:tabOk==='cl'?html`<${P.ChecklistsTab} ctx=${ctx} open=${open}/>`:tabOk==='rp'?html`<${window.FFR.ReportsTab} ctx=${ctx}/>`:html`<${Plans} ctx=${ctx} open=${open}/>`}
     ${a&&html`<${AssetPanel} ctx=${ctx} a=${a} open=${open} behind=${!!dlg} onClose=${()=>setAsset(null)}/>`}
     ${dlg&&dlg.k==='wo'&&html`<${WorkOrderDialog} ctx=${ctx} wo=${dlg.wo&&db.work_orders.find(w=>w.id===dlg.wo.id)||dlg.wo} init=${dlg.init} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='service'&&html`<${ServiceDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} plan=${dlg.plan} baseline=${dlg.baseline} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='reading'&&html`<${ReadingDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='profile'&&html`<${ProfileDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
+    ${dlg&&dlg.k==='machine'&&html`<${MachineDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='breakdown'&&html`<${BreakdownDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='plan'&&html`<${PlanDialog} ctx=${ctx} plan=${dlg.plan} onClose=${()=>setDlg(null)}/>`}
     ${D&&dlg&&dlg.k==='defect'&&html`<${D.DefectDialog} ctx=${ctx} d=${(db.defects||[]).find(x=>x.id===dlg.d.id)||dlg.d} open=${open} onClose=${()=>setDlg(null)}/>`}

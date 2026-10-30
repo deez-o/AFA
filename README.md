@@ -69,6 +69,13 @@ Personal to each person's browser: hidden rows, section order, view length, dark
 
 Servicing, meter readings, work orders and breakdowns for the machines on the roster (the **Fleet** screen), and digital prestart checks done on a phone (the **Prestarts** screen).
 
+Fleet's sections sit in a bar below the header: **Dashboard · Machines · Calendar · Work orders · Defects · Service plans · Prestarts · Checklists · Reports**.
+
+- **Machines**: the fleet list by category. Planners and administrators add machines (or import the fleet list) and change their fleet number, description, category, rego and crew; mechanics, supervisors and administrators add the fleet details (make, model, year, serial/VIN, meters, notes, retired). Only administrators and superusers delete a machine, after confirming (its bookings go with it); ticking *Retired* keeps its history instead.
+- **Calendar**: the machines' schedule board: where each machine is booked, breakdowns, repairs and scheduled services, with the same date controls, + Booking and Settings (category order, show/hide) as the old Machines screen. Everyone who has Fleet uses this instead of the separate Machines screen; people without Fleet (viewers, and everyone while Fleet is still a preview) keep the Machines screen.
+- **Average use per year**: the Dashboard and Machines lists show each machine's average hours and/or km a year, worked out from its first and latest meter readings (since any meter replacement; needs two readings at least 30 days apart). Each machine's panel has its **meter readings** history: a chart and every reading, with the change since the one before and where it came from (prestart, service, entered, correction).
+
+
 - `maint.js`: the Fleet screens, loaded only when someone opens Fleet or Prestarts
 - `prestart.js`: the Prestarts screen, the checklist builder, prestart history, logins, and machine manuals
 - `defects.js`: the defect register, defect actions, restrictions and return to service
@@ -114,7 +121,7 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 ### In the planner
 - A **restricted** machine can't be ticked on a booking's Machines tab or in a plan's *Machines needed*, and the database refuses it from any route (copies, plan pushes, imports).
 - Bookings that already had it keep it, but are flagged: a red ⚠ on the booking bar (today onwards), a warning when the booking opens, ⚠ on the Machines tab. A plan with a newly added restricted machine can't be sent to the schedule.
-- Machine pickers also warn (without blocking) when a machine's **service is overdue or due soon**, or it has **open defects**. The Machines screen marks restricted machines.
+- Machine pickers also warn (without blocking) when a machine's **service is overdue or due soon**, or it has **open defects**. Fleet › Calendar (and the Machines screen) marks restricted machines.
 
 ### Reports
 Fleet › **Reports**: work order backlog, service compliance, prestart compliance (prestarts on the days each machine was booked), downtime, breakdowns, defects and service history. Pick the dates and category; export each to **CSV** (Excel) or a branded **PDF**. Each machine's panel has a **History PDF**.
