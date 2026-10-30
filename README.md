@@ -75,13 +75,14 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 - `supabase/maintenance.sql`: the maintenance tables, roles and database rules
 - `supabase/prestarts.sql`: prestart checklists and prestarts, the `maintenance` file store, and the link from each login to its Staff record
 - `supabase/defects.sql`: defects, restrictions, and how work orders carry defects through repair
-- `tests/maintenance_test.sql`, `tests/prestarts_test.sql`, `tests/defects_test.sql`: check the database rules; they leave no data behind
+- `supabase/planner_link.sql`: stops restricted machines being added to bookings or plans; `machine_alerts` for the planner's warnings
+- `tests/maintenance_test.sql`, `tests/prestarts_test.sql`, `tests/defects_test.sql`, `tests/planner_link_test.sql`: check the database rules; they leave no data behind
 
 ### Set up (once)
 1. Supabase → **SQL Editor** → **New query**. Paste all of `supabase/maintenance.sql` and click **Run**. It is safe to run again and doesn't change roster data.
 2. Do the same with `supabase/prestarts.sql` (after `maintenance.sql`). It also creates the private file store (Storage bucket `maintenance`) for prestart photos, signatures and manuals.
-3. Then `supabase/defects.sql` (after `prestarts.sql`).
-4. To check them: paste `tests/maintenance_test.sql` into a new query and **Run**, then `tests/prestarts_test.sql`, then `tests/defects_test.sql`. The messages list each check as PASS and finish with `ALL … TESTS PASSED`. They roll themselves back.
+3. Then `supabase/defects.sql` (after `prestarts.sql`), then `supabase/planner_link.sql`.
+4. To check them: paste `tests/maintenance_test.sql` into a new query and **Run**, then `tests/prestarts_test.sql`, `tests/defects_test.sql` and `tests/planner_link_test.sql`. The messages list each check as PASS and finish with `ALL … TESTS PASSED`. They roll themselves back.
 
 ### Roles
 | Role | Schedule | Maintenance |
@@ -108,10 +109,14 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 - Repair: **Raise work order** on a defect (several defects can go on one work order). Completing the work order marks its defects repaired; a supervisor or administrator verifying it closes them. Small fixes can be marked *Fixed on the spot*, then verified.
 - **Return to service**: only an administrator, and only once the repair is verified (defect closed or dismissed), from the machine panel. Administrators can also take a machine out of service by hand.
 - Supervisors and administrators can **dismiss** a defect with a reason (not a fault, duplicate). Defects are never deleted.
-- Blocking restricted machines in bookings and Planning comes in the next phase.
+
+### In the planner
+- A **restricted** machine can't be ticked on a booking's Machines tab or in a plan's *Machines needed*, and the database refuses it from any route (copies, plan pushes, imports).
+- Bookings that already had it keep it, but are flagged: a red ⚠ on the booking bar (today onwards), a warning when the booking opens, ⚠ on the Machines tab. A plan with a newly added restricted machine can't be sent to the schedule.
+- Machine pickers also warn (without blocking) when a machine's **service is overdue or due soon**, or it has **open defects**. The Machines screen marks restricted machines.
 
 **Features in progress:** Fleet & Maintenance and Prestarts start out visible to the `admin` only (marked *Preview* in the left menu). Release each one from the settings menu (top right) under *Features in progress*.
 
-After pulling this version, run `supabase/schema.sql`, then `supabase/maintenance.sql`, `supabase/prestarts.sql` and `supabase/defects.sql` in the SQL Editor: all are safe to re-run.
+After pulling this version, run `supabase/schema.sql`, then `supabase/maintenance.sql`, `supabase/prestarts.sql`, `supabase/defects.sql` and `supabase/planner_link.sql` in the SQL Editor: all are safe to re-run.
 
 Set a role the same way as before, e.g. `update public.profiles set role = 'mechanic' where email = 'name@yourcompany.com.au';`

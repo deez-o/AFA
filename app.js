@@ -885,7 +885,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
         ${Grip('Drag to move '+r.name,e=>startReo(e,'row',r.id,scopeOf(r)),'lg:opacity-0 group-hover/name:opacity-100')}
         <${Badge} r=${r} size=${28}/>
         <div class="min-w-0">
-          <div class="font-medium text-[13px] truncate" title=${r.name}>${r.name}</div>
+          <div class="font-medium text-[13px] truncate flex items-center gap-1.5" title=${r.name}><span class="truncate">${r.name}</span>${r.type==='machine'&&data.alerts&&data.alerts[r.id]&&data.alerts[r.id].restricted&&html`<span class="shrink-0 text-[9.5px] font-bold uppercase tracking-wide px-1 rounded leading-[14px]" style=${{background:'hsl(0 72% 47%)',color:'#fff'}} title=${'Restricted: do not use. '+(data.alerts[r.id].restriction||'')}>Restricted</span>`}</div>
           <div class="text-[11.5px] text-muted truncate flex items-center gap-1.5">${r.type==='crew'&&r.subbie&&html`<${SubTag}/>`}<span class="truncate">${r.type==='crew'?`${ppl} staff · ${pl} machine${pl===1?'':'s'}`:`${r.sub}${crew?' · '+crew.name:''}`}</span></div>
         </div>
         <button class="ml-auto p-1 rounded text-muted hover:text-ink shrink-0 lg:opacity-0 group-hover/name:opacity-100 focus:opacity-100" onClick=${()=>onRename(r)} aria-label=${'Edit '+r.name} title="Edit name">${Icon.pencil}</button>
@@ -923,6 +923,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             ${it.cutL&&html`<span aria-hidden="true">‹</span>`}
             ${night&&html`<span class="shrink-0 inline-flex" title="Night works">${Icon.moon}</span>`}
             ${(src=>src&&src.kind==='job'&&html`
+              ${src.end>=iso(TODAY)&&restrictedIn(data,src.plantIds).length>0&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px] bar-restricted" style=${{width:15,height:14,background:'hsl(0 75% 46%)',color:'#fff'}} title=${'Restricted machine on this job: '+restrictedIn(data,src.plantIds).map(id=>(data.resources.find(r=>r.id===id)||{}).name).join(', ')+'. Swap it for another machine.'}>${Icon.alert}</span>`}
               ${!src.sapEntered&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:13,background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">${Icon.sap}</span>`}
               ${src.inductionReq&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:14,background:src.inductionDone?'hsl(145 60% 34%)':'hsl(0 75% 46%)',color:'#fff'}} title=${src.inductionDone?'Site induction required: paperwork sent':'Site induction required: paperwork not sent yet'}>${Icon.induct}</span>`}
               ${src.creditIssue&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-full font-bold" style=${{width:14,height:14,fontSize:10,lineHeight:1,background:'hsl(0 75% 46%)',color:'#fff',boxShadow:'0 0 0 1.5px #fff'}} title="Credit issue">$</span>`}`)(v?(it.b.cover?it.b.parent:null):it.b)}
@@ -1075,6 +1076,30 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
 }
 
 /* ---------- mobile plant picker (crew jobs) ---------- */
+/* ---------- maintenance alerts for the planner (live site): restricted machines, open defects, services due ---------- */
+function useMachineAlerts(live,setRaw){
+  useEffect(()=>{if(!live||!live.sb)return;const sb=live.sb;let off=false,t=null,ch=null;
+    const load=async()=>{try{const {data:rows,error}=await sb.from('machine_alerts').select('*');if(error)throw error;
+      const o={};(rows||[]).forEach(r=>{if(r.restricted||r.open_defects||r.service)o[r.asset_id]=r});
+      if(!off)setRaw(d=>JSON.stringify(d.alerts||{})===JSON.stringify(o)?d:{...d,alerts:o})}catch(e){}};   /* not set up yet: no alerts */
+    load();const iv=setInterval(load,5*60e3);
+    try{ch=sb.channel('alerts-'+uid());['restrictions','defects','meter_readings','service_records','service_plans','asset_profiles'].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,600)}));ch.subscribe()}catch(e){}
+    return()=>{off=true;clearInterval(iv);clearTimeout(t);try{if(ch)sb.removeChannel(ch)}catch(e){}}},[]);
+}
+/* what to tell the planner about a machine: block = restricted (can't be added) */
+const machAlert=(data,id)=>{const a=data&&data.alerts&&data.alerts[id];if(!a)return null;
+  const dft=a.open_defects?`${a.open_defects} open defect${a.open_defects===1?'':'s'}`:'';
+  if(a.restricted)return {block:true,tone:'var(--bad)',text:`Restricted: do not use${a.restriction?' · '+a.restriction:''}`};
+  if(a.service==='overdue')return {tone:'var(--bad)',text:[`Service overdue: ${a.service_plans}`,dft].filter(Boolean).join(' · ')};
+  const bits=[a.service==='soon'&&`Service due soon: ${a.service_plans}`,dft].filter(Boolean);
+  return bits.length?{tone:'var(--warn)',text:bits.join(' · ')}:null};
+const restrictedIn=(data,ids)=>(ids||[]).filter(id=>data&&data.alerts&&data.alerts[id]&&data.alerts[id].restricted);
+function RestrictedNote({data,ids,what}){
+  const bad=restrictedIn(data,ids).map(id=>data.resources.find(r=>r.id===id)).filter(Boolean);
+  if(!bad.length)return null;
+  return html`<div class="rounded-lg px-3 py-2 text-[12.5px] font-medium restricted-note" style=${{background:'hsl(0 80% 96%)',color:'hsl(0 72% 38%)',boxShadow:'inset 0 0 0 1.5px hsl(0 72% 47%)'}}>
+    ${bad.map(m=>m.name).join(', ')} ${bad.length===1?'is':'are'} restricted (do not use): ${bad.map(m=>data.alerts[m.id].restriction).filter(Boolean).join('; ')}. Take ${bad.length===1?'it':'them'} off ${what} and pick another machine.</div>`;
+}
 function PlantPicker({f,set,data}){
   const machines=data.resources.filter(r=>r.type==='machine');
   const crew=data.resources.find(r=>r.id===f.resourceId);
@@ -1085,20 +1110,22 @@ function PlantPicker({f,set,data}){
   const plantSections=[...(own.filter(hit).length?[{key:'own',label:`${crew?.name||'Crew'}'s plant`,rows:own.filter(hit)}]:[]),
     ...groupMachines(machines.filter(m=>m.crewId!==f.resourceId&&hit(m)),data)];
   const picked=new Set(f.plantIds||[]);
-  const toggle=id=>{const s=new Set(picked);s.has(id)?s.delete(id):s.add(id);set({plantIds:[...s]})};
-  const addOwn=()=>set({plantIds:[...new Set([...picked,...own.map(m=>m.id)])]});
+  const toggle=id=>{const s=new Set(picked);if(s.has(id))s.delete(id);else if(!(machAlert(data,id)||{}).block)s.add(id);set({plantIds:[...s]})};
+  const addOwn=()=>set({plantIds:[...new Set([...picked,...own.filter(m=>!(machAlert(data,m.id)||{}).block).map(m=>m.id)])]});
   const range={start:f.start,end:f.end};
   const status=m=>{
-    if(!f.start||!f.end||f.end<f.start)return null;
+    const al=machAlert(data,m.id);if(al&&al.block)return al;
+    if(!f.start||!f.end||f.end<f.start)return al;
     const down=data.blocks.find(b=>b.resourceId===m.id&&KINDS[b.kind].down&&overlaps(b,range));
     if(down)return {tone:'var(--bad)',text:`${b2s(down)}: ${down.title||KINDS[down.kind].label}`};
     const other=data.blocks.find(b=>b.id!==f.id&&b.kind==='job'&&(b.plantIds||[]).includes(m.id)&&overlaps(b,range));
     if(other){const c=data.resources.find(r=>r.id===other.resourceId);
-      return {tone:'var(--warn)',text:`${b2s(other)}: already on ${c?.name||'another crew'}'s job`}}
-    return null;
+      return {tone:'var(--warn)',text:`${b2s(other)}: already on ${c?.name||'another crew'}'s job`+(al?' · '+al.text:'')}}
+    return al;
   };
   const b2s=b=>b.start===b.end?fmtShort(parse(b.start)):`${fmtShort(parse(b.start))}–${fmtShort(parse(b.end))}`;
   return html`<section class="grid gap-3 md:grid-cols-[minmax(0,1fr)_300px] md:items-start">
+    ${restrictedIn(data,f.plantIds).length>0&&html`<div class="md:col-span-2"><${RestrictedNote} data=${data} ids=${f.plantIds} what="this booking"/></div>`}
     <div class="flex items-center gap-2 md:col-span-2">
       <h3 class="font-display text-[15px] font-semibold">Machines</h3>
       <span class="mono text-[11px] text-faint">${picked.size} assigned</span>
@@ -1114,7 +1141,7 @@ function PlantPicker({f,set,data}){
           ...sec.rows.map(m=>{const st=status(m);const isOwn=m.crewId===f.resourceId;
           return html`<li key=${m.id} style=${{borderColor:'var(--line)'}}>
             <label class="flex items-center gap-2.5 px-2.5 py-1.5 cursor-pointer hover:bg-sunken">
-              <input id=${'pl-'+m.id} type="checkbox" class="w-4 h-4 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} onChange=${()=>toggle(m.id)}/>
+              <input id=${'pl-'+m.id} type="checkbox" class="w-4 h-4 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} disabled=${!!(st&&st.block&&!picked.has(m.id))} title=${st&&st.block?'Restricted: can’t be added':''} onChange=${()=>toggle(m.id)}/>
               <${Badge} r=${m} size=${24}/>
               <div class="min-w-0 flex-1">
                 <div class="text-[13px] truncate"><span class="font-medium mono">${m.name}</span> <span class="text-muted">${m.sub}</span></div>
@@ -1435,11 +1462,11 @@ function AsphaltShifts({f,set,data}){
 /* ---------- booking editor (tabbed) ---------- */
 /* Tabs are a list so more can be added later: give each an id, label, when it applies, and a render function. */
 const BOOKING_TABS=[
-  {id:'details',label:'Booking Details',applies:()=>true,render:p=>html`<${BookingDetails} ...${p}/>`},
+  {id:'details',label:'Booking Details',applies:()=>true,render:p=>html`${p.f.kind==='job'&&html`<div class="mb-3"><${RestrictedNote} data=${p.data} ids=${p.f.plantIds} what="this booking (Machines tab)"/></div>`}<${BookingDetails} ...${p}/>`},
   {id:'quantities',label:(f,d)=>isSealCrew(d.resources.find(r=>r.id===f.resourceId))?'Seal & Quantities':'Asphalt & Quantities',applies:f=>f.kind==='job',
     badge:(f,d)=>{const q=qtyTotals(f);if(isSealCrew(d.resources.find(r=>r.id===f.resourceId)))return q.area?`${fmtN(q.area)} m²`:null;return q.tonnes?`${fmtN(q.tonnes)} t`:null},
     render:p=>html`<${AsphaltShifts} f=${p.f} set=${p.set} data=${p.data}/>`},
-  {id:'machines',label:'Machines',applies:f=>f.kind==='job',badge:f=>(f.plantIds||[]).length?`${(f.plantIds||[]).length}`:null,
+  {id:'machines',label:'Machines',applies:f=>f.kind==='job',badge:(f,d)=>(f.plantIds||[]).length?`${restrictedIn(d,f.plantIds).length?'⚠ ':''}${(f.plantIds||[]).length}`:null,
     render:p=>html`<${PlantPicker} f=${p.f} set=${p.set} data=${p.data}/>`},
   {id:'trucks',label:'Trucks',applies:(f,d)=>f.kind==='job'&&!isSealCrew(d.resources.find(r=>r.id===f.resourceId)),
     badge:f=>{const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&q.trucks)||[]).filter(truckHas).length,0);return n?`${n}`:null},
@@ -4025,14 +4052,16 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
         <span class="text-[12px] text-muted">Each ticked ${night?'night':'shift'} is booked for this crew when you send the plan to the schedule.</span></div>`)(planSealCrew(data,p))}
     <//>
 
+    ${restrictedIn(data,p.machineIds).length>0&&html`<${RestrictedNote} data=${data} ids=${p.machineIds} what="this plan (Machines needed)"/>`}
     <${PlanCard} id="pl-machines" title="Machines needed" sub=${`${picked.size} selected`}
       right=${machConf>0&&html`<span class="text-[12px] font-semibold" style=${{color:'var(--warn)'}}>${machConf} clash${machConf===1?'':'es'} on these dates</span>`}>
       ${machines.length===0?html`<div class="text-[12.5px] text-muted">No machines yet. Add or import them on the Machines screen.</div>`
         :html`<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">${groupMachines(machines,data).map(g=>html`<div key=${g.key} class="grid gap-1 content-start">
           <div class="label" style=${{color:'var(--ink)'}}>${g.label}</div>
-          ${g.rows.map(m=>{const c=conf.machines[m.id];return html`<label key=${m.id} class="flex items-start gap-2 rounded-md px-1.5 py-1 cursor-pointer hover:bg-sunken" title=${c?c.join('\n'):''}>
-            <input type="checkbox" class="w-4 h-4 mt-0.5 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} onChange=${()=>set({machineIds:toggleIn(p.machineIds||[],m.id)})}/>
+          ${g.rows.map(m=>{const c=conf.machines[m.id];const al=machAlert(data,m.id);const blocked=!!(al&&al.block&&!picked.has(m.id));return html`<label key=${m.id} class=${'flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-sunken '+(blocked?'cursor-not-allowed':'cursor-pointer')} title=${[al&&al.text,...(c||[])].filter(Boolean).join('\n')}>
+            <input id=${'plm-'+m.id} type="checkbox" class="w-4 h-4 mt-0.5 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} disabled=${blocked} onChange=${()=>{if(!blocked)set({machineIds:toggleIn(p.machineIds||[],m.id)})}}/>
             <span class="min-w-0"><span class="text-[13px] font-semibold mono">${m.name}</span> <span class="text-[12.5px] text-muted">${m.sub||''}</span>
+              ${al&&html`<span class="block text-[11.5px] font-medium" style=${{color:al.tone}}>${al.text}</span>`}
               ${c&&html`<span class="block text-[11.5px] font-medium" style=${{color:'var(--warn)'}}>${c[0]}${c.length>1?` (+${c.length-1} more)`:''}</span>`}</span></label>`})}
         </div>`)}</div>`}
     <//>
@@ -4142,6 +4171,8 @@ function PlanningScreen({data,setData,notify,onOpenBooking}){
             <li>${schedInfo.crew.name} · ${schedInfo.old&&schedInfo.old.shift==='night'?'night':'day'} works · ${fmtShort(parse(schedInfo.ds[0]))}${schedInfo.ds.length>1?' – '+fmtShort(parse(schedInfo.ds[schedInfo.ds.length-1])):''} (${schedInfo.ds.length} shift${schedInfo.ds.length===1?'':'s'})</li>
             <li>Quantities for each shift, ${(schedInfo.p.machineIds||[]).length} machine${(schedInfo.p.machineIds||[]).length===1?'':'s'}, subcontractors and the crew start time</li>
             <li class="text-muted">Dates stay as they are on the schedule. Trucks already entered on the booking are kept.</li></ul>
+          ${(()=>{const was=new Set((schedInfo.old&&schedInfo.old.plantIds)||[]);const bad=restrictedIn(data,(schedInfo.p.machineIds||[]).filter(id=>!was.has(id)));
+            return bad.length>0&&html`<div id="ps-restricted-push" class="text-[12.5px] rounded-md px-2.5 py-2 font-medium" style=${{background:'hsl(0 80% 96%)',color:'hsl(0 72% 38%)'}}>${bad.map(id=>(data.resources.find(r=>r.id===id)||{}).name).join(', ')} ${bad.length===1?'is':'are'} restricted (do not use) and can’t go on the booking. Take ${bad.length===1?'it':'them'} off the plan’s machines first.</div>`})()}
           ${(Object.keys(schedInfo.c.machines).length>0||schedInfo.c.crew.length>0)&&html`<div class="text-[12.5px] rounded-md px-2.5 py-2 grid gap-1" style=${{background:'hsl(38 90% var(--blk-l))',color:'hsl(30 60% var(--blk-fg-l))'}}>
             <span class="font-semibold">Clashes (you can still go ahead):</span>
             ${schedInfo.c.crew.length>0&&html`<span>${schedInfo.crew.name} is already booked: ${schedInfo.c.crew.join('; ')}</span>`}
@@ -4163,7 +4194,7 @@ function PlanningScreen({data,setData,notify,onOpenBooking}){
             <label class="inline-flex items-center gap-2 text-[13px] font-medium cursor-pointer"><input id="ps-seal-ok" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${sealOk} onChange=${e=>setSealOk(e.target.checked)}/>I’ve checked the seal shifts above</label>
           </div>`)(schedInfo.seal)}`}
         <div class="flex justify-end gap-2"><button class="btn" onClick=${()=>setSched(null)}>Cancel</button>
-          <button class="btn btn-primary" disabled=${!schedInfo.old||((schedInfo.seal.items.length>0||schedInfo.seal.removes.length>0)&&(!sealOk||(schedInfo.seal.items.length>0&&!schedInfo.seal.crew)))} onClick=${runSchedule}>Update booking</button></div>
+          <button id="ps-push-go" class="btn btn-primary" disabled=${!schedInfo.old||restrictedIn(data,(schedInfo.p.machineIds||[]).filter(id=>!((schedInfo.old&&schedInfo.old.plantIds)||[]).includes(id))).length>0||((schedInfo.seal.items.length>0||schedInfo.seal.removes.length>0)&&(!sealOk||(schedInfo.seal.items.length>0&&!schedInfo.seal.crew)))} onClick=${runSchedule}>Update booking</button></div>
       </div></div>`}
   </div>`;
 }
@@ -4641,7 +4672,8 @@ function App({boot,live}){
     if(!live.canEdit&&!onlySugg){setTimeout(()=>setToast('You have view-only access. Ask an administrator for planner access to make changes.'),0);return cur}
     return withChangeLog(cur,next,live.user.email)});
   window.__rosterMe=live.user.email;
-  const reloadAll=async()=>{try{const nd={...rowsToData(await fetchAllRows(live.sb))};nd.sectionOrder=nd.sectionOrder||[...DEFAULT_ORDER];remoteRef.current=nd;setDataRaw(nd)}catch(e){}};
+  const reloadAll=async()=>{try{const nd={...rowsToData(await fetchAllRows(live.sb))};nd.sectionOrder=nd.sectionOrder||[...DEFAULT_ORDER];setDataRaw(cur=>{const x={...nd,alerts:cur.alerts};remoteRef.current=x;return x})}catch(e){}};
+  useMachineAlerts(live,fn=>setDataRaw(cur=>{const nd=fn(cur);if(nd!==cur)remoteRef.current=nd;return nd}));
   useEffect(()=>{
     writeLocal(LOCAL_HIDDEN,data.resources.filter(r=>r.visible===false).map(r=>r.id));
     if(data.sectionOrder)writeLocal(LOCAL_ORDER,data.sectionOrder);
