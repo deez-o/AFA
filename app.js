@@ -5109,10 +5109,16 @@ function App({boot,live}){
     const who=data.resources.find(r=>r.id===b.resourceId)?.name;
     setToast(`Moved${prev&&prev.resourceId!==b.resourceId?' to '+who:''} · ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`);
   };
-  /* dragging an edge of a booking: only its dates change (its shift quantities stay on their days) */
+  /* dragging an edge of a booking to change its length */
   const onResize=b=>{
     const prev=data.blocks.find(x=>x.id===b.id);if(!prev)return;
-    setData(d=>({...d,blocks:d.blocks.map(x=>x.id===b.id?{...x,start:b.start,end:b.end}:x)}));
+    /* started earlier: every shift moves to start from the new first day (shift 1 → the new first day, and so on), leaving the last shift empty.
+       ended later: the new days are simply empty shifts. */
+    let sd=prev.shiftData;
+    if(sd&&b.start<prev.start){const was=shiftDates(prev),now=shiftDates({...prev,start:b.start,end:b.end});const out={};
+      Object.keys(sd).forEach(k=>{if(!was.includes(k))out[k]=sd[k]});   /* anything not on a shift stays where it is */
+      was.forEach((k,i)=>{if(sd[k]&&now[i])out[now[i]]=sd[k]});sd=out}
+    setData(d=>({...d,blocks:d.blocks.map(x=>x.id===b.id?{...x,start:b.start,end:b.end,...(sd!==prev.shiftData?{shiftData:sd}:{})}:x)}));
     const n=diffDays(parse(b.start),parse(b.end))+1;const was=diffDays(parse(prev.start),parse(prev.end))+1;
     setToast(`${n>was?'Extended':'Shortened'} to ${n} day${n===1?'':'s'} · ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`);
   };
