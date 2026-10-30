@@ -9,6 +9,7 @@ const {Modal,Fld,fs,errMsg}=window.FFM;
 const BUCKET='lab';
 const n0=v=>{const x=parseFloat(String(v==null?'':v).replace(/,/g,''));return isFinite(x)?x:0};
 const f1=v=>v?fmtN(Math.round(v*10)/10):'–';
+const KINDS=[['asphalt','Asphalt report'],['core','Core report'],['ncr','NCR']];const kindLabel=k=>(KINDS.find(x=>x[0]===k)||[,'Lab report'])[1];
 const UPLOAD_ROLES=['admin','superuser','planner','lab'];
 const ACCEPT='application/pdf,image/jpeg,image/png,image/webp,.xlsx,.xls,.csv,.docx';
 const OK_TYPE=/^(application\/pdf|image\/(jpeg|png|webp)|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document)|application\/vnd\.ms-excel|text\/csv)$/;
@@ -38,11 +39,15 @@ function LabScreen({data,live,notify}){
   const {v,err,reload}=useLab(sb,from);
   /* every shift already worked, by job */
   const jobs=useMemo(()=>{const by=new Map();
-    data.blocks.filter(b=>b.kind==='job'&&b.jobId).forEach(b=>shiftDates(b).filter(k=>k<today&&k>=from).forEach(k=>{
+    const seen=new Set();
+    data.blocks.filter(b=>b.kind==='job'&&b.jobId).forEach(b=>{const ks=new Set(shiftDates(b).filter(k=>k<=today&&k>=from));
+      /* a submitted pack counts even if its booking has since been moved or shortened */
+      if(v)v.packs.forEach(p=>{if(p.block_id===b.id&&p.status==='submitted'&&p.shift_date>=from)ks.add(p.shift_date)});
+      [...ks].forEach(k=>{seen.add(b.id+'|'+k);
       const j=data.jobs.find(x=>x.id===b.jobId);if(!j)return;const crewId=coverOf(b,k)||b.resourceId;
       const ps=v?v.packs.filter(p=>p.block_id===b.id&&p.shift_date===k):[];const sub=ps.filter(p=>p.status==='submitted');
       const laid=sub.map(laidOf).reduce((a,x)=>({t:a.t+x.t,a:a.a+x.a,loads:a.loads+x.loads,mixes:[...new Set([...a.mixes,...x.mixes])]}),{t:0,a:0,loads:0,mixes:[]});
-      const o=by.get(j.id)||{j,shifts:[]};o.shifts.push({e:{b,k,crewId},crew:data.resources.find(r=>r.id===crewId),plan:plannedOf(b,k),packs:ps,sub,laid});by.set(j.id,o)}));
+      const o=by.get(j.id)||{j,shifts:[]};o.shifts.push({e:{b,k,crewId},crew:data.resources.find(r=>r.id===crewId),plan:plannedOf(b,k),packs:ps,sub,laid});by.set(j.id,o)})});
     return [...by.values()].map(o=>({...o,shifts:o.shifts.sort((x,y)=>y.e.k.localeCompare(x.e.k)||(x.crew&&y.crew?x.crew.name.localeCompare(y.crew.name):0)),
       last:o.shifts.reduce((m,s)=>s.e.k>m?s.e.k:m,''),t:o.shifts.reduce((a,s)=>a+s.laid.t,0),a:o.shifts.reduce((a,s)=>a+s.laid.a,0),nSub:o.shifts.filter(s=>s.sub.length).length}))
       .sort((x,y)=>y.last.localeCompare(x.last))},[data.blocks,data.jobs,v,from]);
@@ -59,6 +64,7 @@ function LabScreen({data,live,notify}){
 
   const Rep=({r})=>html`<div class="flex items-center gap-2 text-[12.5px] lab-report"><span class="text-muted shrink-0">${Icon.download}</span>
     <button type="button" class="hover:underline text-left min-w-0 flex-1 truncate" onClick=${()=>openFile(r)}>${r.name}</button>
+    <span class="text-[11px] font-semibold px-1.5 rounded shrink-0" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>${kindLabel(r.kind)}</span>
     <span class="text-[11.5px] text-muted whitespace-nowrap">${r.shift_date?fmtShort(parse(r.shift_date))+' · ':''}${new Date(r.created_at).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}${r.note?' · '+r.note:''}</span>
     ${(mgr||(canUp&&r.created_by===live.user.id))&&html`<button type="button" class="p-1 rounded text-muted hover:text-ink" aria-label=${'Remove '+r.name} onClick=${()=>delFile(r)}>${Icon.x}</button>`}</div>`;
 
@@ -84,7 +90,7 @@ function LabScreen({data,live,notify}){
         ${isOpen&&html`<div class="border-t border-line px-4 py-3 grid gap-3">
           <div class="flex flex-wrap gap-2">
             <button type="button" class="btn lab-qa-all" disabled=${!allSub.length||!!busy} onClick=${()=>pdfs(allSub,o.j.id)}>${Icon.download} ${busy===o.j.id?'Making PDFs…':`Download QA (${allSub.length} pack${allSub.length===1?'':'s'})`}</button>
-            ${canUp&&!setupMsg&&html`<button type="button" class="btn btn-primary lab-upload" onClick=${()=>setUp({job:o.j,shifts:o.shifts.map(s=>s.e.k),n:Date.now()})}>${Icon.plus} Upload lab report</button>`}</div>
+            ${canUp&&!setupMsg&&KINDS.map(([kk,l])=>html`<button key=${kk} type="button" class=${'btn lab-upload lab-upload-'+kk} onClick=${()=>setUp({job:o.j,shifts:o.shifts.map(s=>s.e.k),kind:kk,n:Date.now()})}>${Icon.plus} ${({asphalt:'Upload Asphalt Report',core:'Upload Core Report',ncr:'Upload NCR'})[kk]}</button>`)}</div>
           <div class="overflow-x-auto"><table class="w-full text-[12.5px] min-w-[720px]">
             <thead><tr class="text-left">${['Shift','Crew','Planned','Laid (QA)','Area m² (QA)','Loads','QA',''].map((h,i)=>html`<th key=${i} class=${'label font-normal py-1.5 pr-3 whitespace-nowrap'+(i>=2&&i<=5?' text-right':'')}>${h}</th>`)}</tr></thead>
             <tbody>${o.shifts.map(s=>{const sr=reportsFor(o.j.id,s.e.k);const draft=s.packs.length&&!s.sub.length;
@@ -111,15 +117,15 @@ function UploadDialog({sb,up,onClose,onDone}){
     if(!OK_TYPE.test(file.type||'')){setErr('Add a PDF, a picture, or an Excel, CSV or Word file.');return}
     setBusy(true);try{const safe=file.name.replace(/[^\w.\- ]+/g,'_').slice(-80);const path=`jobs/${up.job.id}/${Date.now()}-${safe}`;
       const {error}=await sb.storage.from(BUCKET).upload(path,file,{contentType:file.type,upsert:false});if(error)throw error;
-      const row={job_id:up.job.id,name:file.name,path,mime:file.type,size:file.size,note:note.trim()||null};if(k)row.shift_date=k;
+      const row={job_id:up.job.id,kind:up.kind||'other',name:file.name,path,mime:file.type,size:file.size,note:note.trim()||null};if(k)row.shift_date=k;
       const {error:e2}=await sb.from('lab_reports').insert(row);if(e2){try{await sb.storage.from(BUCKET).remove([path])}catch(x){}throw e2}
       onDone()}catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
-  return html`<${Modal} title="Upload a lab report" sub=${jobLabel(up.job)} onClose=${onClose}
+  return html`<${Modal} title=${'Upload '+(up.kind==='ncr'?'an NCR':'a '+kindLabel(up.kind).toLowerCase())} sub=${jobLabel(up.job)} onClose=${onClose}
     foot=${html`${err&&html`<span id="lab-up-err" class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="lab-up-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Uploading…':'Upload'}</button>`}>
     <div class="grid gap-3">
       <${Fld} label="For"><select id="lab-up-shift" class="field" style=${fs} value=${k} onChange=${e=>setK(e.target.value)}><option value="">The whole job</option>${[...new Set(up.shifts)].map(d=>html`<option key=${d} value=${d}>Shift ${WD[parse(d).getDay()]} ${fmtShort(parse(d))}</option>`)}</select><//>
       <${Fld} label="Report (PDF, picture, Excel, CSV or Word, up to 25 MB)"><input id="lab-up-file" type="file" accept=${ACCEPT} class="field" style=${{...fs,paddingTop:5}} onChange=${e=>setFile(e.target.files&&e.target.files[0]||null)}/><//>
-      <${Fld} label="Note (optional)"><input id="lab-up-note" class="field" style=${fs} placeholder="e.g. Cores, density results" value=${note} onInput=${e=>setNote(e.target.value)}/><//>
+      <${Fld} label="Note (optional)"><input id="lab-up-note" class="field" style=${fs} placeholder=${up.kind==='core'?'e.g. Density results':up.kind==='ncr'?'e.g. NCR number, what it’s about':'e.g. Binder content, grading'} value=${note} onInput=${e=>setNote(e.target.value)}/><//>
     </div><//>`;
 }
 

@@ -36,6 +36,10 @@ create table if not exists public.lab_reports (
   constraint lab_reports_path check (path like 'jobs/' || job_id || '/%')
 );
 create index if not exists lab_reports_job on public.lab_reports (job_id, shift_date);
+-- what sort of report: asphalt report, core report or NCR
+alter table public.lab_reports add column if not exists kind text not null default 'other';
+alter table public.lab_reports drop constraint if exists lab_reports_kind;
+alter table public.lab_reports add constraint lab_reports_kind check (kind in ('asphalt','core','ncr','other'));
 
 create or replace function public.lab_report_rules()
 returns trigger language plpgsql security definer set search_path = public as $$
