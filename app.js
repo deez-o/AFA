@@ -2606,13 +2606,13 @@ const previewOf=d=>d&&Array.isArray(d.previewOnly)?d.previewOnly:PREVIEW_DEFAULT
 const screenOK=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=role==='admin'||role==='superuser';
   return (!s.admin||admin)&&(!s.roles||s.roles.includes(role))&&(!s.preview||role==='admin'||!previewOf(d).includes(k))};
 const SCREENS={
-  schedule:{label:'Schedule',title:'FraserFlow',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
+  schedule:{label:'Schedule',title:'Schedule',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   jobs:{label:'Jobs',title:'Jobs',only:[],legend:[],head:''},
   planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
   fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',roles:['admin','superuser','planner','supervisor','mechanic'],preview:true},   /* maintenance: not for operators or viewers */
-  ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',roles:['admin'],bottom:true},   /* the administrator only, never superusers; always at the bottom of the menu */   /* administrators only (button hidden for everyone else) */
+  ideas:{label:'Ideas',title:'Ideas',only:[],legend:[],head:'',roles:['admin'],bottom:true},   /* the administrator only, never superusers; always at the bottom of the menu */   /* administrators only (button hidden for everyone else) */
 };
 const NAV_ICON={
   fleet:svg(html`<path d="M10.5 2a3.5 3.5 0 00-3.2 4.9L2.5 11.7a1.3 1.3 0 001.8 1.8l4.8-4.8A3.5 3.5 0 0014 5.5l-2 2-1.8-.3-.3-1.8 2-2c-.4-.3-.9-.4-1.4-.4z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/>`,20),
@@ -4650,6 +4650,7 @@ function App({boot,live}){
   useEffect(()=>{const t=SCREENS[screen].tab;if(t&&tab!==t)setTab(t);else if(!t&&(tab==='person'||tab==='machine'))setTab('crew')},[screen,tab]);
   useEffect(()=>{if(!screenOK(screen,live.role,data))goScreen('schedule')},[screen,data.previewOnly]);
   const SCR=SCREENS[screen];
+  useEffect(()=>{document.title='FraserFlow - '+SCR.title},[screen]);
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
   const [importing,setImporting]=useState(false);const [merging,setMerging]=useState(false);const [logOpen,setLogOpen]=useState(false);const [machImport,setMachImport]=useState(false);
@@ -4768,7 +4769,7 @@ function App({boot,live}){
         ${screen==='schedule'&&html`<${ExportsMenu} items=${[{id:'exp-program',label:'Daily program',desc:'PDF for each job working on a day',run:()=>setProgram(true)},
           ...(data.resources.some(r=>r.type==='crew'&&r.subbie)?[{id:'exp-subworks',label:'Subbie works',desc:'Upcoming works for a subcontractor crew',run:()=>setSubWorksOpen(true)}]:[])]}/>`}
         <div class="flex items-center gap-2 min-w-0">
-          <h1 class=${'font-display font-semibold tracking-tight truncate '+(SCR.title==='FraserFlow'?'text-[24px] leading-none':'text-[20px]')}>${SCR.title==='FraserFlow'?html`Fraser<span style=${{color:'var(--accent)'}}>Flow</span>`:SCR.title}</h1>
+          <h1 class="font-display font-semibold tracking-tight truncate text-[22px] leading-none">Fraser<span style=${{color:'var(--accent)'}}>Flow</span><span class="text-faint font-normal"> - </span>${SCR.title}</h1>
           ${!live.canEdit&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change anything">View only</span>`}
         </div>
         <div class="flex-1"></div>
