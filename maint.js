@@ -554,7 +554,6 @@ function MachinesTab({ctx,open}){
       <select class="field w-auto" style=${fs} value=${cat} onChange=${e=>setCat(e.target.value)} aria-label="Category"><option value="">All categories</option>${machineCatsOf(data).map(c=>html`<option key=${c} value=${c}>${c}</option>`)}</select>
       ${nRet>0&&html`<label class="inline-flex items-center gap-1.5 text-[12.5px] cursor-pointer"><input type="checkbox" class="w-4 h-4" checked=${ret} onChange=${e=>setRet(e.target.checked)}/>Show retired (${nRet})</label>`}
       <span class="text-[12.5px] text-muted">${shown.length} machine${shown.length===1?'':'s'}</span><span class="flex-1"></span>
-      ${canAdd&&ctx.onImportMachines&&html`<button id="mc-import" type="button" class="btn" onClick=${ctx.onImportMachines}>${Icon.download} Import list</button>`}
       ${canAdd&&html`<button id="mc-add" type="button" class="btn btn-primary" onClick=${()=>setDlg({isNew:true})}>${Icon.plus} Add machine</button>`}
     </div>
     <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="mc-table">
@@ -572,7 +571,7 @@ function MachinesTab({ctx,open}){
           <td class="py-2 pr-3 text-right whitespace-nowrap w-0">
             ${(canEdit||perms.work)&&html`<button type="button" class="mc-edit w-8 h-8 inline-flex items-center justify-center rounded-md text-muted hover:text-ink" title=${'Edit '+r.name} aria-label=${'Edit '+r.name} onClick=${()=>setDlg({a})}>${Icon.pencil}</button>`}
             ${canDel&&html`<button type="button" class="mc-del w-8 h-8 inline-flex items-center justify-center rounded-md hover:opacity-70" style=${{color:'var(--bad)'}} title=${'Delete '+r.name} aria-label=${'Delete '+r.name} onClick=${()=>setDlg({a,del:true})}>${Icon.trash}</button>`}</td></tr>`})}</tbody>`)}
-      ${!shown.length&&html`<tbody><tr><td colspan="9" class="px-3 py-6 text-center text-muted">${M.assets.length?'No machines match.':'No machines yet.'+(canAdd?' Add one, or import your fleet list.':'')}</td></tr></tbody>`}
+      ${!shown.length&&html`<tbody><tr><td colspan="9" class="px-3 py-6 text-center text-muted">${M.assets.length?'No machines match.':'No machines yet.'+(canAdd?' Add your first machine.':'')}</td></tr></tbody>`}
     </table></div>
     ${dlg&&html`<${MachineDialog} key=${dlg.isNew?'new':dlg.a.m.id+(dlg.del?':del':'')} ctx=${ctx} a=${dlg.a} isNew=${!!dlg.isNew} startDel=${!!dlg.del} onClose=${()=>setDlg(null)}/>`}
   </section>`;
