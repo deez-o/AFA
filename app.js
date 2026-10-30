@@ -2619,9 +2619,11 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
           ${!S.bs.length?html`<div class="text-[12.5px] text-muted">No bookings for this job yet. Add one from the Schedule.</div>`:(()=>{
             /* seal bookings first, then asphalt; each with the quantities that matter for it */
             const sealOf=b=>isSealCrew(data.resources.find(r=>r.id===b.resourceId));
-            const qtyOf=b=>{const sd=b.shiftData||{};let t=0,a=0;const types=new Set(),binders=new Set();
-              shiftDates(b).forEach(k=>linesOf(sd[k]).filter(lineHas).forEach(l=>{t+=num(l.tonnes);a+=num(l.area);if(l.type)types.add(l.type);if(l.binder)binders.add(l.binder)}));
-              return {t,a,types:[...types],binders:[...binders]}};
+            const qtyOf=b=>{const sd=b.shiftData||{};let t=0,a=0;const types=new Set(),binders=new Set(),stones=new Set();
+              shiftDates(b).forEach(k=>linesOf(sd[k]).filter(lineHas).forEach(l=>{t+=num(l.tonnes);a+=num(l.area);if(l.type)types.add(l.type);if(l.binder)binders.add(l.binder);if((l.stone||'').trim())stones.add(l.stone.trim())}));
+              return {t,a,types:[...types],binders:[...binders],stones:[...stones]}};
+            /* seal and asphalt share one column layout so the two tables line up */
+            const W=[12,11,6,5.5,12,10,8,8,11.5,7,9];   /* % of the width */
             const n0=v=>v?fmtN(Math.round(v)):html`<span class="text-faint">–</span>`;
             const flags=b=>html`<span class="inline-flex flex-wrap gap-1">
               ${!b.sapEntered&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded" style=${{background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">SAP</span>`}
@@ -2630,20 +2632,22 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
               ${b.planId&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>Plan</span>`}</span>`;
             const group=(seal,bs)=>{if(!bs.length)return null;const Q=bs.map(qtyOf);
               const tot={t:Q.reduce((x,q)=>x+q.t,0),a:Q.reduce((x,q)=>x+q.a,0)};
-              const cols=['Crew','Dates','Shift','Shifts',...(seal?['Seal type','Binder','Area m²']:['Mix','Tonnes','Area m²']),'Supervisor','Quote','Flags'];
+              const cols=['Crew','Dates','Shift','Shifts',...(seal?['Seal type','Binder','Stone','Area m²']:['Mix','Binder','Tonnes','Area m²']),'Supervisor','Quote','Flags'];
               return html`<div class="grid gap-1" id=${seal?'job-bk-seal':'job-bk-asphalt'}>
                 <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5"><span class="text-[13px] font-semibold">${seal?'Seal':'Asphalt'}</span><span class="text-[12px] text-muted">${bs.length} booking${bs.length===1?'':'s'}${seal?` · ${fmtN(Math.round(tot.a))} m²`:` · ${fmtN(Math.round(tot.t))} t · ${fmtN(Math.round(tot.a))} m²`}</span></div>
-                <div class="overflow-x-auto"><table class="w-full text-[12.5px]">
-                <thead><tr class="text-left">${cols.map(h=>html`<th key=${h} class=${'label font-normal py-1.5 pr-3 whitespace-nowrap'+(/m²|Tonnes/.test(h)?' text-right':'')}>${h}</th>`)}</tr></thead>
+                <div class="overflow-x-auto"><table class="w-full text-[12.5px] table-fixed job-bk-table" style=${{minWidth:860}}>
+                <colgroup>${W.map((w,i)=>html`<col key=${i} style=${{width:w+'%'}}/>`)}</colgroup>
+                <thead><tr class="text-left">${cols.map(h=>html`<th key=${h} class=${'label font-normal py-1.5 pr-3 whitespace-nowrap truncate'+(/m²|Tonnes/.test(h)?' text-right':'')}>${h}</th>`)}</tr></thead>
                 <tbody>${bs.map((b,i)=>{const c=data.resources.find(r=>r.id===b.resourceId);const q=Q[i];const ds=shiftDates(b);const today=iso(TODAY);const past=b.end<today,live=b.start<=today&&b.end>=today;
                   return html`<tr key=${b.id} class="border-t border-line cursor-pointer hover:bg-sunken job-bk-row" style=${past?{opacity:.6}:null} onClick=${()=>onEditBooking(b)} tabindex="0" onKeyDown=${e=>{if(e.key==='Enter')onEditBooking(b)}}>
                     <td class="py-2 pr-3 whitespace-nowrap"><span class="font-medium">${c?c.name:'Crew'}</span>${c&&c.subbie&&html` <${SubTag}/>`}${b.crewSize?html` <span class="text-muted">· ${b.crewSize} man</span>`:''}</td>
                     <td class="py-2 pr-3 mono whitespace-nowrap">${range(b.start,b.end)}${live?html` <span class="text-[10.5px] font-semibold px-1 rounded" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>Now</span>`:''}</td>
                     <td class="py-2 pr-3 whitespace-nowrap">${b.shift==='night'?html`<span class="inline-flex items-center gap-1">${Icon.moon} Night</span>`:'Day'}</td>
                     <td class="py-2 pr-3 tnum">${ds.length}</td>
-                    <td class="py-2 pr-3 whitespace-nowrap">${q.types.join(', ')||html`<span class="text-faint">–</span>`}</td>
-                    ${seal?html`<td class="py-2 pr-3 whitespace-nowrap">${q.binders.join(', ')||html`<span class="text-faint">–</span>`}</td><td class="py-2 pr-3 tnum text-right">${n0(q.a)}</td>`
-                      :html`<td class="py-2 pr-3 tnum text-right">${n0(q.t)}</td><td class="py-2 pr-3 tnum text-right">${n0(q.a)}</td>`}
+                    <td class="py-2 pr-3 truncate" title=${q.types.join(', ')}>${q.types.join(', ')||html`<span class="text-faint">–</span>`}</td>
+                    <td class="py-2 pr-3 truncate job-bk-binder" title=${q.binders.join(', ')}>${q.binders.join(', ')||html`<span class="text-faint">–</span>`}</td>
+                    ${seal?html`<td class="py-2 pr-3 truncate" title=${q.stones.join(', ')}>${q.stones.join(', ')||html`<span class="text-faint">–</span>`}</td>`:html`<td class="py-2 pr-3 tnum text-right">${n0(q.t)}</td>`}
+                    <td class="py-2 pr-3 tnum text-right">${n0(q.a)}</td>
                     <td class="py-2 pr-3 whitespace-nowrap">${b.supervisor||html`<span class="text-faint">–</span>`}${b.supervisorPhone?html`<div class="text-[11px] text-muted mono">${b.supervisorPhone}</div>`:''}</td>
                     <td class="py-2 pr-3 mono whitespace-nowrap">${b.quoteNo||html`<span class="text-faint">–</span>`}</td>
                     <td class="py-2 pr-3 whitespace-nowrap">${flags(b)}</td>

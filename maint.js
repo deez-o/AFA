@@ -347,6 +347,29 @@ function PlanDialog({ctx,plan,onClose}){
 }
 
 /* ---------- one machine's maintenance ---------- */
+/* the machine's photo on its card: loaded only when the card opens */
+function shrinkPhoto(file,max=1000){return new Promise((ok,no)=>{const u=URL.createObjectURL(file);const im=new Image();
+  im.onload=()=>{const k=Math.min(1,max/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
+    c.getContext('2d').drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);ok(c.toDataURL('image/jpeg',.78))};
+  im.onerror=()=>{URL.revokeObjectURL(u);no(new Error('That file isn’t a picture this phone can read.'))};im.src=u})}
+function MachinePhoto({ctx,a}){
+  const {sb,perms}=ctx;const id=a.m.id;const [ph,setPh]=useState(undefined);const [busy,setBusy]=useState(false);const [err,setErr]=useState('');const [big,setBig]=useState(false);
+  useEffect(()=>{let off=false;setPh(undefined);(async()=>{try{const {data,error}=await sb.from('asset_photos').select('photo').eq('asset_id',id).maybeSingle();if(error)throw error;if(!off)setPh(data?data.photo:null)}catch(e){if(!off)setPh(null)}})();return()=>{off=true}},[id]);
+  const add=async file=>{if(!file)return;setErr('');setBusy(true);
+    try{const photo=await shrinkPhoto(file);const {error}=await sb.from('asset_photos').upsert({asset_id:id,photo});if(error)throw error;setPh(photo);ctx.notify&&ctx.notify('Photo saved')}
+    catch(e){setErr(/asset_photos|relation|schema cache/.test(errMsg(e))?'Machine photos aren’t set up yet: an administrator needs to run supabase/machine_photos.sql.':errMsg(e))}finally{setBusy(false)}};
+  const del=async()=>{setErr('');setBusy(true);try{const {error}=await sb.from('asset_photos').delete().eq('asset_id',id);if(error)throw error;setPh(null)}catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
+  const can=perms.work;
+  if(ph===undefined)return html`<div class="rounded-md bg-sunken animate-pulse" style=${{aspectRatio:'4/3'}} id="ap-photo-loading"></div>`;
+  return html`<div class="grid gap-1.5" id="ap-photo">
+    ${ph?html`<button type="button" class="block rounded-md overflow-hidden border border-line bg-sunken" style=${{aspectRatio:'4/3'}} onClick=${()=>setBig(true)} aria-label="View photo"><img src=${ph} alt=${a.m.name} class="w-full h-full object-cover" id="ap-photo-img"/></button>`
+      :can&&html`<label class="rounded-md border border-dashed border-line-strong flex flex-col items-center justify-center gap-1 text-[12.5px] text-muted cursor-pointer hover:bg-sunken" style=${{aspectRatio:'4/3'}}>${Icon.plus}<span>${busy?'Saving…':'Add a photo of the machine'}</span>
+        <input id="ap-photo-file" type="file" accept="image/*" class="sr-only" disabled=${busy} onChange=${e=>{add(e.target.files[0]);e.target.value=''}}/></label>`}
+    ${ph&&can&&html`<div class="flex items-center gap-3 text-[12px]"><label class="text-muted hover:text-ink cursor-pointer">${busy?'Saving…':'Change photo'}<input id="ap-photo-file" type="file" accept="image/*" class="sr-only" disabled=${busy} onChange=${e=>{add(e.target.files[0]);e.target.value=''}}/></label>
+      <button id="ap-photo-del" type="button" class="text-muted hover:text-ink" disabled=${busy} onClick=${del}>Remove</button></div>`}
+    ${err&&html`<div class="text-[12px]" style=${{color:'var(--bad)'}} id="ap-photo-err">${err}</div>`}
+    ${big&&html`<div class="fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-4" onClick=${()=>setBig(false)}><img src=${ph} alt=${a.m.name} class="max-w-full max-h-full rounded-md"/></div>`}</div>`}
+
 function AssetPanel({ctx,a,onClose,open,behind}){
   const {perms,data,M}=ctx;const [pdfBusy,setPdfBusy]=useState(false);
   const plans=a.plans.slice().sort((x,y)=>({overdue:0,soon:1,nobase:2,ok:3}[x.state]-{overdue:0,soon:1,nobase:2,ok:3}[y.state]));
@@ -377,6 +400,7 @@ function AssetPanel({ctx,a,onClose,open,behind}){
       <div class="grid gap-3 md:grid-cols-3">
         <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
           <div class="flex items-center gap-2"><span class="label flex-1">Machine details</span>${(perms.work||ctx.canEdit)&&html`<button id="ap-profile" type="button" class="text-[12px] text-muted hover:text-ink inline-flex items-center gap-1" onClick=${()=>open({k:'machine',a})}>${Icon.pencil} Edit</button>`}</div>
+          <${MachinePhoto} key=${a.m.id} ctx=${ctx} a=${a}/>
           ${[['Make / model',[p.make,p.model].filter(Boolean).join(' ')],['Year',p.year],['Serial',p.serial],['Meters',a.mt==='both'?'Hours and km':a.mt==='km'?'Kilometres':'Engine hours'],['Notes',p.notes]].map(([k,v])=>html`<div key=${k} class="flex gap-2 text-[12.5px]"><span class="text-muted w-[92px] shrink-0">${k}</span><span class=${v?'':'text-faint'}>${v||'–'}</span></div>`)}
         </section>
         <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
@@ -606,6 +630,7 @@ function MachineDialog({ctx,a,isNew,startDel,onClose}){
   const remove=async()=>{if(!perms.mgr)return;
     setData(d=>({...d,resources:d.resources.filter(r=>r.id!==m.id),blocks:d.blocks.filter(b=>b.resourceId!==m.id).map(b=>b.plantIds&&b.plantIds.includes(m.id)?{...b,plantIds:b.plantIds.filter(x=>x!==m.id)}:b)}));
     if(a&&a.p)try{await sb.from('asset_profiles').delete().eq('asset_id',m.id)}catch(e){}
+    try{await sb.from('asset_photos').delete().eq('asset_id',m.id)}catch(e){}
     notify(`${m.name} deleted`);reload();onClose()};
   const T=(id,label,k,ph,cls='',dis=!canR)=>html`<${Fld} label=${label}><input id=${id} class=${'field '+cls} style=${fs} placeholder=${ph||''} value=${f[k]} disabled=${dis} onInput=${e=>setF({...f,[k]:e.target.value})}/><//>`;
   return html`<${Modal} title=${isNew?'Add a machine':m.name} sub=${isNew?'It appears on the schedule and in Fleet straight away':[m.sub,machCatOf(m)].filter(Boolean).join(' · ')} onClose=${onClose}
