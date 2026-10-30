@@ -211,5 +211,22 @@ set local role authenticated;
 select pg_temp.ok((select count(*) from public.maintenance_audit where tbl = 'prestarts') >= 2, 'prestarts are in the audit trail');
 reset role;
 
+-- 6. The administrator can delete a prestart (e.g. a test), with a reason that is kept
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a7');
+set local role authenticated;
+select pg_temp.refused($$select public.delete_prestart((select id from public.prestarts where client_id = '00000000-0000-0000-0000-00000000e001'), 'test')$$, 'superuser deleting a prestart');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
+set local role authenticated;
+select pg_temp.refused($$select public.delete_prestart((select id from public.prestarts where client_id = '00000000-0000-0000-0000-00000000e001'), '  ')$$, 'deleting a prestart without a reason');
+create temp table gone on commit drop as select id from public.prestarts where client_id = '00000000-0000-0000-0000-00000000e001';
+select public.delete_prestart((select id from gone), 'Test prestart');
+select pg_temp.ok(not exists (select 1 from public.prestarts where id = (select id from gone)) and not exists (select 1 from public.prestart_answers where prestart_id = (select id from gone)),
+  'administrator deletes a prestart and its answers');
+select pg_temp.ok((select new->>'reason' = 'Test prestart' and jsonb_array_length(old->'answers') = 5 from public.maintenance_audit where row_id = (select id from gone)::text and action = 'delete (administrator)'),
+  'the reason and a full copy of the prestart are kept in the audit trail');
+reset role;
+select pg_temp.refused($$delete from public.prestarts where id = (select id from public.prestarts limit 1)$$, 'other prestarts still can''t be deleted directly');
+
 select 'ALL PRESTART TESTS PASSED' as result;
 rollback;

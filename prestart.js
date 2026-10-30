@@ -206,6 +206,10 @@ function PsDone({res,a,onHome,onView}){
 /* ---------- a submitted prestart (read only) ---------- */
 function PrestartView({ctx,ps,onClose}){
   const {sb,M,db}=ctx;const [rows,setRows]=useState(null);const [err,setErr]=useState('');
+  const [del,setDel]=useState(null);const [busy,setBusy]=useState(false);   /* the administrator can delete one (e.g. a test), giving a reason */
+  const remove=async()=>{if(!(del||'').trim()){setErr('Say why it’s being deleted.');return}setBusy(true);setErr('');
+    const {error}=await sb.rpc('delete_prestart',{pid:ps.id,reason:del.trim()});setBusy(false);
+    if(error){setErr(errMsg(error));return}ctx.notify&&ctx.notify('Prestart deleted');ctx.reload&&ctx.reload();onClose()};
   useEffect(()=>{sb.from('prestart_answers').select('*').eq('prestart_id',ps.id).order('pos').then(({data,error})=>{if(error)setErr(errMsg(error));else setRows(data||[])})},[ps.id]);
   const a=M.byId.get(ps.asset_id);const tpl=db.prestart_templates.find(t=>t.id===ps.template_id);
   const urls=useSigned(sb,[ps.signature,...(rows||[]).flatMap(r=>r.photos||[])].filter(Boolean));
@@ -214,7 +218,9 @@ function PrestartView({ctx,ps,onClose}){
     :r.answer==='fail'?html`<span class="w-6 h-6 rounded-full inline-flex items-center justify-center text-white shrink-0" style=${{background:'hsl(0 72% 47%)'}} title="Fail">${I.cross}</span>`
     :html`<span class="w-6 h-6 rounded-full inline-flex items-center justify-center shrink-0 text-muted" style=${{background:'var(--sunken)'}} title="Not applicable">${I.dash}</span>`;
   return html`<${Modal} title=${html`<span class="inline-flex items-center gap-2 flex-wrap">Prestart · ${a?a.m.name:ps.asset_id} ${resChip(ps.result)}</span>`} sub=${`${fmtDT(ps.submitted_at)} · ${ps.operator_name}`} onClose=${onClose}
-    foot=${html`<span class="text-[12px] text-muted mr-auto">Submitted prestarts can’t be changed</span><button type="button" class="btn" onClick=${onClose}>Close</button>`}>
+    foot=${del!=null?html`<input id="ps-del-reason" class="field flex-1 min-w-[200px]" style=${fs} placeholder="Why delete it? e.g. Test prestart" value=${del} onInput=${e=>setDel(e.target.value)} aria-label="Reason for deleting"/>
+        <button type="button" class="btn" onClick=${()=>{setDel(null);setErr('')}}>Keep</button><button id="ps-del-go" type="button" class="btn" style=${{color:'var(--bad)'}} disabled=${busy} onClick=${remove}>${busy?'Deleting…':'Delete prestart'}</button>`
+      :html`<span class="text-[12px] text-muted mr-auto">Submitted prestarts can’t be changed</span>${ctx.role==='admin'&&html`<button id="ps-del" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel('')}>Delete…</button>`}<button type="button" class="btn" onClick=${onClose}>Close</button>`}>
     <div class="grid gap-3" id="ps-view">
       <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[12.5px]">
         ${[['Machine',a?`${a.m.name} · ${a.m.sub||''}`:ps.asset_id],['Checklist',tpl?`${tpl.name} · v${tpl.version}`:''],['Meters',[ps.hours!=null&&`${fmtN(+ps.hours)} h`,ps.km!=null&&`${fmtN(+ps.km)} km`].filter(Boolean).join(' · ')],
@@ -249,7 +255,7 @@ function PrestartScreen({data,live,notify}){
   if(err&&!db)return html`<div class="panel p-6 grid gap-2 max-w-[640px]"><div class="font-display text-[17px] font-semibold">Prestarts aren’t set up yet</div><p class="text-[13px] text-muted">An administrator needs to run the Fleet & Maintenance database scripts in Supabase.</p><p class="text-[12px] text-faint mono">${err}</p><div><button type="button" class="btn" onClick=${reload}>Try again</button></div></div>`;
   if(!M||!prof)return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;
   if(!db.p3)return html`<div class="panel p-6 grid gap-2 max-w-[640px]"><div class="font-display text-[17px] font-semibold">Prestarts aren’t set up yet</div><p class="text-[13px] text-muted">An administrator needs to run <span class="mono">supabase/prestarts.sql</span> once in Supabase → SQL Editor.</p><p class="text-[12px] text-faint mono">${db.p3err||''}</p><div><button type="button" class="btn" onClick=${reload}>Try again</button></div></div>`;
-  const ctx={sb,db,data,M,me,notify,reload};
+  const ctx={sb,db,data,M,me,notify,reload,role:live.role};
   const staff=prof.staff_id?data.resources.find(r=>r.id===prof.staff_id):null;
   const tpls=db.prestart_templates;
   let body;

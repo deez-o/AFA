@@ -96,7 +96,7 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 ### Prestarts
 - **Checklists** (Fleet › Checklists, admin and superuser): one per machine category, plus an optional one for *all other machines*. Start from the standard list and change it. Saving a change makes a new version; prestarts already done keep the questions they answered. Mark questions **critical**: a fail means *Do not operate*.
 - **Operators** fill in the prestart on their phone: meters, each question (Pass / Fail / N/A; a fail needs a comment and can have photos), signature and declaration. Answers are saved on the phone as they go, so a dropped connection or a closed browser loses nothing. Submitting twice never makes two prestarts.
-- A submitted prestart can't be changed or deleted by anyone. Hours or km lower than the last reading don't stop the prestart: it is saved with a note and the reading isn't recorded.
+- A submitted prestart can't be changed. Only the `admin` can delete one (e.g. a test): open it → *Delete…*, give a reason. A full copy and the reason are kept in the audit trail. Hours or km lower than the last reading don't stop the prestart: it is saved with a note and the reading isn't recorded.
 - **Logins** (Fleet › Logins, admin and superuser): set each person's role and link each login to its Staff record, so prestarts carry the operator's name. Nobody can change their own role, and only the `admin` can give or remove the admin role. New logins are still added in Supabase → Authentication → Users.
 - Defects raised automatically from failed items, and restrictions that block a machine, come in the next phase.
 

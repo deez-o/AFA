@@ -164,6 +164,8 @@ create table if not exists public.prestart_answers (
 create or replace function public.prestart_locked()
 returns trigger language plpgsql as $$
 begin
+  -- the one way out: the administrator deleting a prestart with delete_prestart() (below), which records why
+  if tg_op = 'DELETE' and coalesce(current_setting('fraserflow.prestart_delete', true), '') = 'on' then return old; end if;
   raise exception 'A submitted prestart can''t be changed or deleted' using errcode = '42501';
 end; $$;
 drop trigger if exists prestarts_locked on public.prestarts;
@@ -278,6 +280,29 @@ begin
 end; $$;
 revoke all on function public.submit_prestart(jsonb) from public, anon;
 grant execute on function public.submit_prestart(jsonb) to authenticated;
+
+-- the administrator (only) can delete a prestart, e.g. a test one. A reason is required, and a full copy of the
+-- prestart and its answers is kept in the audit trail. Its photos, signature and meter readings stay.
+create or replace function public.delete_prestart(pid uuid, reason text)
+returns void language plpgsql security definer set search_path = public as $$
+declare ps jsonb;
+begin
+  if public.my_role() is distinct from 'admin' then
+    raise exception 'Only the administrator can delete a prestart' using errcode = '42501';
+  end if;
+  if btrim(coalesce(reason, '')) = '' then raise exception 'Say why the prestart is being deleted' using errcode = '22023'; end if;
+  select to_jsonb(p) || jsonb_build_object('answers', coalesce((select jsonb_agg(to_jsonb(a) order by a.pos) from public.prestart_answers a where a.prestart_id = p.id), '[]'::jsonb))
+    into ps from public.prestarts p where p.id = pid;
+  if ps is null then raise exception 'That prestart doesn''t exist' using errcode = '23503'; end if;
+  insert into public.maintenance_audit (tbl, row_id, action, old, new)
+  values ('prestarts', pid::text, 'delete (administrator)', ps, jsonb_build_object('reason', btrim(reason)));
+  perform set_config('fraserflow.prestart_delete', 'on', true);
+  delete from public.prestart_answers where prestart_id = pid;
+  delete from public.prestarts where id = pid;
+  perform set_config('fraserflow.prestart_delete', '', true);
+end; $$;
+revoke all on function public.delete_prestart(uuid, text) from public, anon;
+grant execute on function public.delete_prestart(uuid, text) to authenticated;
 
 -- 4. Manuals and documents for a machine (files in the file store) -----------------
 create table if not exists public.maintenance_files (
