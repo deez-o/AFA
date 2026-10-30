@@ -63,6 +63,10 @@ FraserFlow can be installed on phones and computers and then opens from its own 
 It always runs the latest version: there is nothing to update. On iPhones the installed app keeps its own sign-in, so people sign in once more after adding it.
 Files: `manifest.json`, `sw.js` (service worker), `icons/`.
 
+## Changing a booking's dates on the board
+
+Drag the middle of a bar to move the whole booking (to other days, or to another crew/machine). Drag its **right end** to extend or shorten it, or its **left end** to change the start date. Only the dates change; quantities already entered for a shift stay on their day. Clicking a bar still opens it. (Planners and administrators; viewers can't change bookings.)
+
 ## What is shared and what is personal
 Shared by everyone: crews, staff, machines, asphalt plants, jobs, bookings, quantities, mixes, binders and quote-change history.
 Personal to each person's browser: hidden rows, section order, view length, dark mode and notification settings.

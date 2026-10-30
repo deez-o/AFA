@@ -76,7 +76,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:4px;backgroun
 .field:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
 .blk{position:absolute;height:28px;border-radius:6px;display:flex;align-items:center;gap:6px;padding:0 8px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;cursor:grab;transition:transform .1s,box-shadow .1s;user-select:none;touch-action:none}
-.blk>*:not(.wkoff){position:relative;z-index:1}
+.blk>*:not(.wkoff):not(.blk-edge){position:relative;z-index:1}
 .blk .wkoff{position:absolute;top:0;bottom:0;z-index:0;pointer-events:none;background-color:color-mix(in srgb,var(--weekend) 78%,transparent);background-image:repeating-linear-gradient(135deg,color-mix(in srgb,var(--ink) 10%,transparent) 0 3px,transparent 3px 7px)}
 .blk .wkoff.cov{background-color:color-mix(in srgb,var(--surface) 55%,transparent);background-image:repeating-linear-gradient(45deg,color-mix(in srgb,var(--ink) 14%,transparent) 0 2px,transparent 2px 6px)}
 /* Leaflet (map) essentials, kept inline */
@@ -110,6 +110,12 @@ body.is-dragging,body.is-dragging *{cursor:grabbing!important;user-select:none}
 .reo-line{position:absolute;left:0;right:0;height:3px;background:var(--accent);z-index:25;pointer-events:none;border-radius:2px}
 .blk:hover{transform:translateY(-1px);box-shadow:0 3px 10px rgba(0,0,0,.12);z-index:3}
 .blk .t{overflow:hidden;text-overflow:ellipsis}
+.blk-edge{position:absolute;top:0;bottom:0;width:9px;z-index:3;cursor:ew-resize;touch-action:none}
+.blk-edge-l{left:-2px}.blk-edge-r{right:-2px}
+.blk-edge::after{content:"";position:absolute;top:22%;bottom:22%;width:3px;border-radius:2px;background:currentColor;opacity:0;transition:opacity .12s}
+.blk-edge-l::after{left:3px}.blk-edge-r::after{right:3px}
+.blk:hover .blk-edge::after,.blk.dragging .blk-edge::after{opacity:.45}
+@media (pointer:coarse){.blk-edge{width:14px}}
 .flag{position:absolute;height:16px;display:flex;align-items:center;justify-content:center;gap:3px;font-size:10.5px;font-weight:600;border-radius:4px;white-space:nowrap;overflow:hidden;pointer-events:auto;font-family:var(--f-mono)}
 .dayarea{touch-action:pan-x pan-y;cursor:crosshair}
 .scrollbox{overflow:auto;overscroll-behavior:contain}
@@ -134,7 +140,7 @@ tailwind.config={theme:{extend:{colors:{
 </head>
 <body>
 <div id="root"></div>
-<script src="/app.js?v=202610302205"></script>
+<script src="/app.js?v=202610302213"></script>
 <script>/* installable app: the service worker (sw.js) */
 if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));</script>
 </body>

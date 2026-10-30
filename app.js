@@ -745,7 +745,7 @@ function packLanes(items){
 }
 
 /* ---------- board ---------- */
-function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExport,collapsed,toggleSection,notifPrefs,only,headLabel}){
+function Board({data,days,view,onCreate,onEdit,onMove,onResize,onRename,onReorder,onExport,collapsed,toggleSection,notifPrefs,only,headLabel}){
   /* ---- drag to reorder sections and rows (by their grip handles) ---- */
   const boxRef=React.useRef(null);
   const [reo,setReo]=useState(null);
@@ -798,13 +798,17 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
   const dragRef=React.useRef(null);
   dragRef.current=drag;
   const typeOf=id=>data.resources.find(r=>r.id===id)?.type;
-  const startDrag=(e,b)=>{
+  /* mode: 'move' the whole booking, or drag its 'start' or 'end' edge to make it longer or shorter */
+  const startDrag=(e,b,mode='move')=>{
     e.stopPropagation();
     if(e.button!==0)return;
+    if(mode!=='move')e.preventDefault();
     const area=e.currentTarget.closest('.dayarea');
     const colW=area.getBoundingClientRect().width/N;
-    setDrag({b,x0:e.clientX,y0:e.clientY,x:e.clientX,y:e.clientY,colW,dx:0,rid:b.resourceId,moved:false});
+    setDrag({b,mode,x0:e.clientX,y0:e.clientY,x:e.clientX,y:e.clientY,colW,dx:0,rid:b.resourceId,moved:false});
   };
+  const resized=(d)=>d.mode==='end'?{...d.b,end:iso(addDays(parse(d.b.end),d.dx))<d.b.start?d.b.start:iso(addDays(parse(d.b.end),d.dx))}
+    :{...d.b,start:iso(addDays(parse(d.b.start),d.dx))>d.b.end?d.b.end:iso(addDays(parse(d.b.start),d.dx))};
   useEffect(()=>{
     if(!drag)return;
     const mv=e=>{
@@ -813,12 +817,13 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
       if(moved)e.preventDefault();
       const dx=Math.round((e.clientX-d.x0)/d.colW);
       let rid=d.rid;
-      const row=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-rid]');
+      const row=d.mode==='move'&&document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-rid]');
       if(row&&typeOf(row.dataset.rid)===typeOf(d.b.resourceId))rid=row.dataset.rid;
       setDrag({...d,x:e.clientX,y:e.clientY,dx,rid,moved});
     };
     const upH=()=>{
       const d=dragRef.current;setDrag(null);if(!d)return;
+      if(d.mode!=='move'){if(!d.moved||d.dx===0)return;const nb=resized(d);if(nb.start!==d.b.start||nb.end!==d.b.end)(onResize||onMove)(nb);return}
       if(!d.moved){onEdit(d.b);return}
       if(d.dx===0&&d.rid===d.b.resourceId)return;
       onMove({...d.b,resourceId:d.rid,start:iso(addDays(parse(d.b.start),d.dx)),end:iso(addDays(parse(d.b.end),d.dx))});
@@ -831,7 +836,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
     return()=>{window.removeEventListener('pointermove',mv);window.removeEventListener('pointerup',upH);window.removeEventListener('keydown',cancel)};
   },[!!drag]);
   useEffect(()=>{document.body.classList.toggle('is-dragging',!!(drag&&drag.moved))},[drag&&drag.moved]);
-  const preview=drag&&drag.moved?{...drag.b,resourceId:drag.rid,start:iso(addDays(parse(drag.b.start),drag.dx)),end:iso(addDays(parse(drag.b.end),drag.dx))}:null;
+  const preview=drag&&drag.moved?(drag.mode!=='move'?resized(drag):{...drag.b,resourceId:drag.rid,start:iso(addDays(parse(drag.b.start),drag.dx)),end:iso(addDays(parse(drag.b.end),drag.dx))}):null;
   const effBlocks=preview?data.blocks.map(b=>b.id===preview.id?preview:b):data.blocks;
   const quoteFresh=new Set(!(notifPrefs&&notifPrefs.quote)?[]:recentQuoteChanges(data).map(c=>c.bookingId));
   const nudge=(b,n)=>onMove({...b,start:iso(addDays(parse(b.start),n)),end:iso(addDays(parse(b.end),n))});
@@ -935,6 +940,8 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
               :html`<span class="t">${title}</span>`}
             ${!compact&&span>=2&&view===7&&html`<span class="ml-auto mono text-[10.5px] opacity-70 shrink-0">${span}d</span>`}
             ${it.cutR&&html`<span aria-hidden="true" class=${compact?'':'ml-auto'}>›</span>`}
+            ${!v&&!it.cutL&&html`<span class="blk-edge blk-edge-l" aria-hidden="true" title="Drag to change the start date" onPointerDown=${e=>startDrag(e,it.b,'start')} onClick=${e=>e.stopPropagation()}></span>`}
+            ${!v&&!it.cutR&&html`<span class="blk-edge blk-edge-r" aria-hidden="true" title="Drag to extend or shorten" onPointerDown=${e=>startDrag(e,it.b,'end')} onClick=${e=>e.stopPropagation()}></span>`}
           </div>`;})}
         ${clashes.map(c=>html`<div key=${'c'+c.i} class="absolute top-1 bottom-1 z-[4] rounded-md pointer-events-none"
             style=${{left:`calc(${c.i/N*100}% + 1px)`,width:`calc(${100/N}% - 2px)`,boxShadow:'inset 0 0 0 2px hsl(0 75% var(--blk-edge-l))',
@@ -5102,6 +5109,13 @@ function App({boot,live}){
     const who=data.resources.find(r=>r.id===b.resourceId)?.name;
     setToast(`Moved${prev&&prev.resourceId!==b.resourceId?' to '+who:''} · ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`);
   };
+  /* dragging an edge of a booking: only its dates change (its shift quantities stay on their days) */
+  const onResize=b=>{
+    const prev=data.blocks.find(x=>x.id===b.id);if(!prev)return;
+    setData(d=>({...d,blocks:d.blocks.map(x=>x.id===b.id?{...x,start:b.start,end:b.end}:x)}));
+    const n=diffDays(parse(b.start),parse(b.end))+1;const was=diffDays(parse(prev.start),parse(prev.end))+1;
+    setToast(`${n>was?'Extended':'Shortened'} to ${n} day${n===1?'':'s'} · ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`);
+  };
   const first=data.resources[0];
 
   const Stat=({k,v,sub,tone})=>html`<div class="min-w-0">
@@ -5179,7 +5193,7 @@ function App({boot,live}){
       </section>`}
 
       <section class="panel flex-1 min-h-[320px] flex flex-col overflow-hidden">
-        <${Board} data=${data} days=${days} view=${view} onCreate=${onCreate} onEdit=${b=>setEditing(b)} onMove=${onMove} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
+        <${Board} data=${data} days=${days} view=${view} onCreate=${onCreate} onEdit=${b=>setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
           collapsed=${collapsed} toggleSection=${t=>setCollapsed(c=>({...c,[t]:!c[t]}))}/>
         <div class="border-t border-line px-4 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
           ${legend.filter(([g])=>SCR.legend.includes(g)).map(([g,ks])=>html`<span key=${g} class="inline-flex flex-wrap items-center gap-x-3 gap-y-1">

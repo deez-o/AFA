@@ -2,7 +2,7 @@
    - FraserFlow's own files: always fetched fresh when online (so updates arrive straight away), kept for offline
    - libraries and fonts from CDNs (fixed versions): kept after the first load
    - data (Supabase) and /api: never touched, always live */
-const CACHE='fraserflow-v7';
+const CACHE='fraserflow-v8';
 const SHELL=['/','/manifest.json','/icons/icon-192.png','/icons/icon-512.png','/icons/apple-touch-icon.png','/icons/favicon-32.png'];
 const CDN=/^https:\/\/(cdn\.tailwindcss\.com|cdnjs\.cloudflare\.com|unpkg\.com|cdn\.jsdelivr\.net|fonts\.googleapis\.com|fonts\.gstatic\.com)\//;
 
