@@ -310,8 +310,15 @@ function PrestartScreen({data,live,notify}){
     const todays=new Map();db.prestarts.filter(p=>localDay(p.submitted_at)===today).forEach(p=>{if(!todays.has(p.asset_id))todays.set(p.asset_id,p)});
     const mine=db.prestarts.filter(p=>p.operator===me).slice(0,8);
     const ql=q.trim().toLowerCase();const crewId=staff&&staff.crewId;
+    /* booked for today's shift (ticked on a job booking): those come first, the operator's own crew's job before others */
+    const nowShift=new Date().getHours()>=15?'night':'day';
+    const bookedOn=m=>{const bs=data.blocks.filter(b=>b.kind==='job'&&(b.plantIds||[]).includes(m.id)&&covers(b,today)&&worksOn(b,TODAY));
+      return bs.find(b=>(b.shift||'day')===nowShift)||bs[0]||null};
+    const bk=new Map(M.assets.map(a=>[a.m.id,bookedOn(a.m)]));
+    const rank=a=>{const b=bk.get(a.m.id);return b?(crewId&&b.resourceId===crewId?0:1):(crewId&&a.m.crewId===crewId?2:3)};
     const list=M.assets.filter(a=>!a.retired&&(!ql||[a.m.name,a.m.sub,a.m.rego,machCatOf(a.m)].join(' ').toLowerCase().includes(ql)))
-      .sort((x,y)=>(crewId?((y.m.crewId===crewId)-(x.m.crewId===crewId)):0)||x.m.name.localeCompare(y.m.name));
+      .sort((x,y)=>rank(x)-rank(y)||x.m.name.localeCompare(y.m.name));
+    const bkText=b=>{const c=data.resources.find(r=>r.id===b.resourceId);const j=data.jobs.find(x=>x.id===b.jobId);return [c&&c.name,j&&[j.customer,j.name].filter(Boolean).join(' · ')].filter(Boolean).join(' · ')+(b.shift==='night'?' (night)':'')};
     const dlist=Object.values(drafts).map(dr=>({dr,a:M.byId.get(dr.asset_id)})).filter(x=>x.a);
     const showInst=inst&&!hideInst&&window.innerWidth<900;
     body=html`<div class="grid gap-3 pb-6">
@@ -336,10 +343,12 @@ function PrestartScreen({data,live,notify}){
           <button type="button" class="btn btn-primary" style=${{height:40}} onClick=${()=>setView({k:'form',a})}>Continue</button></div>`)}</section>`}
       <input id="ps-search" type="search" class="field" style=${{height:44,fontSize:16}} placeholder="Find a machine: fleet no., name or rego" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Find a machine"/>
       <section class="panel divide-y overflow-hidden" style=${{borderColor:'var(--line)'}} aria-label="Machines" id="ps-machines">
-        ${list.map(a=>{const tpl=tplFor(tpls,a.m);const t=todays.get(a.m.id);const mineCrew=crewId&&a.m.crewId===crewId;
-          return html`<button key=${a.m.id} type="button" class="w-full text-left px-3 py-3 flex items-center gap-3 hover:bg-sunken disabled:opacity-60" style=${{borderColor:'var(--line)'}} disabled=${!tpl} onClick=${()=>setView({k:'form',a})}>
+        ${list.map((a,i)=>{const tpl=tplFor(tpls,a.m);const t=todays.get(a.m.id);const mineCrew=crewId&&a.m.crewId===crewId;const b=bk.get(a.m.id);
+          const head=i===0&&b?'Booked for today':(i>0&&bk.get(list[i-1].m.id)&&!b)?'Other machines':null;
+          return html`${head&&html`<div key=${'h'+i} class="px-3 py-1.5 label bg-sunken ps-group">${head}</div>`}<button key=${a.m.id} type="button" class="w-full text-left px-3 py-3 flex items-center gap-3 hover:bg-sunken disabled:opacity-60" style=${{borderColor:'var(--line)'}} disabled=${!tpl} onClick=${()=>setView({k:'form',a})}>
             <div class="min-w-0 flex-1"><div class="text-[15px] font-semibold">${a.m.name} <span class="font-normal text-muted text-[13.5px]">${a.m.sub||''}</span>${mineCrew&&html` <span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted">Your crew</span>`}</div>
-              <div class="text-[12.5px] text-muted truncate">${a.m.rego&&html`<span class="mono font-medium text-ink ps-rego">Rego ${a.m.rego}</span> · `}${tpl?`${machCatOf(a.m)||'No category'} · ${meterTxt(a)}`:`No prestart checklist for ${machCatOf(a.m)||'this machine'} yet`}</div></div>
+              <div class="text-[12.5px] text-muted truncate">${a.m.rego&&html`<span class="mono font-medium text-ink ps-rego">Rego ${a.m.rego}</span> · `}${tpl?`${machCatOf(a.m)||'No category'} · ${meterTxt(a)}`:`No prestart checklist for ${machCatOf(a.m)||'this machine'} yet`}</div>
+              ${b&&html`<div class="text-[12.5px] font-medium truncate ps-booked" style=${{color:'var(--accent)'}}>Today: ${bkText(b)}</div>`}</div>
             ${a.restr&&a.restr.length?html`<span class="shrink-0 text-[10.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style=${{background:'hsl(0 72% 47%)',color:'#fff'}}>Do not use</span>`:''}
             ${t?html`<span class="text-right shrink-0"><span class="block">${resChip(t.result)}</span><span class="block text-[11.5px] text-muted mt-0.5">${fmtTime(t.submitted_at)} · ${t.operator_name.split(' ')[0]}</span></span>`:tpl&&html`<span class="text-muted shrink-0">${Icon.chevR}</span>`}</button>`})}
         ${!list.length&&html`<div class="px-3 py-6 text-center text-[13px] text-muted">No machines match.</div>`}
