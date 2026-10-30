@@ -179,6 +179,7 @@ const Icon={
   moon:svg(html`<path d="M12.5 10.2A5.5 5.5 0 015.8 3.5a5.5 5.5 0 106.7 6.7z" fill="currentColor"/>`,12),
   wrench:svg(html`<path d="M10.5 2a3.5 3.5 0 00-3.2 4.9L2.5 11.7a1.3 1.3 0 001.8 1.8l4.8-4.8A3.5 3.5 0 0014 5.5l-2 2-1.8-.3-.3-1.8 2-2c-.4-.3-.9-.4-1.4-.4z" fill="currentColor"/>`,11),
   sap:svg(html`<rect x="1.5" y="3" width="13" height="10" rx="2" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M4.5 6.5h7M4.5 9.5h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M2 14L14 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`,11),
+  briefcase:svg(html`<rect x="2" y="4.5" width="12" height="9" rx="1.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M5.8 4.5V3.2c0-.4.3-.7.7-.7h3c.4 0 .7.3.7.7v1.3M2 8.5h12" stroke="currentColor" stroke-width="1.5" fill="none"/>`,15),
   person:svg(html`<circle cx="8" cy="5" r="2.6" fill="currentColor"/><path d="M3 14c.4-3 2.4-4.6 5-4.6s4.6 1.6 5 4.6z" fill="currentColor"/>`,11),
 };
 
@@ -556,15 +557,16 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
   const placeholders={crew:['Crew name, e.g. Crew 5','Type of work, e.g. Paving, Seal'],person:['Full name','Role, e.g. Roller operator'],machine:['Machine #, e.g. PV010','Description, e.g. Vogele Paver (2003)'],aplant:['Plant name, e.g. Asphalt plant 2','Location, e.g. Narangba']};
 
   const tabsBar=html`<div class="seg w-full !grid grid-cols-3 gap-0.5" role="tablist" aria-label="Resource type">
-        ${[...orderOf(data).filter(t=>TYPES[t]).map(t=>[t,TYPES[t].tab||TYPES[t].label,data.resources.filter(r=>r.type===t).length]),['jobs','Jobs',data.jobs.length],['mixes','Mixes',mixTypesOf(data).length],['seal','Seal',sealTypesOf(data).length],['trucks','Trucks',truckCosOf(data).length],['subs','Subcontractors',subCosOf(data).length]].filter(([t])=>tabOK(t))
+        ${[...orderOf(data).filter(t=>TYPES[t]).map(t=>[t,TYPES[t].tab||TYPES[t].label,data.resources.filter(r=>r.type===t).length]),['mixes','Mixes',mixTypesOf(data).length],['seal','Seal',sealTypesOf(data).length],['trucks','Trucks',truckCosOf(data).length],['subs','Subcontractors',subCosOf(data).length]].filter(([t])=>tabOK(t))
           .map(([t,label,n])=>html`<button key=${t} role="tab" class="flex-1 !px-1 !text-[12.5px]" aria-pressed=${tab===t} aria-selected=${tab===t} title=${`${label} (${n})`} onClick=${()=>{setTab(t);setConfirmId(null)}}>${label}</button>`)}
       </div>`;
   const headTop=html`<div class="flex items-center justify-between gap-2">
-        <div class="font-display text-[17px] font-semibold leading-tight">Resources</div>
-        ${onClose&&html`<button class="btn btn-ghost lg:hidden" onClick=${onClose} aria-label="Close resources panel">${Icon.x}</button>`}
+        <div class="font-display text-[17px] font-semibold leading-tight">${tab==='jobs'?'Jobs':'Settings'}</div>
+        ${onClose&&html`<button class="btn btn-ghost lg:hidden" onClick=${onClose} aria-label=${tab==='jobs'?'Close jobs panel':'Close settings panel'}>${Icon.x}</button>`}
       </div>`;
+  /* Jobs has its own button in the header, so it opens on its own without the settings tabs */
   if(tab==='jobs')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
-    <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
+    <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}</div>
     <${JobsManager} data=${data} setData=${setData} onImport=${onImport} onMerge=${onMerge}/>
   </aside>`;
   if(tab==='subs')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
@@ -586,8 +588,8 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
   return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">
       <div class="flex items-center justify-between gap-2">
-        <div class="font-display text-[17px] font-semibold leading-tight">Resources</div>
-        ${onClose&&html`<button class="btn btn-ghost lg:hidden" onClick=${onClose} aria-label="Close resources panel">${Icon.x}</button>`}
+        <div class="font-display text-[17px] font-semibold leading-tight">Settings</div>
+        ${onClose&&html`<button class="btn btn-ghost lg:hidden" onClick=${onClose} aria-label="Close settings panel">${Icon.x}</button>`}
       </div>
       ${tabsBar}
       <div>
@@ -1049,7 +1051,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
           ?groupCrews(rows).map(g=>[SubHead(g),...(collapsed['crew:'+g.key]?[]:g.rows.map(Row))])
           :t==='machine'?groupMachines(rows,data).map(g=>[SubHead(g,'mcat','machine'),...(collapsed['mcat:'+g.key]?[]:g.rows.map(Row))])
           :rows.map(Row))}
-        ${!collapsed[t]&&t!=='tonnes'&&rows.length===0&&html`<div class="px-4 py-4 text-muted text-[13px] border-b border-line">No ${TYPES[t].label.toLowerCase()} on the board. Add or unhide them in the Resources panel.</div>`}
+        ${!collapsed[t]&&t!=='tonnes'&&rows.length===0&&html`<div class="px-4 py-4 text-muted text-[13px] border-b border-line">No ${TYPES[t].label.toLowerCase()} on the board. Add or unhide them in Settings.</div>`}
       </div>`;})}
 
     </div>
@@ -1088,7 +1090,7 @@ function PlantPicker({f,set,data}){
       ${own.length>0&&own.some(m=>!picked.has(m.id))&&html`<button type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${addOwn}>Add ${crew?.name||'crew'}'s plant</button>`}
     </div>
     ${machines.length===0
-      ?html`<div class="text-[12.5px] text-muted md:col-span-2">No machines yet. Add them on the Machines screen (left menu), in the Resources panel.</div>`
+      ?html`<div class="text-[12.5px] text-muted md:col-span-2">No machines yet. Add them on the Machines screen (left menu), in the Settings panel.</div>`
       :html`${machines.length>8&&html`<input id="pl-search" class="field field-sm md:col-start-1" style=${{height:30,fontSize:13}} placeholder="Search machine #, description, rego or category" value=${pq} onInput=${e=>setPq(e.target.value)} aria-label="Search machines"/>`}
       <ul class="border border-line rounded-lg max-h-[min(460px,55vh)] overflow-y-auto divide-y md:col-start-1" style=${{borderColor:'var(--line)'}}>
         ${plantSections.length===0&&html`<li class="px-3 py-3 text-[12.5px] text-muted">No machines match.</li>`}
@@ -3389,9 +3391,13 @@ function App({boot,live}){
   const [drawer,setDrawer]=useState(false);
   const [panel,setPanel]=useState(()=>{try{return localStorage.getItem(KEY+':panel')!=='hidden'}catch(e){return true}});
   useEffect(()=>{try{localStorage.setItem(KEY+':panel',panel?'shown':'hidden')}catch(e){}},[panel]);
-  const toggleResources=()=>{let wide=true;try{wide=window.matchMedia('(min-width: 1024px)').matches}catch(e){}
-    if(wide)setPanel(p=>!p);else setDrawer(d=>!d)};
   const [tab,setTab]=useState('crew');
+  /* the side panel shows either Settings (crews, mixes, trucks…) or Jobs; each header button opens its own view and closes it when pressed again */
+  const lastSet=useRef('crew');useEffect(()=>{if(tab!=='jobs')lastSet.current=tab},[tab]);
+  const panelOpen=()=>{let wide=true;try{wide=window.matchMedia('(min-width: 1024px)').matches}catch(e){}return wide?panel:drawer};
+  const showPanel=v=>{let wide=true;try{wide=window.matchMedia('(min-width: 1024px)').matches}catch(e){}if(wide)setPanel(v);else setDrawer(v)};
+  const toggleResources=()=>{if(tab==='jobs'){setTab(lastSet.current||'crew');showPanel(true)}else showPanel(!panelOpen())};
+  const toggleJobs=()=>{if(tab==='jobs'&&panelOpen())showPanel(false);else{setTab('jobs');showPanel(true)}};
   /* roll "today" over at midnight when the page stays open */
   const [,setDayTick]=useState(0);
   useEffect(()=>{const chk=()=>{const n=new Date();if(iso(n)!==iso(TODAY)){n.setHours(12,0,0,0);TODAY=n;setDayTick(x=>x+1)}};
@@ -3515,9 +3521,12 @@ function App({boot,live}){
           <img src=${BRAND_OVAL} alt="Alex Fraser Group" class="block h-[50px] w-auto select-none" draggable="false"/>
           <img src=${BRAND_TAG} alt="Building greener roads" class="brand-tag hidden xl:block h-[30px] w-auto select-none" draggable="false"/>
         </div>
-        <button class="btn" onClick=${toggleResources} aria-pressed=${panel} aria-controls="resources-panel"
-          title=${panel?'Hide the Resources panel':'Show the Resources panel'}
-          style=${panel?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.list} Resources</button>
+        ${(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
+          title=${on?'Hide Settings':'Crews, plant, mixes, seal, trucks and subcontractors'}
+          style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.gear} Settings</button>`)(panel&&tab!=='jobs')}
+        ${screen==='schedule'&&(on=>html`<button id="btn-jobs" class="btn" onClick=${toggleJobs} aria-pressed=${on} aria-controls="resources-panel"
+          title=${on?'Hide Jobs':'Jobs: add, edit, complete and import'}
+          style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.briefcase} Jobs</button>`)(panel&&tab==='jobs')}
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setProgram(true)} title="Daily program PDFs for each job on a day">${Icon.download} Daily program</button>`}
         <div class="flex items-center gap-2 min-w-0">
           <h1 class="font-display text-[20px] font-semibold tracking-tight truncate">${SCR.title==='FraserFlow'?html`Fraser<span style=${{color:'var(--accent)'}}>Flow</span>`:SCR.title}</h1>
@@ -3738,7 +3747,7 @@ function FirstRun({canEdit,onStart}){
     ${canEdit
       ?html`<div class="flex flex-col gap-3">
           <div class="font-semibold">Set up your roster</div>
-          <p class="text-[13px] text-muted">The roster is empty. Start it, then add your crews, staff and machines in the Resources panel, or bring in your jobs with Import from TeamCal in the Jobs tab.</p>
+          <p class="text-[13px] text-muted">The roster is empty. Start it, then add your crews, staff and machines in Settings, or bring in your jobs with Import from TeamCal under Jobs.</p>
           <button class="btn btn-primary justify-center" disabled=${busy} onClick=${async()=>{setBusy(true);await onStart(emptyRoster())}}>Start the roster</button>
         </div>`
       :html`<p class="text-[13px] text-muted">The roster hasn’t been set up yet. A planner needs to sign in first.</p>`}
