@@ -48,6 +48,8 @@ body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:1
 .tnum{font-variant-numeric:tabular-nums}
 .label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
 .brand-tag{display:block}
+/* thin Alex Fraser maroon strip across the top of the page */
+body::before{content:'';position:fixed;top:0;left:0;right:0;height:4px;background:#990A2C;z-index:80;pointer-events:none}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .brand-tag{filter:invert(1)}}
 :root[data-theme="dark"] .brand-tag{filter:invert(1)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
@@ -101,6 +103,6 @@ tailwind.config={theme:{extend:{colors:{
 </head>
 <body>
 <div id="root"></div>
-<script src="/app.js?v=202610301152"></script>
+<script src="/app.js?v=202610301158"></script>
 </body>
 </html>
