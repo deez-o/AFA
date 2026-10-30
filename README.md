@@ -129,8 +129,18 @@ Once FraserFlow has been opened on a phone with reception, it opens again withou
 
 After pulling this version, run `supabase/schema.sql`, then `supabase/maintenance.sql`, `supabase/prestarts.sql`, `supabase/defects.sql` and `supabase/planner_link.sql` in the SQL Editor: all are safe to re-run.
 
+### Creating logins inside FraserFlow
+Fleet › **Logins** › **New login** (administrators and superusers): username (or email), a temporary password (one is suggested), role and Staff record. **Reset password…** on a row gives someone a new temporary password. Either way they choose their own the next time they sign in. Only the administrator can create admins or reset an admin's password; nobody resets their own here.
+
+This needs one setting, because creating logins uses Supabase's admin key, which must stay on the server:
+1. Supabase → **Project Settings → API Keys** (or *API*) → copy the **service_role** secret key. Never paste it anywhere else, or into a chat.
+2. Vercel → Project → **Settings → Environment Variables** → add `SUPABASE_SERVICE_ROLE_KEY` with that value (Production).
+3. Vercel → **Deployments** → redeploy the latest.
+
+The key is only used by `api/users.js`, which checks that the person asking is signed in as an administrator or superuser. `tests/api_users_test.js` checks those rules (`node tests/api_users_test.js`).
+
 ### Usernames instead of email addresses
 People can sign in with a plain username (e.g. `jsmith`) instead of an email. Supabase still needs an address for every login, so a username is stored as `jsmith@fraserflow.local` (nothing is ever sent there); FraserFlow only ever shows `jsmith`.
-To add one: Supabase → **Authentication → Users → Add user → Create new user**. Email: `jsmith@fraserflow.local`, a temporary password, tick **Auto Confirm User**. They sign in with `jsmith` and the temporary password, then choose their own. Forgotten passwords: reset it the same way (a new temporary password). People with real email logins keep signing in with their email.
+To add one: Fleet › Logins › **New login**, or in Supabase → **Authentication → Users → Add user → Create new user**. Email: `jsmith@fraserflow.local`, a temporary password, tick **Auto Confirm User**. They sign in with `jsmith` and the temporary password, then choose their own. Forgotten passwords: reset it the same way (a new temporary password). People with real email logins keep signing in with their email.
 
 Set a role the same way as before, e.g. `update public.profiles set role = 'mechanic' where email = 'name@yourcompany.com.au';`
