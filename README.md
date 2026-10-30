@@ -131,11 +131,11 @@ After pulling this version, run `supabase/schema.sql`, then `supabase/maintenanc
 
 ### Staff
 The **Staff** screen has two views (switch at the top):
-- **Leave calendar**: everyone's leave, sick days, RDOs and training, on the same calendar as before and counted as *staff away* on the schedule. The **Leave** panel beside it lists who's away today and over the next 4 weeks; **Add leave** books it, and clicking any leave changes or removes it.
-- **People**: the staff list with crew, position and current or next leave. Planners and administrators add, edit and remove staff here (it is no longer under Settings). Administrators and superusers also see each person's **login** on their row (username, role, *Create login*, *Reset password*), and a list of logins that aren't linked to anyone on staff.
+- **Leave calendar**: everyone's leave, sick days, RDOs and training, on the same calendar as before and counted as *staff away* on the schedule. The bar across the top shows who's away today (and when they're back), who's away this week, and leave coming up in the next 4 weeks. **Add leave** (top right) books it; click leave on the calendar to change or remove it.
+- **People**: the staff list with crew, position and current or next leave. Planners and administrators add, edit and remove staff here (it is no longer under Settings). When an administrator or superuser adds someone, their login is created at the same time (username suggested from their name, temporary password `temppass`), unless they untick it. Administrators and superusers also see each person's **login** on their row (username, role, *Create login*, *Reset password*), and a list of logins that aren't linked to anyone on staff.
 
 ### Creating logins inside FraserFlow
-Staff › **People**: *Create login* on a person's row, or **New login** under *Logins without a staff member* (administrators and superusers): username (or email), a temporary password (one is suggested), role and Staff record. **Reset password…** on a row gives someone a new temporary password. Either way they choose their own the next time they sign in. Only the administrator can create admins or reset an admin's password; nobody resets their own here.
+Staff › **People**: *Create login* on a person's row, or **New login** under *Logins without a staff member* (administrators and superusers): username (or email), the temporary password `temppass`, role and Staff record. **Reset password…** on a row gives someone a new temporary password. Either way they choose their own the next time they sign in. Only the administrator can create admins or reset an admin's password; nobody resets their own here.
 
 This needs one setting, because creating logins uses Supabase's admin key, which must stay on the server:
 1. Supabase → **Project Settings → API Keys** (or *API*) → copy the **service_role** secret key. Never paste it anywhere else, or into a chat.

@@ -4696,6 +4696,17 @@ function removeSampleData(d){
    (the staff list, with each person's login for administrators and superusers)
    ===================================================================== */
 const LEAVE_KINDS=['leave','sick','rdo','training'];
+/* leave figures for the Staff screen's top bar: away today, away this week (Mon–Sun), starting in the next 4 weeks */
+function leaveStats(data){
+  const today=iso(TODAY),mon=mondayOf(TODAY),wk=[...Array(7)].map((_,i)=>iso(addDays(mon,i))),until=iso(addDays(TODAY,28));
+  const people=new Map(data.resources.filter(r=>r.type==='person').map(p=>[p.id,p]));
+  const bl=data.blocks.filter(b=>people.has(b.resourceId)&&LEAVE_KINDS.includes(b.kind)&&KINDS[b.kind].away);
+  const today_=bl.filter(b=>covers(b,today)).map(b=>({b,p:people.get(b.resourceId)}));
+  const inWeek=bl.filter(b=>b.start<=wk[6]&&b.end>=wk[0]);const weekIds=[...new Set(inWeek.map(b=>b.resourceId))];
+  const weekDays=weekIds.reduce((s,id)=>s+wk.filter(k=>parse(k).getDay()%6&&inWeek.some(b=>b.resourceId===id&&covers(b,k))).length,0);
+  const soon=bl.filter(b=>b.start>today&&b.start<=until).sort((a,b)=>a.start.localeCompare(b.start)).map(b=>({b,p:people.get(b.resourceId)}));
+  return {today:today_,week:weekIds.map(id=>people.get(id)),weekDays,soon};
+}
 const leaveRange=b=>b.start===b.end?fmtShort(parse(b.start)):`${fmtShort(parse(b.start))} – ${fmtShort(parse(b.end))}`;
 const leaveChip=k=>{const K=KINDS[k]||{};return html`<span class="shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap" style=${{background:`hsl(${K.hue||220} 70% var(--blk-l))`,color:`hsl(${K.hue||220} 50% var(--blk-fg-l))`}}>${K.label||k}</span>`};
 function SDialog({title,sub,onClose,children,foot,width=520}){
@@ -4732,34 +4743,11 @@ function LeaveDialog({data,setData,onClose,notify,personId}){
     </div><//>`;
 }
 
-/* beside the leave calendar: who's away today and over the next four weeks */
-function LeavePanel({data,canEdit,onAdd,onEdit}){
-  const today=iso(TODAY),until=iso(addDays(TODAY,27));
-  const people=new Map(data.resources.filter(r=>r.type==='person').map(p=>[p.id,p]));
-  const bl=data.blocks.filter(b=>people.has(b.resourceId)&&LEAVE_KINDS.includes(b.kind)&&b.end>=today&&b.start<=until)
-    .sort((a,b)=>a.start.localeCompare(b.start)||people.get(a.resourceId).name.localeCompare(people.get(b.resourceId).name));
-  const now=bl.filter(b=>b.start<=today),soon=bl.filter(b=>b.start>today);
-  const item=b=>{const p=people.get(b.resourceId);return html`<button key=${b.id} type="button" class="w-full text-left flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-sunken lv-item" onClick=${()=>onEdit(b)}>
-    <${Badge} r=${p} size=${26}/><span class="min-w-0 flex-1"><span class="block text-[13px] font-medium truncate">${p.name}</span>
-      <span class="block text-[11.5px] text-muted truncate">${leaveRange(b)}${b.start<=today&&b.end>=today?` · back ${fmtShort(addDays(parse(b.end),1))}`:''}${b.title?' · '+b.title:''}</span></span>${leaveChip(b.kind)}</button>`};
-  return html`<aside class="panel h-full flex flex-col overflow-hidden" id="leave-panel" aria-label="Leave">
-    <div class="px-4 pt-4 pb-3 border-b border-line flex items-center gap-2"><div class="font-display text-[17px] font-semibold flex-1">Leave</div>
-      ${canEdit&&html`<button id="lv-add" type="button" class="btn btn-primary" onClick=${onAdd}>${Icon.plus} Add leave</button>`}</div>
-    <div class="flex-1 min-h-0 overflow-y-auto p-2 grid gap-3 content-start">
-      <section class="grid gap-0.5"><div class="label px-2 pt-1">Away today <span class="mono text-faint">${now.length}</span></div>
-        ${now.length?now.map(item):html`<div class="px-2 py-1.5 text-[12.5px] text-muted">Everyone is in.</div>`}</section>
-      <section class="grid gap-0.5"><div class="label px-2 pt-1">Next 4 weeks <span class="mono text-faint">${soon.length}</span></div>
-        ${soon.length?soon.map(item):html`<div class="px-2 py-1.5 text-[12.5px] text-muted">No leave booked.</div>`}</section>
-    </div>
-    <div class="px-4 py-2.5 border-t border-line text-[11.5px] text-muted">Click leave to change or remove it. You can also drag on the calendar.</div>
-  </aside>`;
-}
-
 /* ---------- logins: created and reset by the server (api/users.js), which holds Supabase's admin key ---------- */
 const LOGIN_ROLES=[['admin','Admin'],['superuser','Superuser'],['planner','Planner'],['supervisor','Supervisor'],['mechanic','Mechanic'],['prestart','Prestart'],['viewer','Viewer']];
 const roleKey=r=>r==='operator'?'prestart':r;   /* "operator" was the old name */
-const TEMP_WORDS=['Asphalt','Roller','Paver','Bitumen','Gravel','Kerb','Tipper','Grader','Screed','Binder','Stone','Bobcat','Broom','Drum','Spray','Road'];
-const tempPw=()=>{const r=n=>{const a=new Uint32Array(1);crypto.getRandomValues(a);return a[0]%n};return TEMP_WORDS[r(16)]+'-'+TEMP_WORDS[r(16)]+'-'+(100+r(900))};
+const TEMP_PASSWORD='temppass';   /* every new or reset login starts with this; they must choose their own at their first sign-in */
+const tempPw=()=>TEMP_PASSWORD;
 const suggestLogin=name=>{const w=String(name||'').toLowerCase().replace(/[^a-z\s'-]/g,'').split(/\s+/).filter(Boolean);return w.length>1?(w[0][0]+w[w.length-1]).replace(/[^a-z]/g,''):(w[0]||'')};
 async function usersApi(sb,body){
   const {data:{session}}=await sb.auth.getSession();
@@ -4774,20 +4762,27 @@ function NewLoginDialog({sb,role,people,linked,person,onDone,onClose}){
     foot=${html`${err&&html`<span id="lg-new-err" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="lg-new-go" type="button" class="btn btn-primary" disabled=${busy} onClick=${go}>${busy?'Creating…':'Create login'}</button>`}>
     <div class="grid sm:grid-cols-2 gap-3">
       <${SFld} label="Username (or email)"><input id="lg-new-login" class="field" autocapitalize="none" spellcheck="false" placeholder="e.g. jsmith" value=${f.login} onInput=${e=>setF({...f,login:e.target.value})}/><//>
-      <${SFld} label="Temporary password"><div class="flex gap-1"><input id="lg-new-pw" class="field mono" value=${f.password} onInput=${e=>setF({...f,password:e.target.value})}/><button type="button" class="btn px-2" title="Make another" aria-label="Make another password" onClick=${()=>setF({...f,password:tempPw()})}>↻</button></div><//>
+      <${SFld} label="Temporary password"><input id="lg-new-pw" class="field mono" value=${f.password} onInput=${e=>setF({...f,password:e.target.value})}/><//>
       <${SFld} label="Role"><select id="lg-new-role" class="field" value=${f.role} onChange=${e=>setF({...f,role:e.target.value})}>${LOGIN_ROLES.filter(([k])=>k!=='admin'||role==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select><//>
       <${SFld} label="Staff member"><select id="lg-new-staff" class="field" value=${f.staff_id} disabled=${!!person} onChange=${e=>setF({...f,staff_id:e.target.value})}><option value="">Not linked (e.g. office)</option>${people.map(p=>html`<option key=${p.id} value=${p.id} disabled=${linked.has(p.id)}>${p.name}${linked.has(p.id)?' (has a login)':''}</option>`)}</select><//>
     </div><//>`;
 }
 
 /* add or edit a staff member */
-function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit}){
+function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit,admin,myRole,onMade}){
   const isNew=!person;const crews=data.resources.filter(r=>r.type==='crew');
   const [f,setF]=useState(()=>person?{name:person.name,sub:person.sub||'',crewId:person.crewId||'',hue:person.hue}:{name:'',sub:'',crewId:'',hue:HUES[data.resources.length%HUES.length]});
   const [err,setErr]=useState('');const [del,setDel]=useState(false);
+  const withLogin=isNew&&admin;const [lg,setLg]=useState({on:true,login:'',edited:false,role:'prestart'});const [busy,setBusy]=useState(false);
+  const loginName=lg.edited?lg.login:suggestLogin(f.name);
   const leave=person?data.blocks.filter(b=>b.resourceId===person.id).length:0;
-  const save=()=>{if(!f.name.trim()){setErr('Enter their name.');return}
-    if(isNew)setData(d=>({...d,resources:[...d.resources,{id:'p'+uid(),type:'person',name:f.name.trim(),sub:f.sub.trim()||'Crew member',crewId:f.crewId||null,hue:f.hue,visible:true}]}));
+  const save=async()=>{if(!f.name.trim()){setErr('Enter their name.');return}
+    const id=isNew?'p'+uid():person.id;
+    if(withLogin&&lg.on){if(!loginName.trim()){setErr('Enter a username for their login.');return}
+      setBusy(true);setErr('');   /* the login first: if the username is taken, nothing is added yet */
+      try{const r=await usersApi(sb,{action:'create',login:loginName.trim(),password:TEMP_PASSWORD,role:lg.role,staff_id:id});onMade&&onMade({login:loginName.trim().toLowerCase(),password:TEMP_PASSWORD,warning:r.warning})}
+      catch(e){setBusy(false);setErr(e.message||String(e));return}setBusy(false)}
+    if(isNew)setData(d=>({...d,resources:[...d.resources,{id,type:'person',name:f.name.trim(),sub:f.sub.trim()||'Crew member',crewId:f.crewId||null,hue:f.hue,visible:true}]}));
     else setData(d=>({...d,resources:d.resources.map(r=>r.id===person.id?{...r,name:f.name.trim(),sub:f.sub.trim(),crewId:f.crewId||null,hue:f.hue}:r)}));
     notify&&notify(isNew?`${f.name.trim()} added`:'Saved');onClose()};
   const remove=async()=>{setData(d=>({...d,resources:d.resources.filter(r=>r.id!==person.id),blocks:d.blocks.filter(b=>b.resourceId!==person.id)}));
@@ -4796,12 +4791,18 @@ function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit}){
   return html`<${SDialog} title=${isNew?'Add a staff member':person.name} onClose=${onClose}
     foot=${del?html`<span class="text-[12.5px] flex-1" style=${{color:'var(--bad)'}}>Remove ${person.name}${leave?` and their ${leave} leave booking${leave===1?'':'s'}`:''}?${prof?' Their login stays, unlinked.':''}</span><button type="button" class="btn" onClick=${()=>setDel(false)}>Keep</button><button id="pd-remove-go" type="button" class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${remove}>Remove</button>`
       :html`${!isNew&&canEdit&&html`<button id="pd-remove" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>Remove</button>`}${err&&html`<span class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span>
-        <button type="button" class="btn" onClick=${onClose}>${canEdit?'Cancel':'Close'}</button>${canEdit&&html`<button id="pd-save" type="button" class="btn btn-primary" onClick=${save}>${isNew?'Add staff member':'Save'}</button>`}`}>
+        <button type="button" class="btn" onClick=${onClose}>${canEdit?'Cancel':'Close'}</button>${canEdit&&html`<button id="pd-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Adding…':isNew?(withLogin&&lg.on?'Add with login':'Add staff member'):'Save'}</button>`}`}>
     <fieldset disabled=${!canEdit} class="m-0 p-0 border-0 min-w-0 grid sm:grid-cols-2 gap-3">
       <${SFld} label="Name"><input id="pd-name" class="field" placeholder="Full name" value=${f.name} onInput=${e=>setF({...f,name:e.target.value})}/><//>
       <${SFld} label="Position"><input id="pd-sub" class="field" placeholder="e.g. Roller operator" value=${f.sub} onInput=${e=>setF({...f,sub:e.target.value})}/><//>
       <${SFld} label="Crew"><select id="pd-crew" class="field" value=${f.crewId} onChange=${e=>setF({...f,crewId:e.target.value})}><option value="">No crew</option>${crews.map(c=>html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select><//>
       <${SFld} label="Colour"><div class="flex flex-wrap gap-1.5 pt-1">${HUES.map(h=>html`<button key=${h} type="button" class="w-6 h-6 rounded-full" aria-label=${'Colour '+h} aria-pressed=${f.hue===h} style=${{background:`hsl(${h} 65% 55%)`,boxShadow:f.hue===h?'0 0 0 2px var(--surface),0 0 0 4px var(--ink)':'none'}} onClick=${()=>setF({...f,hue:h})}></button>`)}</div><//>
+      ${withLogin&&html`<div class="sm:col-span-2 rounded-lg border border-line p-3 grid sm:grid-cols-2 gap-3" id="pd-login">
+        <label class="sm:col-span-2 inline-flex items-center gap-2 text-[13px] font-medium cursor-pointer"><input id="pd-login-on" type="checkbox" class="w-4 h-4" checked=${lg.on} onChange=${e=>setLg({...lg,on:e.target.checked})}/>Create their login</label>
+        ${lg.on&&html`<${SFld} label="Username"><input id="pd-login-name" class="field mono" autocapitalize="none" spellcheck="false" placeholder="e.g. jsmith" value=${loginName} onInput=${e=>setLg({...lg,login:e.target.value,edited:true})}/><//>
+          <${SFld} label="Role"><select id="pd-login-role" class="field" value=${lg.role} onChange=${e=>setLg({...lg,role:e.target.value})}>${LOGIN_ROLES.filter(([k])=>k!=='admin'||myRole==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select><//>
+          <div class="sm:col-span-2 text-[12px] text-muted">They sign in with this username and the password <span class="mono font-semibold text-ink">${TEMP_PASSWORD}</span>, then choose their own.</div>`}
+      </div>`}
     </fieldset><//>`;
 }
 
@@ -4839,7 +4840,6 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
         <input id="sp-search" class="field" style=${{height:32,fontSize:13,width:230}} placeholder=${admin?'Search name, position, crew, username':'Search name, position, crew'} value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search staff"/>
         <select class="field w-auto" style=${{height:32,fontSize:13}} value=${crew} onChange=${e=>setCrew(e.target.value)} aria-label="Crew"><option value="">All crews</option>${crews.map(c=>html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}<option value="~">No crew</option></select>
         <span class="text-[12.5px] text-muted">${list.length} of ${people.length}</span><span class="flex-1"></span>
-        ${canEdit&&html`<button id="sp-leave" type="button" class="btn" onClick=${()=>onAddLeave()}>${Icon.plus} Add leave</button>`}
         ${canEdit&&html`<button id="sp-add" type="button" class="btn btn-primary" onClick=${()=>setDlg({k:'person'})}>${Icon.plus} Add staff member</button>`}
       </div>
       ${made&&html`<div id="lg-made" class="px-3 py-2.5 border-b border-line text-[13px] flex flex-wrap items-center gap-2" style=${{background:'hsl(145 50% var(--blk-l))'}}>
@@ -4847,7 +4847,7 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
         <button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>setMade(null)}>Done</button></div>`}
       ${perr&&html`<div id="lg-err" class="px-3 py-2 text-[12.5px]" style=${{color:'var(--bad)'}}>${perr}</div>`}
       <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="sp-table">
-        <thead><tr class="text-left">${['Name','Crew','Leave',...(admin?['Login','Role','']:[]),''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+        <thead><tr class="text-left">${['Name','Crew','Leave',...(admin?['Login','Role','']:[])].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
         <tbody>${list.map(p=>{const lv=leaveOf(p);const pr=profOf.get(p.id);
           return html`<tr key=${p.id} class="border-t border-line" data-person=${p.name}>
             <td class="py-2 px-3"><button type="button" class="flex items-center gap-2.5 text-left sp-open" onClick=${()=>setDlg({k:'person',p})}><${Badge} r=${p} size=${28}/><span class="min-w-0"><span class="block font-medium text-[13px] hover:underline">${p.name}</span><span class="block text-[11.5px] text-muted">${p.sub||''}</span></span></button></td>
@@ -4855,8 +4855,8 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
             <td class="py-2 px-3 whitespace-nowrap">${lv?html`<span class="text-[12px]" style=${lv.now?{color:'hsl(28 80% 40%)',fontWeight:600}:{color:'var(--muted)'}}>${lv.now?'Away: ':'Next: '}${lv.t}</span>`:html`<span class="text-faint">–</span>`}</td>
             ${admin&&(profs==null?html`<td colspan="3" class="py-2 px-3 text-muted">…</td>`:pr?html`<td class="py-2 px-3 mono whitespace-nowrap sp-login">${showLogin(pr.email)}${pr.id===me?html` <span class="text-muted font-sans">(you)</span>`:''}</td><td class="py-2 px-3">${roleSel(pr)}</td><td class="py-2 px-3 text-right whitespace-nowrap">${resetCtl(pr)}</td>`
               :html`<td class="py-2 px-3 text-faint">No login</td><td></td><td class="py-2 px-3 text-right"><button type="button" class="btn sp-newlogin" style=${{height:30}} onClick=${()=>{setMade(null);setDlg({k:'login',p})}}>${Icon.plus} Create login</button></td>`)}
-            <td class="py-2 px-3 text-right whitespace-nowrap">${canEdit&&html`<button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>onAddLeave(p.id)}>Add leave</button>`}</td></tr>`})}
-          ${!list.length&&html`<tr><td colspan="7" class="px-3 py-6 text-center text-muted">${people.length?'No staff match.':'No staff yet.'+(canEdit?' Add your first staff member.':'')}</td></tr>`}</tbody></table></div>
+</tr>`})}
+          ${!list.length&&html`<tr><td colspan="6" class="px-3 py-6 text-center text-muted">${people.length?'No staff match.':'No staff yet.'+(canEdit?' Add your first staff member.':'')}</td></tr>`}</tbody></table></div>
     </section>
     ${admin&&profs&&html`<section class="panel flex flex-col min-h-0" id="sp-loose">
       <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line"><h3 class="font-display text-[15px] font-semibold">Logins without a staff member</h3><span class="text-[12px] text-muted">e.g. office staff. Link a login to someone on staff so their prestarts carry their name.</span><span class="flex-1"></span>
@@ -4870,7 +4870,7 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
           <td class="py-2 px-3 text-right whitespace-nowrap">${resetCtl(p)}</td></tr>`)}
           ${!loose.length&&html`<tr><td colspan="4" class="px-3 py-4 text-center text-muted">Every login belongs to someone on staff.</td></tr>`}</tbody></table></div>
     </section>`}
-    ${dlg&&dlg.k==='person'&&html`<${PersonDialog} data=${data} setData=${setData} person=${dlg.p} prof=${dlg.p&&profOf.get(dlg.p.id)} sb=${sb} canEdit=${canEdit} notify=${notify} onClose=${()=>setDlg(null)}/>`}
+    ${dlg&&dlg.k==='person'&&html`<${PersonDialog} data=${data} setData=${setData} person=${dlg.p} prof=${dlg.p&&profOf.get(dlg.p.id)} sb=${sb} canEdit=${canEdit} admin=${admin} myRole=${myRole} onMade=${m=>{setMade(m);load()}} notify=${notify} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='login'&&html`<${NewLoginDialog} sb=${sb} role=${myRole} people=${people.slice().sort((a,b)=>a.name.localeCompare(b.name))} linked=${linked} person=${dlg.p} onClose=${()=>setDlg(null)} onDone=${m=>{setDlg(null);setMade(m);load()}}/>`}
   </div>`;
 }
@@ -5045,7 +5045,6 @@ function App({boot,live}){
 
   return html`<div class="shell h-full flex gap-4">
     <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} data=${data} badge=${{ideas:(data.suggestions||[]).length}}/>
-    ${screen==='staff'&&!peopleView&&html`<div class="hidden lg:block w-[300px] shrink-0 h-full"><${LeavePanel} data=${data} canEdit=${live.canEdit} onAdd=${()=>setLeaveDlg({})} onEdit=${b=>setEditing(b)}/></div>`}
     <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet'&&screen!=='prestarts'&&screen!=='staff'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onMaint=${screenOK('fleet',live.role,data)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
@@ -5081,7 +5080,7 @@ function App({boot,live}){
         </div>`}
         ${live.role!=='prestart'&&html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
         ${live.role!=='prestart'&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} onMaint=${screenOK('fleet',live.role,data)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
-        ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary lg:hidden" disabled=${!live.canEdit} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Leave</button>`}
+        ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary" disabled=${!live.canEdit} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Add leave</button>`}
         ${boardScreen&&screen!=='staff'&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
         <${SettingsMenu} simple=${live.role==='prestart'} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
@@ -5090,12 +5089,17 @@ function App({boot,live}){
       ${live.offline&&html`<${OfflineBar} at=${live.offline.at}/>`}
       ${leaveDlg&&html`<${LeaveDialog} data=${data} setData=${setData} notify=${setToast} personId=${leaveDlg.personId} onClose=${()=>setLeaveDlg(null)}/>`}
       ${peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:screen==='fleet'||screen==='prestarts'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
-      <section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+      ${screen==='staff'?(()=>{const L=leaveStats(data);return html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3" id="leave-stats">
+        <${Stat} k="Away today" v=${L.today.length} sub=${L.today.length?L.today.map(x=>`${x.p.name.split(' ')[0]} (back ${fmtShort(addDays(parse(x.b.end),1))})`).join(', '):'everyone in'} tone=${L.today.length?'var(--warn)':null}/>
+        <${Stat} k="Away this week" v=${L.week.length} sub=${L.week.length?`${L.weekDays} staff-day${L.weekDays===1?'':'s'} · ${L.week.map(p=>p.name.split(' ')[0]).join(', ')}`:'no leave this week'}/>
+        <${Stat} k="Coming up (4 weeks)" v=${L.soon.length} sub=${L.soon.length?L.soon.slice(0,3).map(x=>`${x.p.name.split(' ')[0]} ${fmtShort(parse(x.b.start))}`).join(', ')+(L.soon.length>3?` +${L.soon.length-3} more`:''):'nothing booked'}/>
+        <${Stat} k="Showing" v=${html`<span class="text-[16px]">${fmtRange(days[0],days[N-1])}</span>`} sub=""/>
+      </section>`})():html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
         <${Stat} k="Crews on jobs today" v=${`${crewsOnJob.length}/${vis('crew').length}`} sub=${`${util}% of crew-days booked`}/>
         <${Stat} k="Machines down today" v=${downToday.length} sub=${downToday.length?downToday.map(m=>m.name).join(', '):'all available'} tone=${downToday.length?'var(--bad)':null}/>
         <${Stat} k="Staff away today" v=${awayToday.length} sub=${awayToday.length?awayToday.map(m=>m.name.split(' ')[0]).join(', '):'full strength'} tone=${awayToday.length?'var(--warn)':null}/>
         <${Stat} k="Showing" v=${html`<span class="text-[16px]">${fmtRange(days[0],days[N-1])}</span>`} sub=""/>
-      </section>
+      </section>`}
 
       <section class="panel flex-1 min-h-[320px] flex flex-col overflow-hidden">
         <${Board} data=${data} days=${days} view=${view} onCreate=${onCreate} onEdit=${b=>setEditing(b)} onMove=${onMove} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
