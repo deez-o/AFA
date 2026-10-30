@@ -58,12 +58,26 @@ const maintHits=(b,shift)=>{const m=b.maintShift||'both';return m==='both'||!shi
 function plantMaintOn(data,blocks,k,shift){ /* names of asphalt plants under maintenance on a date (for a given shift) */
   return data.resources.filter(r=>r.type==='aplant'&&blocks.some(b=>b.resourceId===r.id&&b.kind==='plantmaint'&&covers(b,k)&&maintHits(b,shift))).map(r=>r.name);
 }
-/* plant assigned to a crew job shows on that machine's row, following the job's dates */
+/* machines can differ from shift to shift: shiftData[date].plantIds; b.plantIds is then every machine on any shift */
+const shiftMach=b=>!!(b&&b.shiftData&&Object.entries(b.shiftData).some(([k,q])=>q&&Array.isArray(q.plantIds)&&k>=b.start&&k<=b.end));
+const machinesOn=(b,k)=>{const q=b&&b.shiftData&&b.shiftData[k];return q&&Array.isArray(q.plantIds)?q.plantIds:(b&&b.plantIds)||[]};
+/* change the machines shift by shift (fn gets the date and that shift's machines); one list again when every shift is the same */
+function withShiftMach(b,fn){const ds=shiftDates(b);const sd={...(b.shiftData||{})};
+  const next=ds.map(k=>[k,[...new Set(fn(k,machinesOn(b,k)))]]);
+  const same=next.length&&next.every(([,ids])=>ids.length===next[0][1].length&&ids.every(x=>next[0][1].includes(x)));
+  if(same||!next.length){Object.keys(sd).forEach(k=>{if(sd[k]&&'plantIds' in sd[k]){const {plantIds,...rest}=sd[k];if(Object.keys(rest).length)sd[k]=rest;else delete sd[k]}});
+    return {shiftData:sd,plantIds:next.length?next[0][1]:fn(null,b.plantIds||[])}}
+  next.forEach(([k,ids])=>{sd[k]={...(sd[k]||{}),plantIds:ids}});
+  return {shiftData:sd,plantIds:[...new Set(next.flatMap(([,ids])=>ids))]}}
+/* plant assigned to a crew job shows on that machine's row, following the job's dates (only the shifts it's on) */
 function plantBookings(blocks,machineId){
-  return blocks.filter(b=>b.kind==='job'&&(b.plantIds||[]).includes(machineId)).map(b=>({
-    id:'v-'+b.id+'-'+machineId,virtual:true,parent:b,kind:'onjob',resourceId:machineId,
-    crewId:b.resourceId,jobId:b.jobId,start:b.start,end:b.end,shift:b.shift,address:b.address,
-    weekendShifts:b.weekendShifts,satShift:b.satShift,sunShift:b.sunShift}));
+  const v=(b,start,end,n)=>({id:'v-'+b.id+'-'+machineId+(n?'-'+n:''),virtual:true,parent:b,kind:'onjob',resourceId:machineId,
+    crewId:b.resourceId,jobId:b.jobId,start,end,shift:b.shift,address:b.address,offDays:b.offDays,
+    weekendShifts:b.weekendShifts,satShift:b.satShift,sunShift:b.sunShift,friShift:b.friShift});
+  return blocks.filter(b=>b.kind==='job'&&(b.plantIds||[]).includes(machineId)).flatMap(b=>{
+    if(!shiftMach(b))return [v(b,b.start,b.end)];
+    const out=[];let run=null;shiftDates(b).forEach(k=>{if(machinesOn(b,k).includes(machineId)){if(run)run.end=k;else run={start:k,end:k}}else if(run){out.push(run);run=null}});if(run)out.push(run);
+    return out.map((x,i)=>v(b,x.start,x.end,i))});
 }
 
 /* a shift handed to another crew (shiftData[date].crewId) shows as a one-shift bar on that crew's row */
@@ -1120,16 +1134,24 @@ function PlantPicker({f,set,data}){
   /* the crew's own plant first, then the rest by category */
   const plantSections=[...(own.filter(hit).length?[{key:'own',label:`${crew?.name||'Crew'}'s plant`,rows:own.filter(hit)}]:[]),
     ...groupMachines(machines.filter(m=>m.crewId!==f.resourceId&&hit(m)),data)];
-  const picked=new Set(f.plantIds||[]);
-  const toggle=id=>{const s=new Set(picked);if(s.has(id))s.delete(id);else if(!(machAlert(data,id)||{}).block)s.add(id);set({plantIds:[...s]})};
-  const addOwn=()=>set({plantIds:[...new Set([...picked,...own.filter(m=>!(machAlert(data,m.id)||{}).block).map(m=>m.id)])]});
-  const range={start:f.start,end:f.end};
+  /* machines for every shift, or one shift at a time */
+  const ds=f.start&&f.end&&f.end>=f.start?shiftDates(f):[];
+  const [msel,setMsel]=useState('all');const one=msel!=='all'&&ds.includes(msel)?msel:null;
+  const per=shiftMach(f);
+  const onAll=id=>ds.length?ds.every(k=>machinesOn(f,k).includes(id)):(f.plantIds||[]).includes(id);
+  const onSome=id=>ds.some(k=>machinesOn(f,k).includes(id));
+  const picked=new Set(one?machinesOn(f,one):(f.plantIds||[]).filter(onAll));
+  const apply=fn=>{if(!ds.length){set({plantIds:fn(null,f.plantIds||[])});return}set(withShiftMach(f,(k,ids)=>!one||k===one?fn(k,ids):ids))};
+  const toggle=id=>{const has=picked.has(id);if(!has&&(machAlert(data,id)||{}).block)return;apply((k,ids)=>has?ids.filter(x=>x!==id):[...ids,id])};
+  const addOwn=()=>apply((k,ids)=>[...ids,...own.filter(m=>!(machAlert(data,m.id)||{}).block).map(m=>m.id)]);
+  const copyAll=()=>{if(!one)return;const src=machinesOn(f,one);set(withShiftMach(f,()=>src))};
+  const range=one?{start:one,end:one}:{start:f.start,end:f.end};
   const status=m=>{
     const al=machAlert(data,m.id);if(al&&al.block)return al;
     if(!f.start||!f.end||f.end<f.start)return al;
     const down=data.blocks.find(b=>b.resourceId===m.id&&KINDS[b.kind].down&&overlaps(b,range));
     if(down)return {tone:'var(--bad)',text:`${b2s(down)}: ${down.title||KINDS[down.kind].label}`};
-    const other=data.blocks.find(b=>b.id!==f.id&&b.kind==='job'&&(b.plantIds||[]).includes(m.id)&&overlaps(b,range));
+    const other=data.blocks.find(b=>b.id!==f.id&&b.kind==='job'&&(b.plantIds||[]).includes(m.id)&&overlaps(b,range)&&(!shiftMach(b)||shiftDates(b).some(k=>k>=range.start&&k<=range.end&&machinesOn(b,k).includes(m.id))));
     if(other){const c=data.resources.find(r=>r.id===other.resourceId);
       return {tone:'var(--warn)',text:`${b2s(other)}: already on ${c?.name||'another crew'}'s job`+(al?' · '+al.text:'')}}
     return al;
@@ -1139,10 +1161,16 @@ function PlantPicker({f,set,data}){
     ${restrictedIn(data,f.plantIds).length>0&&html`<div class="md:col-span-2"><${RestrictedNote} data=${data} ids=${f.plantIds} what="this booking"/></div>`}
     <div class="flex items-center gap-2 md:col-span-2">
       <h3 class="font-display text-[15px] font-semibold">Machines</h3>
-      <span class="mono text-[11px] text-faint">${picked.size} assigned</span>
+      <span class="mono text-[11px] text-faint">${picked.size} assigned${one?' this shift':per?' on every shift':''}</span>
       <span class="flex-1"></span>
+      ${one&&ds.length>1&&html`<button id="pm-copy-all" type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${copyAll}>Copy to all shifts</button>`}
       ${own.length>0&&own.some(m=>!picked.has(m.id))&&html`<button type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${addOwn}>Add ${crew?.name||'crew'}'s plant</button>`}
     </div>
+    ${ds.length>1&&html`<div class="md:col-start-1 flex flex-wrap items-center gap-1.5" id="pm-shifts" role="tablist" aria-label="Machines for which shift">
+      <button type="button" role="tab" class=${'pm-shift text-[12px] rounded-full border px-2.5 py-1 '+(!one?'font-semibold':'text-muted hover:text-ink')} style=${!one?{background:'var(--accent-soft)',borderColor:'var(--accent)',color:'var(--accent)'}:{borderColor:'var(--line)'}} aria-selected=${!one} onClick=${()=>setMsel('all')}>All shifts</button>
+      ${ds.map((k,i)=>{const on=one===k;const diff=per&&machinesOn(f,k).length!==(f.plantIds||[]).length;return html`<button key=${k} type="button" role="tab" data-date=${k} class=${'pm-shift text-[12px] rounded-full border px-2.5 py-1 '+(on?'font-semibold':'text-muted hover:text-ink')} style=${on?{background:'var(--accent-soft)',borderColor:'var(--accent)',color:'var(--accent)'}:{borderColor:'var(--line)'}} aria-selected=${on} onClick=${()=>setMsel(k)}>
+        ${f.shift==='night'?'Night':'Shift'} ${i+1} · ${WD[parse(k).getDay()]} ${fmtShort(parse(k))} <span class="mono text-faint">${machinesOn(f,k).length}</span>${diff?html` <span title="Different machines from the other shifts" style=${{color:'var(--warn)'}}>•</span>`:''}</button>`})}
+      ${!one&&per&&html`<span class="text-[11.5px] text-muted">Machines differ between shifts: ticks here are on every shift.</span>`}</div>`}
     ${machines.length===0
       ?html`<div class="text-[12.5px] text-muted md:col-span-2">No machines yet. Add them in Fleet › Machines.</div>`
       :html`${machines.length>8&&html`<input id="pl-search" class="field field-sm md:col-start-1" style=${{height:30,fontSize:13}} placeholder="Search machine #, description, rego or category" value=${pq} onInput=${e=>setPq(e.target.value)} aria-label="Search machines"/>`}
@@ -1152,7 +1180,7 @@ function PlantPicker({f,set,data}){
           ...sec.rows.map(m=>{const st=status(m);const isOwn=m.crewId===f.resourceId;
           return html`<li key=${m.id} style=${{borderColor:'var(--line)'}}>
             <label class="flex items-center gap-2.5 px-2.5 py-1.5 cursor-pointer hover:bg-sunken">
-              <input id=${'pl-'+m.id} type="checkbox" class="w-4 h-4 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} disabled=${!!(st&&st.block&&!picked.has(m.id))} title=${st&&st.block?'Restricted: can’t be added':''} onChange=${()=>toggle(m.id)}/>
+              <input id=${'pl-'+m.id} type="checkbox" class="w-4 h-4 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} ref=${el=>{if(el)el.indeterminate=!one&&!picked.has(m.id)&&onSome(m.id)}} disabled=${!!(st&&st.block&&!picked.has(m.id))} title=${st&&st.block?'Restricted: can’t be added':''} onChange=${()=>toggle(m.id)}/>
               <${Badge} r=${m} size=${24}/>
               <div class="min-w-0 flex-1">
                 <div class="text-[13px] truncate"><span class="font-medium mono">${m.name}</span> <span class="text-muted">${m.sub}</span></div>
@@ -1161,13 +1189,13 @@ function PlantPicker({f,set,data}){
               ${m.rego&&html`<span class="mono text-[10.5px] text-faint shrink-0">${m.rego}</span>`}
             </label></li>`;})])}
       </ul>`}
-    ${machines.length>0&&(()=>{const sel=machines.filter(m=>picked.has(m.id));const warn=sel.filter(m=>status(m)).length;
+    ${machines.length>0&&(()=>{const sel=machines.filter(m=>picked.has(m.id)||(!one&&onSome(m.id)));const warn=sel.filter(m=>status(m)).length;
       return html`<div class="rounded-lg border border-line bg-sunken p-2.5 grid gap-2 content-start md:col-start-2 md:row-start-2 md:row-span-3" aria-label="Machines selected for this job">
         <div class="flex items-center gap-2">
-          <span class="label" style=${{color:'var(--ink)'}}>Selected for this job</span><span class="mono text-[11px] text-faint">${sel.length}</span>
+          <span class="label" style=${{color:'var(--ink)'}}>${one?`Selected for ${WD[parse(one).getDay()]} ${fmtShort(parse(one))}`:'Selected for this job'}</span><span class="mono text-[11px] text-faint">${sel.length}</span>
           ${warn>0&&html`<span class="text-[11.5px] font-medium" style=${{color:'var(--warn)'}}>${warn} need${warn===1?'s':''} checking</span>`}
           <span class="flex-1"></span>
-          ${sel.length>0&&html`<button type="button" class="text-[12px] font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>set({plantIds:[]})}>Clear all</button>`}
+          ${sel.length>0&&html`<button type="button" class="text-[12px] font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>apply(()=>[])}>Clear all</button>`}
         </div>
         ${sel.length===0&&html`<div class="text-[12.5px] text-muted py-2">Nothing selected yet. Tick machines in the list.</div>`}
         ${groupMachines(sel,data).map(g=>html`<div key=${g.key} class="grid gap-1">
@@ -1175,9 +1203,9 @@ function PlantPicker({f,set,data}){
           <div class="flex flex-wrap gap-1.5">
             ${g.rows.map(m=>{const st=status(m);return html`<span key=${m.id} class="inline-flex items-center gap-1.5 rounded-md bg-surface border pl-2 pr-1 py-0.5 text-[12px] max-w-full"
                 style=${{borderColor:st?st.tone:'var(--line)'}} title=${[m.name,m.sub,m.rego,st&&st.text].filter(Boolean).join(' · ')}>
-              <span class="font-semibold mono shrink-0">${m.name}</span><span class="text-muted truncate">${m.sub||''}</span>
+              <span class="font-semibold mono shrink-0">${m.name}</span><span class="text-muted truncate">${m.sub||''}</span>${!one&&per&&!onAll(m.id)?html`<span class="text-[11px] shrink-0" style=${{color:'var(--warn)'}}>${ds.filter(k=>machinesOn(f,k).includes(m.id)).length}/${ds.length} shifts</span>`:''}
               ${st&&html`<span class="shrink-0 inline-flex" style=${{color:st.tone}}>${Icon.alert}</span>`}
-              <button type="button" class="w-5 h-5 shrink-0 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>toggle(m.id)} aria-label=${'Remove '+m.name+' from this job'}>${Icon.x}</button>
+              <button type="button" class="w-5 h-5 shrink-0 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>picked.has(m.id)?toggle(m.id):apply((k,ids)=>ids.filter(x=>x!==m.id))} aria-label=${'Remove '+m.name+' from this job'}>${Icon.x}</button>
             </span>`})}
           </div></div>`)}
       </div>`})()}
@@ -1663,9 +1691,10 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify}){
     const sealSave=out.kind==='job'&&isSealCrew(data.resources.find(r=>r.id===out.resourceId));
     const newMixes=[...new Set(Object.values(out.shiftData||{}).flatMap(q=>linesOf(q)).filter(l=>l._custom&&(l.type||'').trim()).map(l=>l.type.trim()))];
     if(out.shiftData){
-      const clean=Object.fromEntries(Object.entries(out.shiftData).filter(([,q])=>hasQty(q)||progHas(q)||(q&&(q.exbin||(q.crewId&&q.crewId!==out.resourceId))))
-        .map(([k,q])=>[k,{lines:linesOf(q).filter(lineHas).map(l=>cleanLine(sealSave?{...l,twoCoat:sealIsTwoCoat(data,l.type)}:l)),...(q&&q.exbin?{exbin:{supplier:q.exbin.supplier||''}}:{}),...(q&&q.crewId&&q.crewId!==out.resourceId?{crewId:q.crewId}:{}),...progClean(q)}]));
+      const clean=Object.fromEntries(Object.entries(out.shiftData).filter(([,q])=>hasQty(q)||progHas(q)||(q&&(q.exbin||(q.crewId&&q.crewId!==out.resourceId)||(out.kind==='job'&&Array.isArray(q.plantIds)))))
+        .map(([k,q])=>[k,{lines:linesOf(q).filter(lineHas).map(l=>cleanLine(sealSave?{...l,twoCoat:sealIsTwoCoat(data,l.type)}:l)),...(q&&q.exbin?{exbin:{supplier:q.exbin.supplier||''}}:{}),...(q&&q.crewId&&q.crewId!==out.resourceId?{crewId:q.crewId}:{}),...(out.kind==='job'&&q&&Array.isArray(q.plantIds)?{plantIds:q.plantIds}:{}),...progClean(q)}]));
       if(Object.keys(clean).length)out.shiftData=clean;else delete out.shiftData;
+      if(out.kind==='job'&&shiftMach(out))Object.assign(out,withShiftMach(out,(k,ids)=>ids));   /* every shift spelled out, and the full list kept on the booking */
     }
     let newJob=null;
     if(out.kind==='job'&&(f.jobId==='__new'||!data.jobs.length)){
@@ -2208,7 +2237,7 @@ function maintNotifs(data,prefs){
     out.push({id:`m-rb-${b.id}-${id}`,at:Date.parse(a.restricted_since)||now,text:`${name(id)} is restricted but booked`,sub:`${where(b)} · ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`,blockId:b.id})})});
   if(prefs.mprestart){const nd=new Date();data.blocks.forEach(b=>{if(b.kind!=='job'||!covers(b,today)||!worksOn(b,TODAY))return;
     const th=new Date(TODAY);th.setHours(b.shift==='night'?21:9,0,0,0);if(nd<th)return;
-    (b.plantIds||[]).forEach(id=>{const a=A[id];if(!a||(a.last_prestart_at&&iso(new Date(a.last_prestart_at))===today))return;
+    machinesOn(b,today).forEach(id=>{const a=A[id];if(!a||(a.last_prestart_at&&iso(new Date(a.last_prestart_at))===today))return;
       out.push({id:`m-pm-${id}-${today}`,at:th.getTime(),text:`No prestart yet today: ${name(id)}`,sub:where(b),blockId:b.id})})})}
   const seen=new Set();return out.filter(c=>!seen.has(c.id)&&seen.add(c.id));
 }
@@ -3299,7 +3328,7 @@ function drawProgram(doc,data,{b,k,crewId}){
 
   /* left: plant onsite */
   ly+=3;ly=head(LX,ly,LW,[['PLANT ONSITE',LW]]);
-  const machines=(b.plantIds||[]).map(id=>data.resources.find(r=>r.id===id)).filter(Boolean);
+  const machines=machinesOn(b,k).map(id=>data.resources.find(r=>r.id===id)).filter(Boolean);
   plantGroups(machines,seal).forEach(g=>{const its=g.items.length?g.items:[null];
     for(let s=0;s<its.length;s+=4){const v=[{t:s?'':g.label+':',bold:true,align:'left',size:6.6}];
       for(let c=0;c<4;c++){const m=its[s+c];v.push(m?{t:g.label==='Additional'&&m.sub?`${m.name} ${m.sub}`:m.name,bold:true,size:6.6}:'')}
@@ -3548,7 +3577,7 @@ function DailyProgramDialog({data,onClose,notify}){
       <div class="overflow-y-auto p-3 grid gap-2">
         ${entries.length===0&&html`<div class="text-[13px] text-muted p-3 text-center">No crew jobs on this day.</div>`}
         ${entries.map(e=>{const j=data.jobs.find(x=>x.id===e.b.jobId);const crew=data.resources.find(r=>r.id===e.crewId);const q=(e.b.shiftData||{})[e.k]||{};
-          const tr=(q.trucks||[]).filter(truckHas).length,sb=(q.subs||[]).filter(subHas).length,pl=(e.b.plantIds||[]).length;
+          const tr=(q.trucks||[]).filter(truckHas).length,sb=(q.subs||[]).filter(subHas).length,pl=machinesOn(e.b,e.k).length;
           const sealE=isSealCrew(crew)||isSealCrew(data.resources.find(r=>r.id===e.b.resourceId));
           return html`<label key=${key(e)} class="flex items-start gap-3 rounded-lg border border-line px-3 py-2.5 cursor-pointer hover:bg-sunken">
             <input type="checkbox" class="w-4 h-4 mt-0.5" style=${{accentColor:'var(--accent)'}} checked=${!off[key(e)]} onChange=${ev=>setOff(o=>({...o,[key(e)]:!ev.target.checked}))}/>
@@ -3797,6 +3826,9 @@ const planFor=(d,b)=>b&&(plansOf(d).find(p=>p.id===b.planId)||plansOf(d).find(p=
 function setBookingShifts(d,bookingId,n){const bk=d.blocks.find(b=>b.id===bookingId);if(!bk||!(n>0))return d;let x=parse(bk.start),c=0,end=bk.start;
   for(let g=0;g<400;g++){if(worksOn(bk,x)){c++;end=iso(x);if(c>=n)break}x=addDays(x,1)}
   return end===bk.end?d:{...d,blocks:d.blocks.map(b=>b.id===bookingId?{...b,end}:b)}}
+/* machines per shift in a plan: shiftPlans[i].machineIds; p.machineIds is every machine on any shift */
+const spMach=(p,sp)=>sp&&Array.isArray(sp.machineIds)?sp.machineIds:(p.machineIds||[]);
+const planMachPer=(p,n)=>{const ls=[...Array(n)].map((_,i)=>spMach(p,(p.shiftPlans||[])[i]));return ls.some(l=>l.length!==ls[0].length||l.some(x=>!ls[0].includes(x)))};
 function newPlan(d){
   return {id:'p'+uid(),title:'',status:'draft',bookingId:'',uhf:'',induction:false,supply:'AFA',
     ppe:['Hi-vis (day/night)','Steel cap boots','2-way radios (UHF)'],pins:[],sections:[],shiftPlans:[],jobSubs:[],machineIds:[],
@@ -3807,13 +3839,14 @@ function newPlan(d){
 function planConflicts(d,p){
   const dates=planDates(p,d);if(!dates.length)return {machines:{},crew:[]};
   const has=b=>dates.some(k=>k>=b.start&&k<=b.end);const machines={};
-  (p.machineIds||[]).forEach(id=>{const list=[];
-    d.blocks.forEach(b=>{if(b.id===p.bookingId||!has(b))return;
-      if(b.kind==='job'&&(b.plantIds||[]).includes(id)){const c=d.resources.find(r=>r.id===b.resourceId);const j=d.jobs.find(x=>x.id===b.jobId);list.push(`On ${c?c.name:'another crew'}'s job${j?` (${j.name})`:''}, ${fmtShort(parse(b.start))}${b.end!==b.start?'–'+fmtShort(parse(b.end)):''}`)}
+  (p.machineIds||[]).forEach(id=>{const list=[];const mine=dates.filter((k,i)=>spMach(p,(p.shiftPlans||[])[i]).includes(id));if(!mine.length)return;
+    const hasM=b=>mine.some(k=>k>=b.start&&k<=b.end);
+    d.blocks.forEach(b=>{if(b.id===p.bookingId||!hasM(b))return;
+      if(b.kind==='job'&&(b.plantIds||[]).includes(id)&&(!shiftMach(b)||mine.some(k=>machinesOn(b,k).includes(id)))){const c=d.resources.find(r=>r.id===b.resourceId);const j=d.jobs.find(x=>x.id===b.jobId);list.push(`On ${c?c.name:'another crew'}'s job${j?` (${j.name})`:''}, ${fmtShort(parse(b.start))}${b.end!==b.start?'–'+fmtShort(parse(b.end)):''}`)}
       else if(b.resourceId===id&&KINDS[b.kind]&&KINDS[b.kind].down)list.push(`${b.title||KINDS[b.kind].label}, ${fmtShort(parse(b.start))}${b.end!==b.start?'–'+fmtShort(parse(b.end)):''}`)});
     /* other plans that want the same machine on the same dates (not on the schedule yet) */
     plansOf(d).forEach(o=>{if(o.id===p.id||o.status==='scheduled'||!(o.machineIds||[]).includes(id))return;const od=planDates(o,d);
-      if(od.some(k=>dates.includes(k)))list.push(`Also planned for ${o.title||o.jobName||'another plan'} (${fmtShort(parse(od[0]))}${od.length>1?'–'+fmtShort(parse(od[od.length-1])):''})`)});
+      if(od.some(k=>mine.includes(k)))list.push(`Also planned for ${o.title||o.jobName||'another plan'} (${fmtShort(parse(od[0]))}${od.length>1?'–'+fmtShort(parse(od[od.length-1])):''})`)});
     if(list.length)machines[id]=list});
   const bkc=planBooking(d,p);const crewId=bkc?bkc.resourceId:p.crewId;
   const crew=crewId?d.blocks.filter(b=>b.resourceId===crewId&&b.id!==p.bookingId&&has(b)).map(b=>{const j=d.jobs.find(x=>x.id===b.jobId);return `${b.kind==='job'?(j?jobLabel(j):'Job'):(b.title||KINDS[b.kind].label)}, ${fmtShort(parse(b.start))}${b.end!==b.start?'–'+fmtShort(parse(b.end)):''}`}):[];
@@ -3843,7 +3876,8 @@ function applyPlan(d,p){
     const lines=(sp.lines||[]).filter(lineHas).map(l=>{const {_tManual,...r}=l;return cleanLine({...r,tonnes:planTonnes(l)})});
     const subs=[...(p.jobSubs||[]),...(sp.subs||[])].filter(subHas).map(s=>({name:(s.name||'').trim(),info:(s.info||'').trim(),time:s.time||p.crewOnSite||''}));
     sd[k]={...q,lines:lines.length?lines:linesOnly(q),...(subs.length?{subs}:{}),...(p.crewOnSite?{start:p.crewOnSite}:{})}});
-  const b={...old,plantIds:[...(p.machineIds||[])],shiftData:sd,planId:p.id,...((p.address||'').trim()?{address:p.address.trim()}:{})};
+  let b={...old,plantIds:[...(p.machineIds||[])],shiftData:sd,planId:p.id,...((p.address||'').trim()?{address:p.address.trim()}:{})};
+  b={...b,...withShiftMach(b,k=>{const i=dates.indexOf(k);return i<0?(p.machineIds||[]):spMach(p,(p.shiftPlans||[])[i])})};   /* each shift gets its own machines */
   [['quoteNo',p.quoteNo],['projectNo',p.projectNo],['supervisor',p.supervisor],['supervisorPhone',p.supervisorPhone]].forEach(([k,v])=>{v=(v||'').trim();if(v)b[k]=v});
   if(p.induction&&!b.inductionReq)b.inductionReq=true;   /* the plan says a site induction is needed: flag it on the booking */
   let blocks=d.blocks.map(x=>x.id===old.id?b:x);
@@ -3954,6 +3988,7 @@ function PlanCard({id,title,sub,children,right}){
 function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShifts,onAddImg,onDelImg,onQuick,onSteps}){
   const [p,setP]=useState(plan);const dirty=useRef(false);const pRef=useRef(p);pRef.current=p;
   const [editPast,setEditPast]=useState(false);   /* shifts before today are locked unless this is ticked */
+  const [nIx,setNIx]=useState(0);const [mIx,setMIx]=useState('all');   /* the night being edited; machines for every night or one night */
   const [quickSetup,setQuickSetup]=useState(false);
   const [stepsSetup,setStepsSetup]=useState(null);
   const [delImg,setDelImg]=useState(null);   /* picture waiting for "Remove?" to be confirmed */   /* which shift's method quick-adds are being edited */   /* editing the quick-add buttons and their default suppliers */
@@ -3997,7 +4032,23 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
   const addPics=async(i,files)=>{for(const f of [...(files||[])]){try{const r=await shrinkImage(f);const img={id:'img'+uid(),planId:p.id,name:f.name||'',...r};holdPlanScroll();onAddImg(img);
       set(x=>{const arr=[...(x.shiftPlans||[])];while(arr.length<=i)arr.push({lines:[{}]});arr[i]={...arr[i],images:[...(arr[i].images||[]),img.id]};return {shiftPlans:arr}})}catch(e){alert(e.message||'Couldn’t add that picture.')}}};
   const toggleIn=(arr,v)=>arr.includes(v)?arr.filter(x=>x!==v):[...arr,v];
-  const machines=data.resources.filter(r=>r.type==='machine');const picked=new Set(p.machineIds||[]);
+  const machines=data.resources.filter(r=>r.type==='machine');
+  const curN=Math.min(nIx,Math.max(0,dates.length-1));const mOne=mIx==='all'||!dates.length?null:Math.min(+mIx,dates.length-1);
+  const onAllP=id=>dates.length?dates.every((_,i)=>spMach(p,sps[i]).includes(id)):(p.machineIds||[]).includes(id);
+  const onSomeP=id=>dates.some((_,i)=>spMach(p,sps[i]).includes(id));
+  const perN=planMachPer(p,dates.length);
+  const picked=new Set(mOne===null?(p.machineIds||[]).filter(onAllP):spMach(p,sps[mOne]));
+  /* change machines on the chosen night (or every night); p.machineIds stays the full list */
+  const setMach=(fn,only=mOne)=>set(x=>{if(!dates.length)return {machineIds:[...new Set(fn(x.machineIds||[]))]};
+    const arr=[...(x.shiftPlans||[])];while(arr.length<dates.length)arr.push({lines:[{}]});
+    for(let i=0;i<dates.length;i++){const cur=spMach(x,arr[i]);arr[i]={...arr[i],machineIds:only===null||i===only?[...new Set(fn(cur))]:[...cur]}}
+    return {shiftPlans:arr,machineIds:[...new Set(arr.slice(0,dates.length).flatMap(sp=>sp.machineIds||[]))]}});
+  const toggleM=id=>{const has=picked.has(id);setMach(ids=>has?ids.filter(x=>x!==id):[...ids,id])};
+  const nightName=i=>`${night?'Night':'Shift'} ${i+1}`;
+  const nightTabs=(sel,onPick,withAll,idp)=>html`<div class="flex flex-wrap items-center gap-1.5" role="tablist" id=${idp}>
+    ${withAll&&html`<button type="button" role="tab" aria-selected=${sel==='all'} class=${'text-[12px] rounded-full border px-2.5 py-1 pl-nt '+(sel==='all'?'font-semibold':'text-muted hover:text-ink')} style=${sel==='all'?{background:'var(--accent-soft)',borderColor:'var(--accent)',color:'var(--accent)'}:{borderColor:'var(--line)'}} onClick=${()=>onPick('all')}>All ${night?'nights':'shifts'}</button>`}
+    ${dates.map((k,i)=>{const on=sel===i;const st=(sps[i].lines||[]).reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);return html`<button key=${k} type="button" role="tab" aria-selected=${on} data-i=${i} class=${'text-[12px] rounded-full border px-2.5 py-1 pl-nt '+(on?'font-semibold':'text-muted hover:text-ink')} style=${on?{background:'var(--accent-soft)',borderColor:'var(--accent)',color:'var(--accent)'}:{borderColor:'var(--line)'}} onClick=${()=>onPick(i)}>
+      ${nightName(i)} · ${WD[parse(k).getDay()]} ${fmtShort(parse(k))}${withAll?html` <span class="mono text-faint">${spMach(p,sps[i]).length}</span>`:st?html` <span class="mono text-faint">${fmtN(st)} t</span>`:''}</button>`})}</div>`;
   const subRow=(list,onList,prefix)=>html`<div class="grid gap-1.5">
     ${list.map((s,j)=>html`<div key=${j} class="grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.2fr_1.2fr_170px_28px] items-center">
       <${Combo} id=${`${prefix}-n${j}`} style=${fsm} placeholder="Subcontractor, e.g. BCM" value=${s.name||''} onChange=${v=>onList(list.map((x,k)=>k===j?{...x,name:v}:x))} label="Subcontractor" options=${subCosOf(data)}/>
@@ -4078,7 +4129,8 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
       ${dates.some(k=>k<iso(TODAY))&&html`<label class="inline-flex items-center gap-1.5 text-[13px] cursor-pointer" title="Shifts before today are locked so they aren't changed by accident"><input id="pl-editpast" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${editPast} onChange=${e=>setEditPast(e.target.checked)}/><span class=${editPast?'font-semibold':'text-muted'}>Edit past shifts</span></label>`}</span>`} title="Shift by shift" sub=${dates.length?`${fmtN(totalT)} t ${seal?'':'asphalt '}over ${dates.length} shift${dates.length===1?'':'s'}`:'Set the first shift and number of shifts above'}>
       ${totals.size>0&&html`<div class="flex flex-wrap gap-1.5">${[...totals.entries()].map(([k,v])=>html`<span key=${k} class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] bg-sunken border border-line">
         <span class="font-semibold mono">${k}</span><span class="text-muted tnum">${fmtN(v.t)} t · ${fmtN(v.a)} m²</span></span>`)}</div>`}
-      ${dates.map((k,i)=>{const sp=sps[i];const lines=sp.lines&&sp.lines.length?sp.lines:[{}];const st=lines.reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);
+      ${dates.length>1&&html`<div class="grid gap-1"><span class="label">Editing</span>${nightTabs(curN,i=>{setNIx(i);setMIx(i)},false,'pl-nights')}</div>`}
+      ${dates.map((k,i)=>{if(i!==curN)return null;const sp=sps[i];const lines=sp.lines&&sp.lines.length?sp.lines:[{}];const st=lines.reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);
         const vol=num(sp.profArea)&&num(sp.profDepth)?num(sp.profArea)*num(sp.profDepth)/1000:0;
         const lockedK=k<iso(TODAY)&&!editPast;
         return html`<fieldset key=${k} disabled=${lockedK} class="rounded-lg border border-line m-0 p-0 min-w-0" style=${lockedK?{opacity:.55}:null} title=${lockedK?'Past shift: tick "Edit past shifts" to change it':undefined}>
@@ -4177,15 +4229,19 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
     <//>
 
     ${restrictedIn(data,p.machineIds).length>0&&html`<${RestrictedNote} data=${data} ids=${p.machineIds} what="this plan (Machines needed)"/>`}
-    <${PlanCard} id="pl-machines" title="Machines needed" sub=${`${picked.size} selected`}
+    <${PlanCard} id="pl-machines" title="Machines needed" sub=${`${picked.size} selected${mOne===null?(perN?' on every '+(night?'night':'shift'):''):' for '+nightName(mOne)}`}
       right=${machConf>0&&html`<span class="text-[12px] font-semibold" style=${{color:'var(--warn)'}}>${machConf} clash${machConf===1?'':'es'} on these dates</span>`}>
+      ${dates.length>1&&html`<div class="flex flex-wrap items-center gap-2">${nightTabs(mOne===null?'all':mOne,i=>setMIx(i),true,'pl-mach-nights')}
+        ${mOne!==null&&html`<button id="pl-mach-copy" type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${()=>{const src=spMach(p,sps[mOne]);setMach(()=>src,null)}}>Copy ${nightName(mOne)}’s machines to all ${night?'nights':'shifts'}</button>`}
+        ${mOne===null&&perN&&html`<span class="text-[11.5px] text-muted">Machines differ between ${night?'nights':'shifts'}: ticks here are on every one.</span>`}</div>`}
       ${machines.length===0?html`<div class="text-[12.5px] text-muted">No machines yet. Add or import them in Fleet › Machines.</div>`
-        :html`<div class="grid gap-x-4 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" id="pl-mach-groups">${groupMachines(machines,data).filter(g=>!/transport|trailer/i.test(g.label)||g.rows.some(m=>picked.has(m.id))).map(g=>html`<div key=${g.key} class="grid gap-0 content-start">
+        :html`<div class="grid gap-x-4 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" id="pl-mach-groups">${groupMachines(machines,data).filter(g=>!/transport|trailer/i.test(g.label)||g.rows.some(m=>onSomeP(m.id))).map(g=>html`<div key=${g.key} class="grid gap-0 content-start">
           <div class="label mb-0.5" style=${{color:'var(--ink)'}}>${g.label}</div>
           ${g.rows.map(m=>{const c=conf.machines[m.id];const al=machAlert(data,m.id);const blocked=!!(al&&al.block&&!picked.has(m.id));return html`<label key=${m.id} class=${'flex items-start gap-2 rounded-md px-1.5 py-[3px] hover:bg-sunken '+(blocked?'cursor-not-allowed':'cursor-pointer')} title=${[al&&al.text,...(c||[])].filter(Boolean).join('\n')}>
-            <input id=${'plm-'+m.id} type="checkbox" class="w-4 h-4 mt-0.5 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} disabled=${blocked} onChange=${()=>{if(!blocked)set({machineIds:toggleIn(p.machineIds||[],m.id)})}}/>
+            <input id=${'plm-'+m.id} type="checkbox" class="w-4 h-4 mt-0.5 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} ref=${el=>{if(el)el.indeterminate=mOne===null&&!picked.has(m.id)&&onSomeP(m.id)}} disabled=${blocked} onChange=${()=>{if(!blocked)toggleM(m.id)}}/>
             <span class="min-w-0 leading-tight"><span class="text-[12.5px] font-semibold mono">${m.name}</span> <span class="text-[12px] text-muted">${m.sub||''}</span>
               ${al&&html`<span class="block text-[11.5px] font-medium" style=${{color:al.tone}}>${al.text}</span>`}
+              ${mOne===null&&perN&&onSomeP(m.id)&&!onAllP(m.id)&&html`<span class="block text-[11.5px] text-muted">${dates.map((k,i)=>spMach(p,sps[i]).includes(m.id)?nightName(i):null).filter(Boolean).join(', ')}</span>`}
               ${c&&html`<span class="block text-[11.5px] font-medium" style=${{color:'var(--warn)'}}>${c[0]}${c.length>1?` (+${c.length-1} more)`:''}</span>`}</span></label>`})}
         </div>`)}</div>`}
     <//>
@@ -4366,6 +4422,7 @@ async function buildPlanPdf(data,p,opt={}){
       if(spProf(p,sp)&&num(sp.profArea))kv([['Profiling',`${fmtN(num(sp.profArea))} m2 @ ${fmtN(num(sp.profDepth))} mm${num(sp.profDepth)?` (about ${fmtN(Math.round(num(sp.profArea)*num(sp.profDepth)/100)/10)} m3)`:''}`]]);
       if(!seal&&spSeal(sp))kv([['Seal crew',`${sealText(sp.seal)}${planSealCrew(data,p)?` (${planSealCrew(data,p).name})`:''}`]]);
       (sp.lines||[]).filter(lineHas).forEach(l=>kv([[seal?'Seal':'Asphalt',seal?`${l.type||''} ${l.binder||''} - ${fmtN(num(l.area))} m2`:`${fmtN(num(l.area))} m2 - ${fmtN(planTonnes(l))} t @ ${fmtN(num(l.depth))} mm ${mixLabel(l)}`]]));
+      if(planMachPer(p,dates.length)){const mm=spMach(p,sp).map(id=>data.resources.find(r=>r.id===id)).filter(Boolean);kv([['Machines',mm.length?mm.map(m=>m.name).join(', '):'None']])}
       const subs=[...(p.jobSubs||[]),...(sp.subs||[])].filter(subHas);if(subs.length)kv([['Subcontractors',subs.map(s=>[s.name,s.info,fmtTime(s.time||p.crewOnSite)].filter(Boolean).join(' - ')).join('\n')]]);
       const tr=spTruck(p,sp);if(!seal&&(num(tr.perRound)||tr.loadStart||(tr.types||[]).length||tr.note))kv([['Trucking',[num(tr.perRound)&&`${fmtN(num(tr.perRound))} t per round${spRounds(p,sp)?` = ${fmtN(spRounds(p,sp))} rounds`:''}`,tr.loadStart&&`start loading ${fmtTime(tr.loadStart)}`,(tr.types||[]).length&&tr.types.join(', '),tr.note].filter(Boolean).join(' · ')]]);
       if((sp.notes||'').trim()){room(5);font(8.5,true,[80,80,80]);doc.text('Method',M,y+3.5);y+=4.6;bullets(sp.notes)}
@@ -4373,7 +4430,7 @@ async function buildPlanPdf(data,p,opt={}){
         room(h+3);try{doc.addImage(im.data,'JPEG',M+(W-w)/2,y+1,w,h);doc.setDrawColor(...AFA_GRID);doc.rect(M+(W-w)/2,y+1,w,h,'S')}catch(e){}y+=h+3});
       y+=2})}
   const machines=(p.machineIds||[]).map(id=>data.resources.find(r=>r.id===id)).filter(Boolean);
-  if(machines.length){head('Machines');groupMachines(machines,data).forEach(g=>kv([[g.label,g.rows.map(m=>`${m.name}${m.sub?' '+m.sub:''}`).join(', ')]]))}
+  if(machines.length){head(planMachPer(p,dates.length)?'Machines (all nights; each night’s are listed under it)':'Machines');groupMachines(machines,data).forEach(g=>kv([[g.label,g.rows.map(m=>`${m.name}${m.sub?' '+m.sub:''}`).join(', ')]]))}
   if((p.jobSubs||[]).filter(subHas).length){head('Subcontractors (whole job)');kv((p.jobSubs||[]).filter(subHas).map(s=>[s.name||'-',[s.info,fmtTime(s.time||p.crewOnSite)].filter(Boolean).join(' - ')]))}
   const sl=p.seal||{};if(num(sl.tackArea)||num(sl.sealArea)||sl.onSite){head('Seal crew');kv([['On site',fmtTime(sl.onSite)],['Tack area',num(sl.tackArea)?`${fmtN(num(sl.tackArea))} m2`:''],['Seal area',num(sl.sealArea)?`${fmtN(num(sl.sealArea))} m2`:'']])}
   if((p.hazards||[]).some(h=>h.hazard||h.control)){head('Safety / environmental - hazards and controls');(p.hazards||[]).filter(h=>h.hazard||h.control).forEach(h=>kv([[h.hazard||'-',h.control||'']]))}
@@ -4781,7 +4838,7 @@ function removeSampleData(d){
   let resources=d.resources.filter(r=>!rid.has(r.id)).map(r=>r.crewId&&rid.has(r.crewId)?{...r,crewId:null}:r);
   /* the sample plant becomes a plain plant with no sample maintenance */
   resources=resources.map(r=>r.id==='a0'&&r.sub==='Narangba'?{...r,sub:'Main plant'}:r);
-  const blocks=d.blocks.filter(b=>!bid.has(b.id)).map(b=>b.plantIds&&b.plantIds.some(x=>rid.has(x))?{...b,plantIds:b.plantIds.filter(x=>!rid.has(x))}:b);
+  const blocks=d.blocks.filter(b=>!bid.has(b.id)).map(b=>b.plantIds&&b.plantIds.some(x=>rid.has(x))?{...b,...withShiftMach(b,(k,ids)=>ids.filter(x=>!rid.has(x)))}:b);
   const left=new Set(blocks.map(b=>b.id));
   return {...d,resources,blocks,jobs:d.jobs.filter(j=>!jid.has(j.id)),quoteChanges:(d.quoteChanges||[]).filter(c=>left.has(c.bookingId))};
 }
@@ -5371,7 +5428,7 @@ function App({boot,live}){
         <${Stat} k="Away this week" v=${L.week.length} sub=${L.week.length?`${L.weekDays} staff-day${L.weekDays===1?'':'s'} · ${L.week.map(p=>p.name.split(' ')[0]).join(', ')}`:'no leave this week'}/>
         <${Stat} k="Coming up (4 weeks)" v=${L.soon.length} sub=${L.soon.length?L.soon.slice(0,3).map(x=>`${x.p.name.split(' ')[0]} ${fmtShort(parse(x.b.start))}`).join(', ')+(L.soon.length>3?` +${L.soon.length-3} more`:''):'nothing booked'}/>
         <${Stat} k="Showing" v=${html`<span class="text-[16px]">${fmtRange(days[0],days[N-1])}</span>`} sub=""/>
-      </section>`})():fleetCal?(()=>{const ms=vis('machine');const t=iso(TODAY);const on=ms.filter(m=>data.blocks.some(b=>b.start<=t&&b.end>=t&&(b.resourceId===m.id||(b.plantIds||[]).includes(m.id))&&!(KINDS[b.kind]&&KINDS[b.kind].down)));
+      </section>`})():fleetCal?(()=>{const ms=vis('machine');const t=iso(TODAY);const on=ms.filter(m=>data.blocks.some(b=>b.start<=t&&b.end>=t&&(b.resourceId===m.id||machinesOn(b,t).includes(m.id))&&!(KINDS[b.kind]&&KINDS[b.kind].down)));
         return html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3" id="fleet-cal-stats">
         <${Stat} k="Machines on jobs today" v=${`${on.length}/${ms.length}`} sub=${on.length?on.slice(0,4).map(m=>m.name).join(', ')+(on.length>4?` +${on.length-4} more`:''):'none booked'}/>
         <${Stat} k="Machines down today" v=${downToday.length} sub=${downToday.length?downToday.map(m=>m.name).join(', '):'all available'} tone=${downToday.length?'var(--bad)':null}/>

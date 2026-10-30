@@ -61,7 +61,7 @@ const AGREE='We the signatories agree that we have been consulted with in the de
 const entriesOn=(data,k)=>programEntries(data,k);
 const jobOf=(data,b)=>data.jobs.find(j=>j.id===b.jobId);
 const crewName=(data,id)=>(data.resources.find(r=>r.id===id)||{}).name||'Crew';
-function prestartHint(data,b,k){const ids=b.plantIds||[];if(!ids.length)return null;const A=data.alerts||{};
+function prestartHint(data,b,k){const ids=machinesOn(b,k);if(!ids.length)return null;const A=data.alerts||{};
   const done=ids.filter(id=>A[id]&&A[id].last_prestart_at&&iso(new Date(A[id].last_prestart_at))===k).length;return {done,of:ids.length}}
 function newPack(data,e,myName){const b=e.b,j=jobOf(data,b)||{};const crew=data.resources.find(r=>r.id===e.crewId);
   return {id:newId(),block_id:b.id,shift_date:e.k,job_id:b.jobId||null,crew_id:e.crewId,status:'draft',toolbox:null,forms:{},

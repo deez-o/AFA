@@ -86,7 +86,7 @@ const REPORTS=[
   {id:'prestarts',label:'Prestart compliance',max:90,make:(ctx,{from,to,cat})=>{const {db,M,data}=ctx;const end=to<iso(TODAY)?to:iso(TODAY);const days=from<=end?dayList(from,end):[];
     const as=M.assets.filter(a=>!a.retired&&(!cat||machCatOf(a.m).toLowerCase()===cat.toLowerCase()));
     const jobs=data.blocks.filter(b=>b.kind==='job'&&(b.plantIds||[]).length&&b.end>=from&&b.start<=end);
-    const rows=as.map(a=>{const booked=days.filter(k=>jobs.some(b=>(b.plantIds||[]).includes(a.m.id)&&covers(b,k)&&worksOn(b,parse(k))));
+    const rows=as.map(a=>{const booked=days.filter(k=>jobs.some(b=>machinesOn(b,k).includes(a.m.id)&&covers(b,k)&&worksOn(b,parse(k))));
       const ps=db.prestarts.filter(p=>p.asset_id===a.m.id&&localDay(p.submitted_at)>=from&&localDay(p.submitted_at)<=to);const pd=new Set(ps.map(p=>localDay(p.submitted_at)));
       const missing=booked.filter(k=>!pd.has(k));return {a,booked:booked.length,done:booked.length-missing.length,missing,ps}}).filter(r=>r.booked||r.ps.length)
       .sort((x,y)=>y.missing.length-x.missing.length||x.a.m.name.localeCompare(y.a.m.name));

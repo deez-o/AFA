@@ -295,7 +295,7 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
 
 function BreakdownDialog({ctx,a,onClose}){
   const {sb,notify,reload,data}=ctx;
-  const crewJob=(()=>{const today=iso(TODAY);const b=data.blocks.find(x=>x.kind==='job'&&x.start<=today&&x.end>=today&&((x.plantIds||[]).includes(a.m.id)||x.resourceId===a.m.crewId));
+  const crewJob=(()=>{const today=iso(TODAY);const b=data.blocks.find(x=>x.kind==='job'&&x.start<=today&&x.end>=today&&(machinesOn(x,today).includes(a.m.id)||x.resourceId===a.m.crewId));
     if(!b)return '';const j=data.jobs.find(x=>x.id===b.jobId);return j?[j.customer,j.name].filter(Boolean).join(' · '):''})();
   const [f,setF]=useState({what:'',location:crewJob,safe:null,priority:'high',hours:'',km:''});const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
   const save=async()=>{setErr('');if(!f.what.trim()){setErr('Describe what failed.');return}if(f.safe==null){setErr('Say whether it is safe to operate.');return}setBusy(true);
@@ -660,7 +660,7 @@ function MachineDialog({ctx,a,isNew,startDel,onClose}){
     if(canP&&profChanged()){setBusy(true);const e=await saveProf(id);setBusy(false);if(e){setErr(e);if(!isNew)return}else reload()}
     notify(isNew?`${name} added`:'Machine saved');onClose()};
   const remove=async()=>{if(!perms.mgr)return;
-    setData(d=>({...d,resources:d.resources.filter(r=>r.id!==m.id),blocks:d.blocks.filter(b=>b.resourceId!==m.id).map(b=>b.plantIds&&b.plantIds.includes(m.id)?{...b,plantIds:b.plantIds.filter(x=>x!==m.id)}:b)}));
+    setData(d=>({...d,resources:d.resources.filter(r=>r.id!==m.id),blocks:d.blocks.filter(b=>b.resourceId!==m.id).map(b=>b.plantIds&&b.plantIds.includes(m.id)?{...b,...withShiftMach(b,(k,ids)=>ids.filter(x=>x!==m.id))}:b)}));
     if(a&&a.p)try{await sb.from('asset_profiles').delete().eq('asset_id',m.id)}catch(e){}
     try{await sb.from('asset_photos').delete().eq('asset_id',m.id)}catch(e){}
     notify(`${m.name} deleted`);reload();onClose()};

@@ -96,7 +96,7 @@ function flushOutbox(sb,u){if(flushing)return flushing;flushing=(async()=>{const
 const localResult=(tpl,ans)=>{let f=0,c=0;(tpl.items||[]).forEach(it=>{if(kindOf(it)==='check'&&(ans[it.key]||{}).answer==='fail'){f++;if(it.critical)c++}});return {result:c?'unsafe':f?'defects':'pass',failed:f}};
 
 /* the job this machine's crew is on today, to fill in the location */
-const jobToday=(data,m)=>{const today=iso(TODAY);const b=data.blocks.find(x=>x.kind==='job'&&x.start<=today&&x.end>=today&&((x.plantIds||[]).includes(m.id)||(m.crewId&&x.resourceId===m.crewId)));
+const jobToday=(data,m)=>{const today=iso(TODAY);const b=data.blocks.find(x=>x.kind==='job'&&x.start<=today&&x.end>=today&&(machinesOn(x,today).includes(m.id)||(m.crewId&&x.resourceId===m.crewId)));
   if(!b)return '';const j=data.jobs.find(x=>x.id===b.jobId);return j?[j.customer,j.name].filter(Boolean).join(' · '):''};
 
 /* ---------- signature ---------- */
@@ -312,7 +312,7 @@ function PrestartScreen({data,live,notify}){
     const ql=q.trim().toLowerCase();const crewId=staff&&staff.crewId;
     /* booked for today's shift (ticked on a job booking): those come first, the operator's own crew's job before others */
     const nowShift=new Date().getHours()>=15?'night':'day';
-    const bookedOn=m=>{const bs=data.blocks.filter(b=>b.kind==='job'&&(b.plantIds||[]).includes(m.id)&&covers(b,today)&&worksOn(b,TODAY));
+    const bookedOn=m=>{const bs=data.blocks.filter(b=>b.kind==='job'&&machinesOn(b,today).includes(m.id)&&covers(b,today)&&worksOn(b,TODAY));
       return bs.find(b=>(b.shift||'day')===nowShift)||bs[0]||null};
     const bk=new Map(M.assets.map(a=>[a.m.id,bookedOn(a.m)]));
     const rank=a=>{const b=bk.get(a.m.id);return b?(crewId&&b.resourceId===crewId?0:1):(crewId&&a.m.crewId===crewId?2:3)};
