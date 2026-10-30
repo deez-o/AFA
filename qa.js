@@ -185,7 +185,8 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
   const {canFill,save,myName,isManager}=ctx;
   const [p,setP]=useState(pack);const tm=useRef(null);const [dlg,setDlg]=useState(null);const [busy,setBusy]=useState(false);const [msg,setMsg]=useState('');
   useEffect(()=>{if(!tm.current)setP(pack)},[pack]);   /* someone else's change arrives (not while we're typing) */
-  const canEdit=canFill&&p.status==='draft';
+  /* a submitted pack is locked: only administrators and superusers can still change it */
+  const canEdit=canFill&&(p.status==='draft'||!!isManager);const isDraft=p.status==='draft';
   const upd=fn=>setP(x=>{const n=fn(x);clearTimeout(tm.current);tm.current=setTimeout(()=>{tm.current=null;save({t:'pack',row:rowOf(n)})},600);return n});
   const rowOf=x=>({id:x.id,block_id:x.block_id,shift_date:x.shift_date,job_id:x.job_id,crew_id:x.crew_id,status:x.status,label:x.label||null,jsa:x.jsa,toolbox:x.toolbox,forms:x.forms||{}});
   const J=p.jsa||{};const setJ=f=>upd(x=>({...x,jsa:{...x.jsa,...f(x.jsa)}}));
@@ -205,7 +206,7 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
     (async()=>{try{const {data:rows,error}=await ctx.sb.from('qa_packs').select('id,toolbox').eq('crew_id',e.crewId).gte('shift_date',iso(mon)).lte('shift_date',iso(sun));if(error)throw error;if(!off)setWkTb((rows||[]).filter(r=>r.id!==p.id&&r.toolbox).length)}catch(x){}})();
     return()=>{off=true}},[p.id,e.crewId,e.k,canEdit]);
   const tbWeek=wkTb==null?null:wkTb+(T?1:0);
-  const tbRemind=btn=>canEdit&&!T&&tbWeek!=null&&tbWeek<2&&html`<div id="qa-tb-remind" class="rounded-xl border px-4 py-3 flex flex-wrap items-center gap-3" style=${{borderColor:'hsl(30 90% 45%)',background:'hsl(38 100% 50% / .10)'}}>
+  const tbRemind=btn=>canEdit&&isDraft&&!T&&tbWeek!=null&&tbWeek<2&&html`<div id="qa-tb-remind" class="rounded-xl border px-4 py-3 flex flex-wrap items-center gap-3" style=${{borderColor:'hsl(30 90% 45%)',background:'hsl(38 100% 50% / .10)'}}>
     <div class="flex-1 min-w-[200px]"><div class="text-[13.5px] font-semibold" style=${{color:'hsl(30 90% 32%)'}}>Toolbox meetings this week: ${tbWeek} of 2</div>
       <div class="text-[12px] text-muted">${crewName(data,e.crewId)} needs two toolbox meetings a week${tbWeek?' – one more to go':''}.</div></div>
     ${btn&&html`<button type="button" class="btn qa-tb-remind-add" onClick=${()=>addOpt('toolbox')}>${Icon.plus} Add a toolbox meeting</button>`}</div>`;
@@ -275,7 +276,7 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
       ${chip(statusOf(p,sigs))}${p.pending&&html`<span class="text-[11.5px]" style=${{color:'hsl(38 90% 40%)'}}>Waiting to send</span>`}
       ${(canEdit||p.label)&&html`<div class="w-full flex items-center gap-2 pt-1"><span class="label shrink-0">Pack name</span>${canEdit?html`<input id="qa-label" class="field" style=${{...fs,maxWidth:320}} placeholder="e.g. Second work area (optional)" value=${p.label||''} onInput=${ev=>upd(x=>({...x,label:ev.target.value}))}/>`:html`<span class="text-[13px] font-medium">${p.label}</span>`}</div>`}
     </div>
-    ${p.status==='submitted'&&html`<div class="rounded-lg px-3 py-2 text-[12.5px]" style=${{background:'hsl(145 50% var(--blk-l))'}}>Submitted${p.submitted_name?' by '+p.submitted_name:''}${p.submitted_at?' · '+fmtDT(p.submitted_at):''}. It can’t be changed${isManager?' unless you reopen it':''}.</div>`}
+    ${p.status==='submitted'&&html`<div class="rounded-lg px-3 py-2 text-[12.5px]" style=${{background:'hsl(145 50% var(--blk-l))'}}>Submitted${p.submitted_name?' by '+p.submitted_name:''}${p.submitted_at?' · '+fmtDT(p.submitted_at):''}. ${isManager?'Only administrators and superusers can change it: your changes save to the submitted pack.':'Only an administrator or superuser can change it now.'}</div>`}
     ${!canFill&&p.status==='draft'&&html`<div class="rounded-lg px-3 py-2 text-[12.5px]" style=${{background:'var(--accent-soft)'}}>Read through the JSA, then sign at the bottom.</div>`}
     <nav class="panel px-2 py-2 flex gap-1.5 overflow-x-auto sticky top-0" style=${{zIndex:6}} id="qa-tabs" aria-label="Forms in this pack">
       ${tabs.map(t=>{const on=t.id===sec;const add=t.opt&&!t.on;const mi=add?[]:missOf(t.id);const ok=!add&&!mi.length;
@@ -354,12 +355,13 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
     <div class="panel px-4 py-3 flex flex-wrap items-center gap-2 sticky bottom-0" style=${{zIndex:5}}>
       ${msg&&html`<span id="qa-msg" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${msg}</span>`}
       <button id="qa-pdf" type="button" class="btn" disabled=${busy} onClick=${pdf}>${Icon.download} ${busy?'Making PDF…':'PDF'}</button>
+      ${T&&html`<button id="qa-tb-pdf" type="button" class="btn" disabled=${busy} onClick=${async()=>{setBusy(true);try{await toolboxPdf(data,e,p,sigs)}catch(x){setMsg(errMsg(x))}finally{setBusy(false)}}}>${Icon.download} Toolbox meeting</button>`}
       ${forms.costs&&html`<button id="qa-costs-pdf" type="button" class="btn" disabled=${busy} title="External costs summary: office use only, not sent to the customer" onClick=${async()=>{setBusy(true);try{await costsPdf(data,e,p,sigs)}catch(x){setMsg(errMsg(x))}finally{setBusy(false)}}}>${Icon.download} External costs</button>`}
       <span class="text-[12px] text-muted flex-1" id="qa-progress">${order.length-missAll.length} of ${order.length} form${order.length===1?'':'s'} complete</span>
-      ${canEdit&&!del&&html`<button id="qa-delete" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>${Icon.trash} Delete</button>`}
-      ${canEdit&&del&&html`<span id="qa-del-confirm" class="w-full flex flex-wrap items-center gap-2"><span class="text-[12.5px] font-medium flex-1" style=${{color:'var(--bad)'}}>Delete this pack${jsaSigs.length?` and its ${sigs.filter(s=>s.pack_id===p.id).length} signature${sigs.filter(s=>s.pack_id===p.id).length===1?'':'s'}`:''}? This can’t be undone.</span>
+      ${canEdit&&isDraft&&!del&&html`<button id="qa-delete" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>${Icon.trash} Delete</button>`}
+      ${canEdit&&isDraft&&del&&html`<span id="qa-del-confirm" class="w-full flex flex-wrap items-center gap-2"><span class="text-[12.5px] font-medium flex-1" style=${{color:'var(--bad)'}}>Delete this pack${jsaSigs.length?` and its ${sigs.filter(s=>s.pack_id===p.id).length} signature${sigs.filter(s=>s.pack_id===p.id).length===1?'':'s'}`:''}? This can’t be undone.</span>
         <button type="button" class="btn" onClick=${()=>setDel(false)}>Cancel</button><button id="qa-del-go" type="button" class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${remove}>Yes, delete</button></span>`}
-      ${canEdit&&!del&&html`<button id="qa-submit" type="button" class="btn btn-primary" onClick=${submit}>Submit pack</button>`}
+      ${canEdit&&isDraft&&!del&&html`<button id="qa-submit" type="button" class="btn btn-primary" onClick=${submit}>Submit pack</button>`}
       ${isManager&&p.status==='submitted'&&html`<button id="qa-reopen" type="button" class="btn" onClick=${reopen}>Reopen</button>`}
     </div>
     ${dlg&&dlg.k==='sign'&&html`<${SignDialog} key=${dlg.form+(dlg.mine?':me':':other')} title=${dlg.title||(dlg.form==='jsa'?'Sign the JSA':dlg.form==='toolbox'?'Sign the toolbox meeting':(FF&&FF.signTitle(dlg.form))||'Sign')} mine=${dlg.mine} myName=${myName}
@@ -449,9 +451,11 @@ async function packPdf(data,e,p,sigs,opt={}){
   const page=(title,orient)=>{const w=doc.internal.pageSize.getWidth();doc.setFillColor(153,10,44);doc.rect(0,0,w,2,'F');img(AFA_LOGO,w-M-34,5,34,13.2,'afa-logo');
     doc.setFont('helvetica','bold');doc.setFontSize(13);doc.setTextColor(0,0,0);txt(title+(p.label?' · '+p.label:''),M,13);y=22};
   const foot=()=>{const n=doc.internal.getNumberOfPages();for(let i=1;i<=n;i++){doc.setPage(i);const w=doc.internal.pageSize.getWidth(),h=doc.internal.pageSize.getHeight();doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(120,125,135);
-    txt(`Approved by Dan Soundy – Operations Manager · JSA version ${J.v||JSA_VERSION} · FraserFlow · ${p.status==='submitted'?'submitted '+fmtDT(p.submitted_at)+(p.submitted_name?' by '+p.submitted_name:''):'draft'}`,M,h-5);txt(`Page ${i} of ${n}`,w-M,h-5,{align:'right'})}};
+    txt(`${opt.toolbox?'Toolbox meeting record':`Approved by Dan Soundy – Operations Manager · JSA version ${J.v||JSA_VERSION}`} · FraserFlow · ${p.status==='submitted'?'submitted '+fmtDT(p.submitted_at)+(p.submitted_name?' by '+p.submitted_name:''):'draft'}`,M,h-5);txt(`Page ${i} of ${n}`,w-M,h-5,{align:'right'})}};
   const box=(x,yy,w,h)=>{doc.setDrawColor(60,60,60);doc.setLineWidth(.2);doc.rect(x,yy,w,h)};
   const room=(h)=>{const hh=doc.internal.pageSize.getHeight();if(y+h>hh-12){doc.addPage('a4','p');page('JOB SPECIFIC ASSESSMENT (JSA) FORM (continued)');return true}return false};
+  const tbOnly=!!opt.toolbox;   /* the toolbox meeting has its own PDF; the QA pack doesn't include it */
+  if(!tbOnly){
   page('JOB SPECIFIC ASSESSMENT (JSA) FORM');
   /* header grid: 3 columns × 4 rows (portrait) */
   const cells=[['Job Number',hd.job_no],['Job Location',hd.location],['Customer',hd.customer],['Date',hd.date?fmtShort(parse(hd.date))+' '+parse(hd.date).getFullYear():''],['Time',hd.time],
@@ -501,9 +505,11 @@ async function packPdf(data,e,p,sigs,opt={}){
   /* the other forms, in the order of the paper pack */
   /* the external costs summary is office-only: it has its own PDF (costsPdf), not sent to the customer */
   if(window.FFQF)for(const f of window.FFQF.FORMS)if(f.id!=='costs'&&(p.forms||{})[f.id]&&f.pdf){f.pdf({doc,J:p,p,data,e,sigs,M,txt,img,box,page,newPage:o=>{doc.addPage('a4',o||'p');},AFA,fmtDT})}
+  }
   /* toolbox meeting (optional), portrait like the paper */
   const T=p.toolbox;
-  if(T){doc.addPage('a4','p');const w=210;page('TOOLBOX MEETING RECORD FORM');doc.setFontSize(8.5);doc.setTextColor(0,0,0);
+  if(tbOnly&&!T)throw new Error('This pack has no toolbox meeting.');
+  if(tbOnly&&T){const w=210;page('TOOLBOX MEETING RECORD FORM');doc.setFontSize(8.5);doc.setTextColor(0,0,0);
     const kv=[['Date',hd.date?fmtShort(parse(hd.date))+' '+parse(hd.date).getFullYear():''],['Location',T.location],['WHS&E Rep',T.whs_rep],['Supervisor',T.supervisor],['Manager',T.manager]];
     kv.forEach(([k,v],i)=>{const x=M+(i%2)*(w-2*M)/2,yy=y+Math.floor(i/2)*6;doc.setFont('helvetica','bold');txt(k+':',x,yy);doc.setFont('helvetica','normal');txt(v||'',x+24,yy)});y+=20;
     const tc=[[M,(w-2*M)*.36,'Topics discussed'],[M+(w-2*M)*.36,(w-2*M)*.36,'Action'],[M+(w-2*M)*.72,(w-2*M)*.13,'Date'],[M+(w-2*M)*.85,(w-2*M)*.15,'Who']];
@@ -521,10 +527,11 @@ async function packPdf(data,e,p,sigs,opt={}){
       doc.setFont('helvetica','normal');doc.setFontSize(8.2);txt(s.name,M+1.2,y+6.5);txt(s.company||AFA,M+cw3[0]+1.2,y+6.5);doc.setFontSize(7.2);txt(fmtDT(s.signed_at),M+cw3[0]+cw3[1]+1.2,y+6.5);
       img(s.signature,M+cw3[0]+cw3[1]+cw3[2]+2,y+.6,26,9.8,'sig-'+s.id);y+=11})}
   foot();
-  const j=jobOf(data,e.b);const name=`QA pack ${(j&&(j.projectNo||j.name))||'job'} ${e.k}${p.label?' '+p.label:''}.pdf`.replace(/[\\/:*?"<>|]+/g,'-');
+  const j=jobOf(data,e.b);const name=`${tbOnly?'Toolbox meeting':'QA pack'} ${(j&&(j.projectNo||j.name))||'job'} ${e.k}${p.label?' '+p.label:''}.pdf`.replace(/[\\/:*?"<>|]+/g,'-');
   if(opt.blob)return {blob:doc.output('blob'),name};doc.save(name);
 }
 /* the external costs summary on its own (office use only) */
+const toolboxPdf=(data,e,p,sigs,opt={})=>packPdf(data,e,p,sigs,{...opt,toolbox:true});
 async function costsPdf(data,e,p,sigs,opt={}){
   const F=window.FFQF;const C=F&&F.byId.costs;if(!C||!(p.forms||{}).costs)throw new Error('This pack has no external costs summary.');
   const Jp=await loadJsPDF();const doc=new Jp({orientation:'p',unit:'mm',format:'a4'});const M=10;let first=true;
@@ -546,7 +553,7 @@ function JobQaDocs({data,jobId,sb}){
   useEffect(()=>{let off=false;setV(null);(async()=>{try{const {data:ps,error}=await sb.from('qa_packs').select('*').eq('job_id',jobId).eq('status','submitted');if(error)throw error;if(!off)setV(ps||[])}catch(x){if(!off){setErr(errMsg(x));setV([])}}})();return()=>{off=true}},[jobId]);
   const entryOf=p=>{const b=data.blocks.find(x=>x.id===p.block_id);return b?{b,k:p.shift_date,crewId:coverOf(b,p.shift_date)||b.resourceId}:null};
   const run=async(p,kind)=>{const e=entryOf(p);if(!e){setErr('That booking is no longer on the schedule.');return}setBusy(p.id+kind);setErr('');
-    try{const {data:sg,error}=await sb.from('qa_signatures').select('*').eq('pack_id',p.id);if(error)throw error;await (kind==='costs'?costsPdf:packPdf)(data,e,p,sg||[])}catch(x){setErr(errMsg(x))}finally{setBusy('')}};
+    try{const {data:sg,error}=await sb.from('qa_signatures').select('*').eq('pack_id',p.id);if(error)throw error;await (kind==='costs'?costsPdf:kind==='tb'?toolboxPdf:packPdf)(data,e,p,sg||[])}catch(x){setErr(errMsg(x))}finally{setBusy('')}};
   if(!v)return html`<div class="text-[12.5px] text-muted">Loading…</div>`;
   const list=[...v].sort((a,b)=>String(b.shift_date).localeCompare(String(a.shift_date)));
   return html`<div class="grid gap-1.5" id="job-qa-docs">
@@ -556,10 +563,11 @@ function JobQaDocs({data,jobId,sb}){
         <div class="min-w-0 flex-1"><div class="text-[13px] font-medium">QA pack · ${WD[parse(p.shift_date).getDay()]} ${fmtShort(parse(p.shift_date))}${p.label?' · '+p.label:''}</div>
           <div class="text-[11.5px] text-muted">${[crew&&crew.name,p.submitted_at&&'submitted '+fmtDT(p.submitted_at),p.submitted_name].filter(Boolean).join(' · ')}</div></div>
         <button type="button" class="btn job-qa-pdf" style=${{height:28,fontSize:12}} disabled=${!!busy} onClick=${()=>run(p,'qa')}>${Icon.download} ${busy===p.id+'qa'?'…':'QA PDF'}</button>
+        ${p.toolbox&&html`<button type="button" class="btn job-tb-pdf" style=${{height:28,fontSize:12}} disabled=${!!busy} onClick=${()=>run(p,'tb')}>${Icon.download} ${busy===p.id+'tb'?'…':'Toolbox meeting'}</button>`}
         ${(p.forms||{}).costs&&html`<button type="button" class="btn job-costs-pdf" style=${{height:28,fontSize:12}} disabled=${!!busy} title="Office use only" onClick=${()=>run(p,'costs')}>${Icon.download} ${busy===p.id+'costs'?'…':'External costs'}</button>`}</div>`})}</div>`;
 }
 
 window.QaScreen=QaScreen;
 window.QaBookingTab=QaBookingTab;
-window.FFQ={JSA_SECTIONS,packPdf,costsPdf,JobQaDocs,allTicks,Card,Tick,SignOff,SignPad,newId,AFA,chip};
+window.FFQ={JSA_SECTIONS,packPdf,costsPdf,toolboxPdf,JobQaDocs,allTicks,Card,Tick,SignOff,SignPad,newId,AFA,chip};
 })();
