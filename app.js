@@ -1057,7 +1057,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             <button class="flex items-center gap-2 pl-1 pr-3 py-2 flex-1 min-w-0 text-left" onClick=${()=>toggleSection(t)} aria-expanded=${!collapsed[t]}>
               <span class="text-muted inline-flex transition-transform" style=${{transform:collapsed[t]?'rotate(-90deg)':'none'}}>${Icon.chevD}</span>
               <span class="label" style=${{color:'var(--ink)'}}>${SEC_LABEL(t)}</span>
-              <span class="mono text-[11px] text-faint">${t==='tonnes'?`${fmtN(viewTotal)} t in view`:rows.length}</span>
+              <span class="mono text-[11px] text-faint whitespace-nowrap">${t==='tonnes'?`${fmtN(viewTotal)} t in view`:rows.length}</span>
             </button>
           </div>
           <div class="flex-1 grid" style=${grid}>
