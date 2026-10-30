@@ -178,6 +178,7 @@ const Icon={
   key:svg(html`<circle cx="5.5" cy="10.5" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M7.7 8.3L14 2M11.5 4.5l1.8 1.8M10 6l1.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,16),
   moon:svg(html`<path d="M12.5 10.2A5.5 5.5 0 015.8 3.5a5.5 5.5 0 106.7 6.7z" fill="currentColor"/>`,12),
   wrench:svg(html`<path d="M10.5 2a3.5 3.5 0 00-3.2 4.9L2.5 11.7a1.3 1.3 0 001.8 1.8l4.8-4.8A3.5 3.5 0 0014 5.5l-2 2-1.8-.3-.3-1.8 2-2c-.4-.3-.9-.4-1.4-.4z" fill="currentColor"/>`,11),
+  induct:svg(html`<path d="M5 2.5h6M4 2.5h8a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1v-10a1 1 0 011-1z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M6 1.5h4v2H6z" fill="currentColor"/><path d="M5.5 9l1.8 1.8L10.8 7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,11),
   sap:svg(html`<rect x="1.5" y="3" width="13" height="10" rx="2" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M4.5 6.5h7M4.5 9.5h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M2 14L14 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`,11),
   briefcase:svg(html`<rect x="2" y="4.5" width="12" height="9" rx="1.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M5.8 4.5V3.2c0-.4.3-.7.7-.7h3c.4 0 .7.3.7.7v1.3M2 8.5h12" stroke="currentColor" stroke-width="1.5" fill="none"/>`,15),
   person:svg(html`<circle cx="8" cy="5" r="2.6" fill="currentColor"/><path d="M3 14c.4-3 2.4-4.6 5-4.6s4.6 1.6 5 4.6z" fill="currentColor"/>`,11),
@@ -910,7 +911,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             style=${{...blockStyle(it.b,data),top:10+it.lane*32,left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
               borderTopLeftRadius:it.cutL?0:6,borderBottomLeftRadius:it.cutL?0:6,borderTopRightRadius:it.cutR?0:6,borderBottomRightRadius:it.cutR?0:6,
               justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined}}
-            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.crewSize?`\n${it.b.crewSize} man crew`:''}${it.b.kind==='job'&&!it.b.sapEntered?'\nNot entered into SAP':''}${it.b.kind==='job'&&it.b.creditIssue?'\nCredit issue':''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
+            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.crewSize?`\n${it.b.crewSize} man crew`:''}${it.b.kind==='job'&&it.b.inductionReq?(it.b.inductionDone?'\nSite induction: paperwork sorted':'\nSite induction required: not sorted'):''}${it.b.kind==='job'&&!it.b.sapEntered?'\nNot entered into SAP':''}${it.b.kind==='job'&&it.b.creditIssue?'\nCredit issue':''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
             onPointerDown=${e=>v?e.stopPropagation():startDrag(e,it.b)}
             onClick=${v?()=>onEdit(it.b.parent):undefined}
             onKeyDown=${e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onEdit(v?it.b.parent:it.b)}
@@ -922,6 +923,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             ${night&&html`<span class="shrink-0 inline-flex" title="Night works">${Icon.moon}</span>`}
             ${(src=>src&&src.kind==='job'&&html`
               ${!src.sapEntered&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:13,background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">${Icon.sap}</span>`}
+              ${src.inductionReq&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:14,background:src.inductionDone?'hsl(145 60% 34%)':'hsl(0 75% 46%)',color:'#fff'}} title=${src.inductionDone?'Site induction required: paperwork sorted':'Site induction required: not sorted yet'}>${Icon.induct}</span>`}
               ${src.creditIssue&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-full font-bold" style=${{width:14,height:14,fontSize:10,lineHeight:1,background:'hsl(0 75% 46%)',color:'#fff',boxShadow:'0 0 0 1.5px #fff'}} title="Credit issue">$</span>`}`)(v?(it.b.cover?it.b.parent:null):it.b)}
             ${!v&&quoteFresh.has(it.b.id)&&html`<span class="shrink-0 w-2 h-2 rounded-full" style=${{background:'var(--accent)',boxShadow:'0 0 0 2px var(--surface)'}} title="Quote number changed in the last 48 hours"></span>`}
             ${v&&!compact&&!it.b.cover&&html`<span class="shrink-0 inline-flex opacity-80">${Icon.pin}</span>`}
@@ -1525,7 +1527,12 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
             <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-sap" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!f.sapEntered} onChange=${e=>set({sapEntered:e.target.checked})}/>Entered into SAP</label>
             <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-credit" type="checkbox" class="w-4 h-4" style=${{accentColor:'hsl(0 72% 48%)'}} checked=${!!f.creditIssue} onChange=${e=>set({creditIssue:e.target.checked})}/>Credit issue</label>
           </div>
-          <span class="text-[11.5px] text-faint -mt-2">The bar shows a small SAP icon until this booking is entered into SAP, and a red $ while there's a credit issue.</span>`
+          <span class="text-[11.5px] text-faint -mt-2">The bar shows a small SAP icon until this booking is entered into SAP, and a red $ while there's a credit issue.</span>
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-induct" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!f.inductionReq} onChange=${e=>set({inductionReq:e.target.checked,...(e.target.checked?{}:{inductionDone:false})})}/>Site induction required</label>
+            ${f.inductionReq&&html`<label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-induct-done" type="checkbox" class="w-4 h-4" style=${{accentColor:'hsl(145 60% 36%)'}} checked=${!!f.inductionDone} onChange=${e=>set({inductionDone:e.target.checked})}/>Induction paperwork sorted</label>`}
+          </div>
+          ${f.inductionReq&&html`<span class="text-[11.5px] text-faint -mt-2">The bar shows a ${f.inductionDone?'green':'red'} induction icon${f.inductionDone?': paperwork sorted.':' until the paperwork is sorted.'}</span>`}`
         :html`<label class="grid gap-1"><span class="label">Note</span>
             <input id="ed-label" class="field" placeholder=${KINDS[f.kind].hint||(rtype==='machine'?'e.g. 500 hr service, hydraulic leak':KINDS[f.kind].label)} value=${f.title||''} onInput=${e=>set({title:e.target.value})}/></label>
           ${f.kind==='plantmaint'&&html`<div class="grid gap-1"><span class="label">Plant unavailable for</span>
@@ -1600,6 +1607,7 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify}){
   const submit=e=>{e.preventDefault();if(err)return;
     if(missing.length){setTried(true);const m0=missing[0];setTab(m0.tab);setTimeout(()=>{const el=document.getElementById(m0.id);if(el){el.scrollIntoView({block:'center'});if(el.focus)el.focus()}},60);return}
     const out={...f,id:f.id||uid()};
+    if(!out.inductionReq){delete out.inductionReq;delete out.inductionDone}
     if(out.kind!=='job'||!isPavetech(data.resources.find(r=>r.id===out.resourceId)))delete out.crewSize;
     if(out.kind!=='job'){delete out.jobId;delete out.shift;delete out.address;delete out.plantIds}
     else{out.jobId=out.jobId||data.jobs[0]?.id||'__new';out.shift=out.shift||'day';out.plantIds=out.plantIds||[];out.address=(out.address||'').trim();out.quoteNo=(out.quoteNo||'').trim();if(!out.quoteNo)delete out.quoteNo;
@@ -2145,6 +2153,8 @@ function bookingDiff(a,b,p,x,rname,jname,when){
   if((p.shift||'day')!==(x.shift||'day'))ch('Shift',p.shift==='night'?'Night':'Day',x.shift==='night'?'Night':'Day');
   if(p.jobId!==x.jobId)ch('Job',jname(a,p.jobId),jname(b,x.jobId));
   if((p.crewSize||'')!==(x.crewSize||''))ch('Crew size',p.crewSize?p.crewSize+' man':'',x.crewSize?x.crewSize+' man':'');
+  if(!!p.inductionReq!==!!x.inductionReq)ch('Site induction required',p.inductionReq?'Yes':'No',x.inductionReq?'Yes':'No');
+  if(!!p.inductionDone!==!!x.inductionDone)ch('Induction paperwork sorted',p.inductionDone?'Yes':'No',x.inductionDone?'Yes':'No');
   if(!!p.sapEntered!==!!x.sapEntered)ch('Entered into SAP',p.sapEntered?'Yes':'No',x.sapEntered?'Yes':'No');
   if(!!p.creditIssue!==!!x.creditIssue)ch('Credit issue',p.creditIssue?'Yes':'No',x.creditIssue?'Yes':'No');
   [['address','Site address'],['projectNo','Project number'],['quoteNo','Quote number'],['supervisor','Supervisor'],['supervisorPhone','Supervisor phone'],['title','Label'],['maintShift','Maintenance shift'],['notes','Notes']]
@@ -3322,6 +3332,7 @@ function applyPlan(d,p){
     sd[k]={...q,lines:lines.length?lines:linesOnly(q),...(subs.length?{subs}:{}),...(p.crewOnSite?{start:p.crewOnSite}:{})}});
   const b={...old,plantIds:[...(p.machineIds||[])],shiftData:sd,planId:p.id,...((p.address||'').trim()?{address:p.address.trim()}:{})};
   [['quoteNo',p.quoteNo],['projectNo',p.projectNo],['supervisor',p.supervisor],['supervisorPhone',p.supervisorPhone]].forEach(([k,v])=>{v=(v||'').trim();if(v)b[k]=v});
+  if(p.induction&&!b.inductionReq)b.inductionReq=true;   /* the plan says a site induction is needed: flag it on the booking */
   let blocks=d.blocks.map(x=>x.id===old.id?b:x);
   /* seal crew shifts: a one-shift booking for each shift that needs the seal crew (updated, not duplicated, when sent again) */
   const sp0=sealPlanOf(d,p);const sc=sp0.crew;let sealN=0,sealKept=0;
@@ -3334,7 +3345,7 @@ function applyPlan(d,p){
       blocks=blocks.map(x=>x.id===ex.id?{...x,shiftData:{...(x.shiftData||{}),[k]:nq}}:x);sealKept++;return}
     const nb={...(ex||{id:uid(),kind:'job',title:'',plantIds:[]}),resourceId:sc.id,jobId:old.jobId,start:k,end:k,shift:old.shift||'day',planSealOf:p.id,planId:p.id,
       weekendShifts:true,satShift:true,sunShift:true,friShift:true,shiftData:{[k]:{...q,...(line?{lines:line}:{}),...(sl.onSite?{start:sl.onSite}:{})}}};
-    ['address','quoteNo','projectNo','supervisor','supervisorPhone'].forEach(f=>{if(b[f])nb[f]=b[f]});
+    ['address','quoteNo','projectNo','supervisor','supervisorPhone'].forEach(f=>{if(b[f])nb[f]=b[f]});if(p.induction&&!nb.inductionReq)nb.inductionReq=true;
     if(ex)blocks=blocks.map(x=>x.id===ex.id?nb:x);else blocks=[...blocks,nb];sealN++});
   const plans=plansOf(d).map(x=>x.id===p.id?{...p,jobId:old.jobId,status:'scheduled',appliedAt:Date.now()}:x);
   return {data:{...d,blocks,plans},bookingId:b.id,created:false,sealN,sealKept,sealCrew:sc&&sc.name};
