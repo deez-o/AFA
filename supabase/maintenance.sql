@@ -96,8 +96,8 @@ drop trigger if exists asset_profiles_touch on public.asset_profiles;
 create trigger asset_profiles_touch before insert or update on public.asset_profiles for each row execute function public.maint_touch();
 
 -- 3. Meter readings (engine hours and kilometres) ----------------------------
---    Readings are never edited or deleted. A wrong reading is fixed by an administrator
---    adding a 'correction'; a new meter or hour clock is recorded as a 'replacement'.
+--    Readings are never edited. An administrator or superuser can delete a wrong one (the audit log keeps it),
+--    or add a 'correction'; a new meter or hour clock is recorded as a 'replacement'.
 create table if not exists public.meter_readings (
   id          uuid primary key default gen_random_uuid(),
   asset_id    text not null,
@@ -359,7 +359,7 @@ alter table public.service_records  enable row level security;
 alter table public.maintenance_audit enable row level security;
 
 grant select, insert, update, delete on public.asset_profiles, public.service_plans, public.work_orders, public.service_records to authenticated;
-grant select, insert on public.meter_readings to authenticated;
+grant select, insert, delete on public.meter_readings to authenticated;
 grant select on public.maintenance_audit to authenticated;
 grant usage on sequence public.work_order_no to authenticated;
 
@@ -382,7 +382,9 @@ create policy "administrators remove" on public.asset_profiles for delete to aut
 
 drop policy if exists "maintenance staff add" on public.meter_readings;
 create policy "maintenance staff add" on public.meter_readings for insert to authenticated with check (public.maint_can_work());
--- no update or delete policy: readings are permanent
+-- no update policy; administrators and superusers can delete a wrong reading (kept in maintenance_audit)
+drop policy if exists "administrators remove readings" on public.meter_readings;
+create policy "administrators remove readings" on public.meter_readings for delete to authenticated using (public.maint_is_manager());
 
 drop policy if exists "administrators manage" on public.service_plans;
 create policy "administrators manage" on public.service_plans for all to authenticated using (public.maint_is_manager()) with check (public.maint_is_manager());

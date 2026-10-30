@@ -472,7 +472,7 @@ function AssetPanel({ctx,a,onClose,open,behind}){
             </div>`})}</div>`}
       </section>
 
-      <${ReadingsHistory} a=${a}/>
+      <${ReadingsHistory} a=${a} ctx=${ctx}/>
 
       ${a.open.length>0&&html`<section class="grid gap-2"><h3 class="font-display text-[15px] font-semibold">Open work orders</h3>
         <div class="rounded-lg border border-line divide-y" style=${{borderColor:'var(--line)'}}>${a.open.map(w=>html`<button key=${w.id} type="button" class="w-full text-left px-3 py-2 flex flex-wrap items-center gap-2 hover:bg-sunken" style=${{borderColor:'var(--line)'}} onClick=${()=>open({k:'wo',wo:w})}>
@@ -584,7 +584,10 @@ function ReadingsChart({rs,unit}){
     <polyline fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke" points=${pts.map(p=>`${x(p.t)},${y(p.v)}`).join(' ')}/>
     ${pts.map((p,i)=>html`<circle key=${i} cx=${x(p.t)} cy=${y(p.v)} r="3" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"><title>${fmtTs(p.r.read_at)}: ${fmtN(p.v)} ${unit}</title></circle>`)}</svg>`;
 }
-function ReadingsHistory({a}){
+function ReadingsHistory({a,ctx}){
+  const canDel=!!(ctx&&ctx.perms&&ctx.perms.mgr);const [del,setDel]=useState(null);const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const remove=async r=>{setBusy(true);setErr('');try{const {error}=await ctx.sb.from('meter_readings').delete().eq('id',r.id);if(error)throw error;
+      ctx.notify&&ctx.notify('Reading deleted');setDel(null);ctx.reload&&ctx.reload()}catch(e){setErr(/permission|policy|42501/.test(errMsg(e)+(e.code||''))?'Deleting readings needs a database update: an administrator needs to run supabase/maintenance.sql again.':errMsg(e))}finally{setBusy(false)}};
   const kinds=['hours','km'].filter(k=>a.reads[k].length&&(a.mt==='both'||a.mt===k||a.reads[k].length));
   const [k,setK]=useState(kinds[0]||'hours');const [all,setAll]=useState(false);
   const kk=kinds.includes(k)?k:kinds[0];
@@ -594,10 +597,14 @@ function ReadingsHistory({a}){
     <div class="flex flex-wrap items-center gap-2"><h3 class="font-display text-[15px] font-semibold">Meter readings</h3><span class="text-[12px] text-muted">${rs.length} reading${rs.length===1?'':'s'}${u?` · average ${perYrTxt(a,kk)} over ${u.days>=730?Math.round(u.days/365.25)+' years':Math.round(u.days/30.4)+' months'}`:''}</span>
       <span class="flex-1"></span>${kinds.length>1&&html`<div class="seg"><button type="button" aria-pressed=${kk==='hours'} onClick=${()=>setK('hours')}>Hours</button><button type="button" aria-pressed=${kk==='km'} onClick=${()=>setK('km')}>Km</button></div>`}</div>
     <div class="rounded-lg border border-line p-2">${rs.length>1?html`<${ReadingsChart} rs=${rs} unit=${unit}/>`:html`<div class="text-[12px] text-muted p-2">One reading so far. The chart starts with the second.</div>`}</div>
-    <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="ap-read-table"><thead><tr class="text-left">${['Date','Reading','Change','Source','Note'].map(h=>html`<th key=${h} class="label font-normal py-1.5 px-2 whitespace-nowrap">${h}</th>`)}</tr></thead>
+    <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="ap-read-table"><thead><tr class="text-left">${[...['Date','Reading','Change','Source','Note'],...(canDel?['']:[])].map((h,i)=>html`<th key=${i} class="label font-normal py-1.5 px-2 whitespace-nowrap">${h}</th>`)}</tr></thead>
       <tbody>${shown.map((r,i)=>{const prev=desc[desc.indexOf(r)+1];const ch=prev&&r.source!=='replacement'?+r.value- +prev.value:null;
         return html`<tr key=${r.id||i} class="border-t border-line"><td class="py-1.5 px-2 whitespace-nowrap">${fmtTs(r.read_at)}</td><td class="py-1.5 px-2 tnum whitespace-nowrap font-medium">${fmtN(+r.value)} ${unit}</td>
-          <td class="py-1.5 px-2 tnum whitespace-nowrap text-muted">${ch==null?'–':(ch>=0?'+':'')+fmtN(ch)}</td><td class="py-1.5 px-2 whitespace-nowrap">${SRC[r.source]||r.source}</td><td class="py-1.5 px-2 text-muted">${r.note||''}</td></tr>`})}</tbody></table></div>
+          <td class="py-1.5 px-2 tnum whitespace-nowrap text-muted">${ch==null?'–':(ch>=0?'+':'')+fmtN(ch)}</td><td class="py-1.5 px-2 whitespace-nowrap">${SRC[r.source]||r.source}</td><td class="py-1.5 px-2 text-muted">${r.note||''}</td>
+          ${canDel&&html`<td class="py-1 px-2 text-right whitespace-nowrap ap-read-del">${del===r.id?html`<span class="inline-flex items-center gap-2"><span class="text-[12px]" style=${{color:'var(--bad)'}}>Delete this reading?</span>
+              <button type="button" class="text-[12px] font-semibold ap-read-del-go" style=${{color:'var(--bad)'}} disabled=${busy} onClick=${()=>remove(r)}>${busy?'Deleting…':'Delete'}</button><button type="button" class="text-[12px] text-muted" onClick=${()=>setDel(null)}>Keep</button></span>`
+            :html`<button type="button" class="p-1 rounded text-muted hover:text-ink ap-read-x" aria-label=${'Delete the reading '+fmtN(+r.value)+' '+unit+' from '+fmtTs(r.read_at)} title="Delete this reading" onClick=${()=>{setDel(r.id);setErr('')}}>${Icon.trash}</button>`}</td>`}</tr>`})}</tbody></table></div>
+    ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}} id="ap-read-err">${err}</div>`}
     ${desc.length>8&&html`<div><button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>setAll(!all)}>${all?'Show fewer':`Show all ${desc.length}`}</button></div>`}
   </section>`;
 }
