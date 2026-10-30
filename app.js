@@ -895,7 +895,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             style=${{...blockStyle(it.b,data),top:10+it.lane*32,left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
               borderTopLeftRadius:it.cutL?0:6,borderBottomLeftRadius:it.cutL?0:6,borderTopRightRadius:it.cutR?0:6,borderBottomRightRadius:it.cutR?0:6,
               justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined}}
-            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.kind==='job'&&!it.b.sapEntered?'\nNot entered into SAP':''}${it.b.kind==='job'&&it.b.creditIssue?'\nCredit issue':''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
+            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.crewSize?`\n${it.b.crewSize} man crew`:''}${it.b.kind==='job'&&!it.b.sapEntered?'\nNot entered into SAP':''}${it.b.kind==='job'&&it.b.creditIssue?'\nCredit issue':''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
             onPointerDown=${e=>v?e.stopPropagation():startDrag(e,it.b)}
             onClick=${v?()=>onEdit(it.b.parent):undefined}
             onKeyDown=${e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onEdit(v?it.b.parent:it.b)}
@@ -1167,6 +1167,8 @@ const sealBindersOf=d=>d&&Array.isArray(d.sealBinders)?d.sealBinders:SEAL_BINDER
 const sealTwoCoatOf=d=>d&&d.sealTwoCoat&&typeof d.sealTwoCoat==='object'?d.sealTwoCoat:{};
 const sealIsTwoCoat=(d,type)=>{const m=sealTwoCoatOf(d);const t=String(type||'').trim().toLowerCase();return Object.keys(m).some(k=>m[k]&&k.toLowerCase()===t)};
 const sealBinderOf=d=>d&&d.sealBinder&&typeof d.sealBinder==='object'?d.sealBinder:{};
+/* Pavetech jobs are booked as a 6 man or 9 man crew */
+const isPavetech=r=>!!r&&r.type==='crew'&&/pavetech/i.test(r.name||'');
 const isSealCrew=r=>!!r&&r.type==='crew'&&workKey(r.sub).includes('seal');
 const binderForProduct=(d,crew,type)=>{if(!isSealCrew(crew))return binderForMix(d,type);
   const m=sealBinderOf(d);const t=(type||'').trim();const k=Object.keys(m).find(x=>x.toLowerCase()===t.toLowerCase());return k?m[k]:''};
@@ -1496,6 +1498,11 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
               <button type="button" aria-pressed=${(f.shift||(f.id?'day':''))==='day'} onClick=${()=>set({shift:'day'})}>Day works</button>
               <button type="button" aria-pressed=${f.shift==='night'} onClick=${()=>set({shift:'night'})}>Night works</button>
             </div></div>
+          ${isPavetech(data.resources.find(r=>r.id===f.resourceId))&&html`<div class="grid gap-1"><span class="label">Pavetech crew size</span>
+            <div id="ed-crewsize" class="seg w-max rounded-lg">
+              <button type="button" aria-pressed=${f.crewSize===6} onClick=${()=>set({crewSize:6})}>6 man crew</button>
+              <button type="button" aria-pressed=${f.crewSize===9} onClick=${()=>set({crewSize:9})}>9 man crew</button>
+            </div></div>`}
           <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
             <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-sap" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!f.sapEntered} onChange=${e=>set({sapEntered:e.target.checked})}/>Entered into SAP</label>
             <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-credit" type="checkbox" class="w-4 h-4" style=${{accentColor:'hsl(0 72% 48%)'}} checked=${!!f.creditIssue} onChange=${e=>set({creditIssue:e.target.checked})}/>Credit issue</label>
@@ -1558,6 +1565,7 @@ function Editor({initial,data,onSave,onDelete,onClose}){
     if(!(f.quoteNo||'').trim())m.push({id:'ed-quote',label:'Quote number',tab:'details'});
     if(!(f.address||'').trim())m.push({id:'ed-address',label:'Site address',tab:'details'});
     if(f.shift!=='day'&&f.shift!=='night')m.push({id:'ed-shift',label:'Shift (day or night)',tab:'details'});
+    if(isPavetech(crewR)&&f.crewSize!==6&&f.crewSize!==9)m.push({id:'ed-crewsize',label:'Crew size (6 or 9 man)',tab:'details'});
     if(!f.start)m.push({id:'ed-start',label:'Start date',tab:'details'});
     if(!f.end)m.push({id:'ed-end',label:'End date',tab:'details'});
     const sealJ=isSealCrew(crewR);const k0=f.start&&f.end?qtyTotals(f).dates[0]:null;
@@ -1573,6 +1581,7 @@ function Editor({initial,data,onSave,onDelete,onClose}){
   const submit=e=>{e.preventDefault();if(err)return;
     if(missing.length){setTried(true);const m0=missing[0];setTab(m0.tab);setTimeout(()=>{const el=document.getElementById(m0.id);if(el){el.scrollIntoView({block:'center'});if(el.focus)el.focus()}},60);return}
     const out={...f,id:f.id||uid()};
+    if(out.kind!=='job'||!isPavetech(data.resources.find(r=>r.id===out.resourceId)))delete out.crewSize;
     if(out.kind!=='job'){delete out.jobId;delete out.shift;delete out.address;delete out.plantIds}
     else{out.jobId=out.jobId||data.jobs[0]?.id||'__new';out.shift=out.shift||'day';out.plantIds=out.plantIds||[];out.address=(out.address||'').trim();out.quoteNo=(out.quoteNo||'').trim();if(!out.quoteNo)delete out.quoteNo;
       if(out.projectNo===undefined){const pj=data.jobs.find(j=>j.id===out.jobId)?.projectNo;if(pj)out.projectNo=pj}
@@ -1618,7 +1627,7 @@ function Editor({initial,data,onSave,onDelete,onClose}){
         </div>
       </div>
       ${isNew&&f.kind==='job'&&html`<style>${['ed-res','ed-customer','ed-job','ed-quote','ed-address','ed-start','ed-end'].map(i=>`label:has(#${i}) > .label::after`).join(',')}{content:' *';color:var(--bad)}
-        .label:has(+ #ed-shift)::after{content:' *';color:var(--bad)}
+        .label:has(+ #ed-shift)::after,.label:has(+ #ed-crewsize)::after{content:' *';color:var(--bad)}
         ${tried?missing.map(m=>`#${m.id}`).join(',')+'{border-color:var(--bad)!important;box-shadow:0 0 0 1px var(--bad)!important}':''}</style>`}
       <div class="flex-1 min-h-0 overflow-y-auto px-5 py-5" role="tabpanel" id=${'panel-'+active.id} aria-labelledby=${'tab-'+active.id}>
         ${active.render({f,set,data,rtype,err,changeRes})}
@@ -2112,6 +2121,7 @@ function bookingDiff(a,b,p,x,rname,jname,when){
   if(p.start!==x.start||p.end!==x.end)ch('Dates',when(p),when(x));
   if((p.shift||'day')!==(x.shift||'day'))ch('Shift',p.shift==='night'?'Night':'Day',x.shift==='night'?'Night':'Day');
   if(p.jobId!==x.jobId)ch('Job',jname(a,p.jobId),jname(b,x.jobId));
+  if((p.crewSize||'')!==(x.crewSize||''))ch('Crew size',p.crewSize?p.crewSize+' man':'',x.crewSize?x.crewSize+' man':'');
   if(!!p.sapEntered!==!!x.sapEntered)ch('Entered into SAP',p.sapEntered?'Yes':'No',x.sapEntered?'Yes':'No');
   if(!!p.creditIssue!==!!x.creditIssue)ch('Credit issue',p.creditIssue?'Yes':'No',x.creditIssue?'Yes':'No');
   [['address','Site address'],['projectNo','Project number'],['quoteNo','Quote number'],['supervisor','Supervisor'],['siteContact','Site contact'],['sitePhone','Contact phone'],['title','Label'],['maintShift','Maintenance shift'],['notes','Notes']]
