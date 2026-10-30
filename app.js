@@ -3010,7 +3010,7 @@ const subWorkRow=(data,{b,k,idx,n})=>{const job=data.jobs.find(j=>j.id===b.jobId
   const lines=linesOf(q).filter(lineHas);const t=lines.reduce((a,l)=>a+num(l.tonnes),0),a=lines.reduce((s,l)=>s+num(l.area),0);
   return {job,q,lines,t,a,start:q.start||'',night:b.shift==='night',address:b.address||job.address||'',
     works:lines.map(l=>[mixLabel(l),num(l.area)?`${fmtN(num(l.area))} m²`:'',num(l.depth)?`@ ${fmtN(num(l.depth))} mm`:'',num(l.tonnes)?`${fmtN(num(l.tonnes))} t`:''].filter(Boolean).join(' ')),
-    notes:[n>1?`Shift ${idx+1} of ${n}`:'',b.quoteNo?`Quote ${b.quoteNo}`:'',(b.projectNo||job.projectNo)?`Project ${b.projectNo||job.projectNo}`:'',
+    notes:[n>1?`Shift ${idx+1} of ${n}`:'',(b.projectNo||job.projectNo)?`Project ${b.projectNo||job.projectNo}`:'',
       b.inductionReq?(b.inductionDone?'Induction: paperwork sent':'Induction required'):'',exbinOf(b,k)?`Exbin${exbinOf(b,k).supplier?' ('+exbinOf(b,k).supplier+')':''}`:'',(b.notes||'').trim()].filter(Boolean)}};
 
 async function buildSubWorksPdf(data,crewIds,from,to){
@@ -3044,7 +3044,7 @@ async function buildSubWorksPdf(data,crewIds,from,to){
     else{colHead();
       let lastDay='';
       rows.forEach(({e,r},ri)=>{
-        const cells=[[`${r.night?'NIGHT':'DAY'}${r.start?'\n'+fmtTime(r.start):''}`],
+        const cells=[[`${r.night?'NIGHT':'DAY'}${r.start?'\n'+fmtTime(r.start):''}${e.b.crewSize?`\n${e.b.crewSize} MAN CREW`:''}`],
           [`${r.job.customer||''}`,`${r.job.name||''}`],[r.address],[r.works.length?r.works.join('\n'):'-'],[r.t?fmtN(r.t):'-'],
           [[e.b.supervisor,e.b.supervisorPhone].filter(Boolean).join('\n')||'-'],[r.notes.join('\n')||'-']];
         const split=cells.map((c,i)=>{font(7.6,i===1);return doc.splitTextToSize(clean(c.filter(Boolean).join('\n')),COLS[i][1]-3.6)});
@@ -3109,7 +3109,7 @@ function SubWorksDialog({data,onClose,notify}){
             ${!list.length?html`<div class="text-[12.5px] text-muted">No works booked for ${c.name} in this period.</div>`
               :list.map(e=>{const r=subWorkRow(data,e);return html`<div key=${e.b.id+e.k} class="grid grid-cols-[96px_1fr_auto] gap-2 text-[12.5px] py-1 border-b border-line last:border-b-0">
                 <span class="mono text-muted">${WD[parse(e.k).getDay()]} ${fmtShort(parse(e.k))}</span>
-                <span class="min-w-0 truncate"><span class="font-medium">${r.job.customer?r.job.customer+' · ':''}${r.job.name||'Job'}</span><span class="text-muted">${r.night?' · night':' · day'}${r.start?' · '+fmtTime(r.start):''}</span></span>
+                <span class="min-w-0 truncate"><span class="font-medium">${r.job.customer?r.job.customer+' · ':''}${r.job.name||'Job'}</span><span class="text-muted">${r.night?' · night':' · day'}${r.start?' · '+fmtTime(r.start):''}${e.b.crewSize?` · ${e.b.crewSize} man`:''}</span></span>
                 <span class="mono tnum">${r.t?fmtN(r.t)+' t':''}</span></div>`})}</div>`)}
         </div>`}
       <div class="px-5 py-3 border-t border-line bg-sunken flex flex-wrap items-center gap-2">
