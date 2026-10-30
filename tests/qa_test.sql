@@ -91,6 +91,19 @@ delete from public.qa_signatures where id = '20000000-0000-0000-0000-00000000000
 select pg_temp.ok(exists (select 1 from public.qa_signatures where id = '20000000-0000-0000-0000-000000000001'), 'but not someone else’s');
 reset role;
 
+-- a supervisor deletes a pack still in progress (its signatures go with it), but not someone's submitted pack
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000b2');
+set local role authenticated;
+insert into public.qa_signatures (id, pack_id, form, user_id, name, signature) select '20000000-0000-0000-0000-00000000000b','10000000-0000-0000-0000-000000000002','jsa',null,'V',png from sig;
+delete from public.qa_packs where id = '10000000-0000-0000-0000-000000000002';
+select pg_temp.ok(not exists (select 1 from public.qa_packs where id = '10000000-0000-0000-0000-000000000002') and not exists (select 1 from public.qa_signatures where id = '20000000-0000-0000-0000-00000000000b'), 'a supervisor deletes a pack in progress, with its signatures');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000b3');
+set local role authenticated;
+delete from public.qa_packs where id = '10000000-0000-0000-0000-000000000001';
+select pg_temp.ok(exists (select 1 from public.qa_packs where id = '10000000-0000-0000-0000-000000000001'), 'an operator can’t delete a pack');
+reset role;
+
 -- 3. Submitted: locked ----------------------------------------------------------------------------------------
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000b2');
 set local role authenticated;
@@ -98,6 +111,8 @@ update public.qa_packs set status = 'submitted' where id = '10000000-0000-0000-0
 select pg_temp.ok((select submitted_name = 'Sam Supervisor' and submitted_at is not null from public.qa_packs where id = '10000000-0000-0000-0000-000000000001'), 'submitted: with who and when');
 select pg_temp.refused($$update public.qa_packs set jsa = '{}' where id = '10000000-0000-0000-0000-000000000001'$$, 'a submitted pack can’t be changed by the supervisor');
 select pg_temp.refused($$insert into public.qa_signatures (id, pack_id, form, user_id, name, signature) select '20000000-0000-0000-0000-000000000008','10000000-0000-0000-0000-000000000001','jsa',null,'Late',png from sig$$, 'no signatures added after it’s submitted');
+delete from public.qa_packs where id = '10000000-0000-0000-0000-000000000001';
+select pg_temp.ok(exists (select 1 from public.qa_packs where id = '10000000-0000-0000-0000-000000000001'), 'a supervisor can’t delete a submitted pack');
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000b4');
 set local role authenticated;

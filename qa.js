@@ -78,7 +78,8 @@ const newToolbox=(pack,myName)=>({location:(pack.jsa.head||{}).location||'',whs_
 /* ---------- waiting on this phone until there's reception ---------- */
 const OB=u=>'qa-outbox:'+u;
 const obRead=async u=>(await ffStore.get(OB(u)))||[];
-async function obPush(u,op){const l=await obRead(u);op={...op,qid:newId()};
+async function obPush(u,op){let l=await obRead(u);op={...op,qid:newId()};
+  if(op.t==='delpack'){l=l.filter(x=>!((x.t==='pack'&&x.row.id===op.id)||(x.t==='sig'&&x.row.pack_id===op.id)))}
   const i=op.t==='pack'?l.findIndex(x=>x.t==='pack'&&x.row.id===op.row.id):-1;if(i>=0)l[i]=op;else l.push(op);await ffStore.set(OB(u),l)}
 let flushing=null;
 function obFlush(sb,u){if(flushing)return flushing;
@@ -86,7 +87,8 @@ function obFlush(sb,u){if(flushing)return flushing;
     for(let guard=0;guard<200;guard++){const l=await obRead(u);if(!l.length)break;const op=l[0];let error=null;
       try{if(op.t==='pack')({error}=await sb.from('qa_packs').upsert(op.row));
         else if(op.t==='sig')({error}=await sb.from('qa_signatures').insert(op.row));
-        else if(op.t==='unsig')({error}=await sb.from('qa_signatures').delete().eq('id',op.id))}
+        else if(op.t==='unsig')({error}=await sb.from('qa_signatures').delete().eq('id',op.id));
+        else if(op.t==='delpack')({error}=await sb.from('qa_packs').delete().eq('id',op.id))}
       catch(e){error=e}
       if(error&&window.isNetErr&&window.isNetErr(error))break;   /* still no reception: try again later */
       if(error&&!(op.t==='sig'&&String(error.code)==='23505'))errs.push(errMsg(error));else sent++;
@@ -109,7 +111,8 @@ function useQa(sb,me,filter,deps){
     return()=>{window.removeEventListener('ff-qa-sent',sent);window.removeEventListener('online',go);clearInterval(iv);clearTimeout(t);try{if(ch)sb.removeChannel(ch)}catch(e){}}},deps);
   const view=useMemo(()=>{if(!srv)return null;const packs=new Map(srv.packs.map(p=>[p.id,p]));let sigs=[...srv.sigs];
     ob.forEach(op=>{if(op.t==='pack')packs.set(op.row.id,{...(packs.get(op.row.id)||{}),...op.row,pending:true});
-      else if(op.t==='sig'){if(!sigs.some(s=>s.id===op.row.id))sigs.push({...op.row,pending:true})}else if(op.t==='unsig')sigs=sigs.filter(s=>s.id!==op.id)});
+      else if(op.t==='sig'){if(!sigs.some(s=>s.id===op.row.id))sigs.push({...op.row,pending:true})}else if(op.t==='unsig')sigs=sigs.filter(s=>s.id!==op.id);
+      else if(op.t==='delpack'){packs.delete(op.id);sigs=sigs.filter(s=>s.pack_id!==op.id)}});
     return {packs:[...packs.values()],sigs,waiting:ob.length}},[srv,ob]);
   const save=async op=>{await obPush(me,op);await refreshOb();obFlush(sb,me)};
   return {v:view,err,reload:load,save}}
@@ -192,6 +195,8 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
   const submit=()=>{if(!jsaSigs.length){setMsg('At least one person needs to sign the JSA before it’s submitted.');return}
     clearTimeout(tm.current);tm.current=null;const n={...p,status:'submitted'};setP(n);save({t:'pack',row:rowOf(n)});setMsg('')};
   const reopen=()=>{const n={...p,status:'draft'};setP(n);save({t:'pack',row:rowOf(n)})};
+  const [del,setDel]=useState(false);
+  const remove=()=>{clearTimeout(tm.current);tm.current=null;save({t:'delpack',id:p.id});ctx.notify&&ctx.notify('QA pack deleted');onBack&&onBack()};
   const pdf=async()=>{setBusy(true);try{await packPdf(data,e,p,sigs)}catch(x){setMsg(errMsg(x))}finally{setBusy(false)}};
   const T=p.toolbox;const setT=f=>upd(x=>({...x,toolbox:{...x.toolbox,...f(x.toolbox)}}));
   const FF=window.FFQF;const forms=p.forms||{};
@@ -276,7 +281,10 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
       ${msg&&html`<span id="qa-msg" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${msg}</span>`}
       <button id="qa-pdf" type="button" class="btn" disabled=${busy} onClick=${pdf}>${Icon.download} ${busy?'Making PDF…':'PDF'}</button>
       <span class="text-[12px] text-muted flex-1">${nT} controls ticked · ${(J.extra||[]).length} added hazard${(J.extra||[]).length===1?'':'s'}</span>
-      ${canEdit&&html`<button id="qa-submit" type="button" class="btn btn-primary" onClick=${submit}>Submit pack</button>`}
+      ${canEdit&&!del&&html`<button id="qa-delete" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>${Icon.trash} Delete</button>`}
+      ${canEdit&&del&&html`<span id="qa-del-confirm" class="w-full flex flex-wrap items-center gap-2"><span class="text-[12.5px] font-medium flex-1" style=${{color:'var(--bad)'}}>Delete this pack${jsaSigs.length?` and its ${sigs.filter(s=>s.pack_id===p.id).length} signature${sigs.filter(s=>s.pack_id===p.id).length===1?'':'s'}`:''}? This can’t be undone.</span>
+        <button type="button" class="btn" onClick=${()=>setDel(false)}>Cancel</button><button id="qa-del-go" type="button" class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${remove}>Yes, delete</button></span>`}
+      ${canEdit&&!del&&html`<button id="qa-submit" type="button" class="btn btn-primary" onClick=${submit}>Submit pack</button>`}
       ${isManager&&p.status==='submitted'&&html`<button id="qa-reopen" type="button" class="btn" onClick=${reopen}>Reopen</button>`}
     </div>
     ${dlg&&dlg.k==='sign'&&html`<${SignDialog} key=${dlg.form+(dlg.mine?':me':':other')} title=${dlg.title||(dlg.form==='jsa'?'Sign the JSA':dlg.form==='toolbox'?'Sign the toolbox meeting':(FF&&FF.signTitle(dlg.form))||'Sign')} mine=${dlg.mine} myName=${myName}
@@ -297,7 +305,7 @@ function QaScreen({data,live,notify}){
   const [day,setDay]=useState(()=>iso(TODAY));const [openId,setOpenId]=useState(null);
   const who=useMe(sb,me,data,live.user.email);
   const {v,err,save}=useQa(sb,me,{date:day},[day]);
-  const ctx={sb,me,myName:who.name,canFill,isManager:role==='admin'||role==='superuser',save};
+  const ctx={sb,me,myName:who.name,canFill,isManager:role==='admin'||role==='superuser',save,notify};
   if(err&&!v)return html`<div class="panel p-6 grid gap-2 max-w-[640px]"><div class="font-display text-[17px] font-semibold">QA packs aren’t set up yet</div><p class="text-[13px] text-muted">An administrator needs to run <span class="mono">supabase/qa.sql</span> once in Supabase → SQL Editor.</p><p class="text-[12px] text-faint mono">${err}</p></div>`;
   if(!v)return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;
   const myCrew=who.staff&&who.staff.crewId;
@@ -353,7 +361,7 @@ function QaBookingTab({data,block,live}){
           <button type="button" class="btn qa-open" style=${{height:30}} onClick=${()=>setOpen(p.id)}>Open</button><button type="button" class="btn px-2" style=${{height:30}} title="PDF" aria-label="PDF" onClick=${()=>packPdf(data,e,p,v.sigs)}>${Icon.download}</button></div>`)}
       </div>`})}</div>
     ${cur&&cp&&html`<${Modal} wide=${true} title="Site QA pack" sub=${`${jobLabel(jobOf(data,block))} · ${WD[parse(cur.k).getDay()]} ${fmtShort(parse(cur.k))}`} onClose=${()=>setOpen(null)}>
-      <${PackView} key=${cp.id} ctx=${ctx} data=${data} e=${cur} pack=${cp} sigs=${v.sigs} inModal=${true}/><//>`}
+      <${PackView} key=${cp.id} ctx=${ctx} data=${data} e=${cur} pack=${cp} sigs=${v.sigs} inModal=${true} onBack=${()=>setOpen(null)}/><//>`}
   </div>`;
 }
 

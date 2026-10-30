@@ -128,7 +128,9 @@ create policy "supervisors fill in" on public.qa_packs for insert to authenticat
 drop policy if exists "supervisors change" on public.qa_packs;
 create policy "supervisors change" on public.qa_packs for update to authenticated using (public.qa_can_fill()) with check (public.qa_can_fill());
 drop policy if exists "administrators remove" on public.qa_packs;
-create policy "administrators remove" on public.qa_packs for delete to authenticated using (public.qa_is_manager());
+drop policy if exists "remove a pack" on public.qa_packs;
+-- a pack still in progress can be deleted by whoever fills packs in; a submitted one only by an administrator or superuser
+create policy "remove a pack" on public.qa_packs for delete to authenticated using (public.qa_is_manager() or (public.qa_can_fill() and status = 'draft'));
 
 drop policy if exists "signed-in people read" on public.qa_signatures;
 create policy "signed-in people read" on public.qa_signatures for select to authenticated using (true);
