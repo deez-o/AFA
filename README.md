@@ -52,6 +52,15 @@ Anyone signed in can change their own password with the key button at the top of
 ### Your own web address
 Vercel → Project → **Settings → Domains** → add e.g. `roster.yourcompany.com.au` and follow the DNS instructions. Then add the new address to Supabase's URL Configuration (step 3.1).
 
+## Install it as an app
+FraserFlow can be installed on phones and computers and then opens from its own icon, full screen.
+- **iPhone / iPad:** open the site in Safari → Share → **Add to Home Screen**.
+- **Android:** open it in Chrome → **Install app** (or the menu → *Add to Home screen*). The Prestarts screen offers an *Install* button.
+- **Computer (Chrome / Edge):** the install icon in the address bar, or Settings (top right) → *Install FraserFlow as an app*.
+
+It always runs the latest version: there is nothing to update. On iPhones the installed app keeps its own sign-in, so people sign in once more after adding it.
+Files: `manifest.json`, `sw.js` (service worker), `icons/`.
+
 ## What is shared and what is personal
 Shared by everyone: crews, staff, machines, asphalt plants, jobs, bookings, quantities, mixes, binders and quote-change history.
 Personal to each person's browser: hidden rows, section order, view length, dark mode and notification settings.

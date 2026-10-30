@@ -2666,7 +2666,23 @@ function SwitchRow({id,label,desc,on,onChange}){
     </span>
   </label>`;
 }
+/* ---------- install FraserFlow as an app (phone home screen, or a desktop app) ---------- */
+let installEvt=null;const installSubs=new Set();
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;installSubs.forEach(f=>f())});
+window.addEventListener('appinstalled',()=>{installEvt=null;installSubs.forEach(f=>f())});
+const isStandalone=()=>(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;
+const isIOS=()=>/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+function useInstall(){
+  const [,tick]=useState(0);
+  useEffect(()=>{const s=()=>tick(x=>x+1);installSubs.add(s);return()=>{installSubs.delete(s)}},[]);
+  if(isStandalone())return null;
+  if(installEvt)return {kind:'prompt',go:async()=>{const e=installEvt;installEvt=null;try{e.prompt();await e.userChoice}catch(x){}installSubs.forEach(g=>g())}};
+  if(isIOS())return {kind:'ios',steps:'In Safari, tap the Share button, then “Add to Home Screen”.'};
+  return null;
+}
+window.ffUseInstall=useInstall;
 function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview}){
+  const inst=useInstall();
   const [open,setOpen]=useState(false);
   const ref=React.useRef(null);
   useEffect(()=>{if(!open)return;
@@ -2688,6 +2704,9 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview}){
       <div class="p-2">
         ${sectionLabel('Appearance')}
         <${SwitchRow} id="set-dark" label="Dark mode" on=${theme==='dark'} onChange=${()=>toggleTheme()}/>
+        ${inst&&html`${sectionLabel('This device')}
+          ${inst.kind==='prompt'?html`<button id="set-install" class="w-full flex items-start gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-left" onClick=${()=>{setOpen(false);inst.go()}}>${Icon.download}<span><span class="block text-[13px] font-medium">Install FraserFlow as an app</span><span class="block text-[12px] text-muted">Opens from its own icon, full screen</span></span></button>`
+            :html`<div class="px-2 py-2 flex items-start gap-2">${Icon.download}<span><span class="block text-[13px] font-medium">Add FraserFlow to your home screen</span><span class="block text-[12px] text-muted">${inst.steps}</span></span></div>`}`}
         ${sectionLabel('Notifications')}
         ${NOTIF_TYPES.map(t=>html`<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
         ${preview&&html`${sectionLabel('Features in progress')}

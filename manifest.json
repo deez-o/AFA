@@ -1,0 +1,17 @@
+{
+  "name": "FraserFlow",
+  "short_name": "FraserFlow",
+  "description": "Alex Fraser Group crew, plant and maintenance planner",
+  "start_url": "/?app=1",
+  "scope": "/",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ECEDEF",
+  "theme_color": "#990A2C",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -243,6 +243,7 @@ function PrestartScreen({data,live,notify}){
   const [prof,setProf]=useState(null);
   useEffect(()=>{sb.from('profiles').select('*').eq('id',me).maybeSingle().then(({data:p})=>setProf(p||{})).catch(()=>setProf({}))},[]);
   const [view,setView]=useState({k:'home'});const [q,setQ]=useState('');const [show,setShow]=useState(null);
+  const inst=window.ffUseInstall?window.ffUseInstall():null;const [hideInst,setHideInst]=useState(()=>{try{return localStorage.getItem(KEY+':ps-noinstall')==='1'}catch(e){return false}});
   const M=useMemo(()=>db?buildModel(data,db):null,[db,data.resources,data.blocks]);
   useEffect(()=>{const el=document.getElementById('ps-scroll');if(el)el.scrollTop=0},[view.k,view.a&&view.a.m.id]);
   if(err&&!db)return html`<div class="panel p-6 grid gap-2 max-w-[640px]"><div class="font-display text-[17px] font-semibold">Prestarts aren’t set up yet</div><p class="text-[13px] text-muted">An administrator needs to run the Fleet & Maintenance database scripts in Supabase.</p><p class="text-[12px] text-faint mono">${err}</p><div><button type="button" class="btn" onClick=${reload}>Try again</button></div></div>`;
@@ -264,9 +265,14 @@ function PrestartScreen({data,live,notify}){
     const list=M.assets.filter(a=>!a.retired&&(!ql||[a.m.name,a.m.sub,a.m.rego,machCatOf(a.m)].join(' ').toLowerCase().includes(ql)))
       .sort((x,y)=>(crewId?((y.m.crewId===crewId)-(x.m.crewId===crewId)):0)||x.m.name.localeCompare(y.m.name));
     const dlist=Object.values(drafts).map(dr=>({dr,a:M.byId.get(dr.asset_id)})).filter(x=>x.a);
+    const showInst=inst&&!hideInst&&window.innerWidth<900;
     body=html`<div class="grid gap-3 pb-6">
       <div class="grid gap-0.5"><div class="font-display text-[20px] font-semibold">Prestart check</div>
         <div class="text-[13px] text-muted">${staff?`Signed in as ${staff.name}`:html`Signed in as ${live.user.email}. <span style=${{color:'hsl(30 90% 38%)'}}>Your login isn’t linked to your Staff record yet: ask an administrator.</span>`}</div></div>
+      ${showInst&&html`<div id="ps-install" class="panel p-3 flex items-center gap-3"><img src="/icons/icon-192.png" alt="" class="w-11 h-11 rounded-xl border border-line shrink-0"/>
+        <div class="min-w-0 flex-1"><div class="text-[14px] font-semibold">Put FraserFlow on your home screen</div><div class="text-[12.5px] text-muted">${inst.kind==='prompt'?'It opens like an app, straight to your prestarts.':inst.steps}</div></div>
+        ${inst.kind==='prompt'&&html`<button type="button" class="btn btn-primary" style=${{height:38}} onClick=${inst.go}>Install</button>`}
+        <button type="button" class="p-1 rounded text-muted hover:text-ink" aria-label="Not now" onClick=${()=>{setHideInst(true);try{localStorage.setItem(KEY+':ps-noinstall','1')}catch(e){}}}>${Icon.x}</button></div>`}
       ${dlist.length>0&&html`<section class="grid gap-2" aria-label="Unfinished prestarts">${dlist.map(({dr,a})=>html`<div key=${a.m.id} class="panel p-3 flex items-center gap-3" style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
           <div class="min-w-0 flex-1"><div class="text-[14.5px] font-semibold truncate">Unfinished: ${a.m.name} · ${a.m.sub||''}</div><div class="text-[12.5px] text-muted">Started ${fmtTime(dr.started_at)}, ${Object.keys(dr.answers||{}).length} answered</div></div>
           <button type="button" class="text-[12.5px] text-muted hover:text-ink px-1" onClick=${()=>{writeDraft(me,{asset_id:a.m.id,del:true});setView({k:'home',t:Date.now()})}}>Discard</button>
