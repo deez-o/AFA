@@ -65,7 +65,7 @@ Files: `manifest.json`, `sw.js` (service worker), `icons/`.
 
 ## Changing a booking's dates on the board
 
-Drag the middle of a bar to move the whole booking (to other days, or to another crew/machine). Drag its **right end** to extend or shorten it, or its **left end** to change the start date. Pulling the start earlier moves every shift to start from the new first day (shift 1's figures go to the new first day, and so on), so the last shift is the empty one. Extending the end just adds empty shifts. Clicking a bar still opens it. (Planners and administrators; viewers can't change bookings.)
+Drag the middle of a bar to move the whole booking (to other days, or to another crew/machine). Drag its **right end** to extend or shorten it, or its **left end** to change the start date. Moving the start (earlier or later) moves every shift with it, so shift 1's figures are always on the first day, shift 2's on the next, and so on. Extending the end just adds empty shifts. Shifts that no longer fit after shortening are kept out of sight and come back, in order, when the booking is stretched again. Clicking a bar still opens it. (Planners and administrators; viewers can't change bookings.)
 
 ## What is shared and what is personal
 Shared by everyone: crews, staff, machines, asphalt plants, jobs, bookings, quantities, mixes, binders and quote-change history.

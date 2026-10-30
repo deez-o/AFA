@@ -5112,10 +5112,14 @@ function App({boot,live}){
   /* dragging an edge of a booking to change its length */
   const onResize=b=>{
     const prev=data.blocks.find(x=>x.id===b.id);if(!prev)return;
-    /* started earlier: every shift moves to start from the new first day (shift 1 → the new first day, and so on), leaving the last shift empty.
-       ended later: the new days are simply empty shifts. */
+    /* start dragged earlier or later: every shift moves to start from the new first day (shift 1 → the new first day, and so on).
+       end dragged: the shifts stay put; new days are empty shifts, days cut off are hidden (and come back if it's stretched again). */
     let sd=prev.shiftData;
-    if(sd&&b.start<prev.start){const was=shiftDates(prev),now=shiftDates({...prev,start:b.start,end:b.end});const out={};
+    if(sd&&b.start!==prev.start){const was=shiftDates(prev),now=shiftDates({...prev,start:b.start,end:b.end});const out={};
+      /* shifts hidden just past the end (from shortening earlier) count as the next shifts, so they come back in order */
+      for(let d=addDays(parse(prev.end),1),guard=0;guard<400;d=addDays(d,1),guard++){if(!worksOn(prev,d))continue;if(!sd[iso(d)])break;was.push(iso(d))}
+      /* started later: shifts that no longer fit are kept just past the end (hidden), so stretching it again brings them back */
+      for(let d=addDays(parse(b.end),1),guard=0;now.length<was.length&&guard<400;d=addDays(d,1),guard++)if(worksOn(prev,d))now.push(iso(d));
       Object.keys(sd).forEach(k=>{if(!was.includes(k))out[k]=sd[k]});   /* anything not on a shift stays where it is */
       was.forEach((k,i)=>{if(sd[k]&&now[i])out[now[i]]=sd[k]});sd=out}
     setData(d=>({...d,blocks:d.blocks.map(x=>x.id===b.id?{...x,start:b.start,end:b.end,...(sd!==prev.shiftData?{shiftData:sd}:{})}:x)}));
