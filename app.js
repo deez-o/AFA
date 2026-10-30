@@ -3173,7 +3173,7 @@ const subWorkRow=(data,{b,k,idx,n})=>{const job=data.jobs.find(j=>j.id===b.jobId
   const lines=linesOf(q).filter(lineHas);const t=lines.reduce((a,l)=>a+num(l.tonnes),0),a=lines.reduce((s,l)=>s+num(l.area),0);
   return {job,q,lines,t,a,start:q.start||'',night:b.shift==='night',address:b.address||job.address||'',
     works:lines.map(l=>[mixLabel(l),num(l.area)?`${fmtN(num(l.area))} m²`:'',num(l.depth)?`@ ${fmtN(num(l.depth))} mm`:'',num(l.tonnes)?`${fmtN(num(l.tonnes))} t`:''].filter(Boolean).join(' ')),
-    notes:[n>1?`Shift ${idx+1} of ${n}`:'',(b.projectNo||job.projectNo)?`Project ${b.projectNo||job.projectNo}`:'',
+    project:b.projectNo||job.projectNo||'',notes:[n>1?`Shift ${idx+1} of ${n}`:'',
       b.inductionReq?(b.inductionDone?'Induction: paperwork sent':'Induction required'):'',exbinOf(b,k)?`Exbin${exbinOf(b,k).supplier?' ('+exbinOf(b,k).supplier+')':''}`:'',(b.notes||'').trim()].filter(Boolean)}};
 
 async function buildSubWorksPdf(data,crewIds,from,to){
@@ -3183,7 +3183,7 @@ async function buildSubWorksPdf(data,crewIds,from,to){
   const font=(s,b,c)=>{doc.setFont('helvetica',b?'bold':'normal');doc.setFontSize(s);doc.setTextColor(...(c||[0,0,0]))};
   const dLong=k=>{const d=parse(k);return `${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]}`};
   const range=`${dLong(from)} - ${dLong(to)} ${parse(to).getFullYear()}`;
-  const COLS=[['SHIFT',22],['CLIENT / JOB',56],['LOCATION',46],['WORKS',62],['TONNES',17],['SUPERVISOR',34],['NOTES',36]];
+  const COLS=[['SHIFT',19],['PROJECT No',20],['CREW SIZE',17],['CLIENT / JOB',50],['LOCATION',41],['WORKS',55],['TONNES',16],['SUPERVISOR',30],['NOTES',25]];
   const firstPageOf=[];
   crewIds.forEach((cid,ci)=>{const crew=data.resources.find(r=>r.id===cid)||{name:'Crew'};const rows=subWorks(data,cid,from,to).map(e=>({e,r:subWorkRow(data,e)}));
     if(ci)doc.addPage();firstPageOf.push(doc.getNumberOfPages());
@@ -3207,10 +3207,10 @@ async function buildSubWorksPdf(data,crewIds,from,to){
     else{colHead();
       let lastDay='';
       rows.forEach(({e,r},ri)=>{
-        const cells=[[`${r.night?'NIGHT':'DAY'}${r.start?'\n'+fmtTime(r.start):''}${e.b.crewSize?`\n${e.b.crewSize} MAN CREW`:''}`],
+        const cells=[[`${r.night?'NIGHT':'DAY'}${r.start?'\n'+fmtTime(r.start):''}`],[r.project||'-'],[e.b.crewSize?`${e.b.crewSize} man`:'-'],
           [`${r.job.customer||''}`,`${r.job.name||''}`],[r.address],[r.works.length?r.works.join('\n'):'-'],[r.t?fmtN(r.t):'-'],
           [[e.b.supervisor,e.b.supervisorPhone].filter(Boolean).join('\n')||'-'],[r.notes.join('\n')||'-']];
-        const split=cells.map((c,i)=>{font(7.6,i===1);return doc.splitTextToSize(clean(c.filter(Boolean).join('\n')),COLS[i][1]-3.6)});
+        const split=cells.map((c,i)=>{font(7.6,i===3||i===2);return doc.splitTextToSize(clean(c.filter(Boolean).join('\n')),COLS[i][1]-3.6)});
         const h=Math.max(...split.map(s=>s.length))*3.4+3.6;
         const needDay=e.k!==lastDay;
         if(y+h+(needDay?7:0)>PH-14){doc.addPage();header(false);colHead();lastDay=''}
@@ -3219,8 +3219,8 @@ async function buildSubWorksPdf(data,crewIds,from,to){
           font(7.2,false,[255,255,255]);doc.text(`${dayRows.length} shift${dayRows.length===1?'':'s'}${dt?` - ${fmtN(dt)} t`:''}`,PW-M-1.8,y+3.9,{align:'right'});y+=5.6;lastDay=e.k}
         if(ri%2){doc.setFillColor(248,248,250);doc.rect(M,y,W,h,'F')}
         doc.setDrawColor(225,225,230);doc.setLineWidth(0.15);doc.line(M,y+h,PW-M,y+h);
-        let x=M;split.forEach((s,i)=>{font(7.6,i===1||i===4,i===0&&r.night?[40,40,110]:i===4?AFA_RED:[25,25,25]);
-          if(i===1&&s.length){font(7.6,true);doc.text(s[0],x+1.8,y+4.3);font(7.6,false,[60,60,60]);if(s.length>1)doc.text(s.slice(1),x+1.8,y+4.3+3.4)}
+        let x=M;split.forEach((s,i)=>{font(7.6,i===3||i===6||i===2,i===0&&r.night?[40,40,110]:i===6?AFA_RED:[25,25,25]);
+          if(i===3&&s.length){font(7.6,true);doc.text(s[0],x+1.8,y+4.3);font(7.6,false,[60,60,60]);if(s.length>1)doc.text(s.slice(1),x+1.8,y+4.3+3.4)}
           else doc.text(s,x+1.8,y+4.3);x+=COLS[i][1]});
         y+=h});
     }
