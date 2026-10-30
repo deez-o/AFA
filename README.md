@@ -53,6 +53,8 @@ Anyone signed in can change their own password with the key button at the top of
 Vercel → Project → **Settings → Domains** → add e.g. `roster.yourcompany.com.au` and follow the DNS instructions. Then add the new address to Supabase's URL Configuration (step 3.1).
 
 ## Install it as an app
+
+Operators (the Prestart role) on a phone or tablet must use the installed app: opened in the phone's browser, FraserFlow shows an **Install FraserFlow** page instead (an Install button on Android, the Share → Add to Home Screen steps on iPhone/iPad). Where the browser can't offer an install (for example it's already installed, or another browser), there's a small *Continue in the browser* link. Computers and other roles aren't affected.
 FraserFlow can be installed on phones and computers and then opens from its own icon, full screen.
 - **iPhone / iPad:** open the site in Safari → Share → **Add to Home Screen**.
 - **Android:** open it in Chrome → **Install app** (or the menu → *Add to Home screen*). The Prestarts screen offers an *Install* button.

@@ -2758,6 +2758,33 @@ function useInstall(){
   return null;
 }
 window.ffUseInstall=useInstall;
+/* operators (prestart role) on a phone or tablet must use the installed app: in the browser they get this page instead */
+const GATE_SKIP=KEY+':install-skip';
+const needsInstall=()=>{if(isStandalone()||!isMobile())return false;try{return sessionStorage.getItem(GATE_SKIP)!=='1'}catch(e){return true}};
+function InstallGate({sb,email}){
+  const [,tick]=useState(0);
+  useEffect(()=>{const s=()=>tick(x=>x+1);installSubs.add(s);return()=>{installSubs.delete(s)}},[]);
+  const ios=isIOS();const can=!!installEvt;
+  const install=async()=>{const e=installEvt;installEvt=null;try{e.prompt();await e.userChoice}catch(x){}installSubs.forEach(g=>g())};
+  const skip=()=>{try{sessionStorage.setItem(GATE_SKIP,'1')}catch(e){}location.reload()};
+  const step=(n,t)=>html`<li class="flex gap-3 items-start"><span class="w-6 h-6 shrink-0 rounded-full inline-flex items-center justify-center text-[12px] font-bold" style=${{background:'var(--accent)',color:'var(--accent-ink)'}}>${n}</span><span class="text-[14px] pt-0.5">${t}</span></li>`;
+  const shareIc=html`<svg width="16" height="18" viewBox="0 0 16 18" fill="none" style=${{display:'inline',verticalAlign:'-3px'}} aria-label="Share"><path d="M8 11V1.5M4.5 5L8 1.5 11.5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 7.5H3.2c-.7 0-1.2.5-1.2 1.2v6.6c0 .7.5 1.2 1.2 1.2h9.6c.7 0 1.2-.5 1.2-1.2V8.7c0-.7-.5-1.2-1.2-1.2H11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+  return html`<div class="min-h-full flex items-center justify-center p-5" id="install-gate">
+    <div class="panel w-full max-w-[420px] p-6 grid gap-4">
+      <div class="flex items-center gap-3"><img src="/icons/icon-192.png" alt="" class="w-14 h-14 rounded-[14px]"/><div><div class="font-display text-[20px] font-semibold leading-tight">Install FraserFlow</div><div class="text-[13px] text-muted">Prestarts are done in the FraserFlow app on this ${/ipad|tablet/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)?'tablet':'phone'}.</div></div></div>
+      ${can?html`<button id="gate-install" type="button" class="btn btn-primary justify-center" style=${{height:46,fontSize:15}} onClick=${install}>${Icon.download} Install the app</button>
+          <div class="text-[13px] text-muted">Then open <b class="text-ink">FraserFlow</b> from your home screen.</div>`
+        :ios?html`<ol class="grid gap-3">${step(1,html`Tap the Share button ${shareIc} at the bottom of Safari (or the top on an iPad).`)}${step(2,html`Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.`)}${step(3,html`Open <b>FraserFlow</b> from your home screen and sign in.`)}</ol>
+          <div class="text-[12px] text-muted">Using Chrome or another app? Open this page in Safari first.</div>`
+        :html`<div class="grid gap-2 text-[14px]"><div>Already installed? Open <b>FraserFlow</b> from your home screen.</div>
+          <div class="text-muted text-[13px]">Not yet: in Chrome, tap the menu <b>⋮</b> then <b>Install app</b> (or <b>Add to Home screen</b>).</div></div>`}
+      <div class="flex items-center gap-3 pt-1 border-t border-line text-[12.5px]">
+        <span class="text-muted truncate flex-1 pt-3">Signed in as ${showLogin(email)}</span>
+        <button type="button" class="text-muted hover:text-ink pt-3" onClick=${()=>sb.auth.signOut()}>Sign out</button>
+        ${!can&&!ios&&html`<button id="gate-skip" type="button" class="text-muted hover:text-ink underline pt-3" onClick=${skip}>Continue in the browser</button>`}
+      </div>
+    </div></div>`;
+}
 function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,maint,simple}){   /* simple (operators): dark mode and their account only */
   const inst0=useInstall();const inst=simple?null:inst0;const [left,setLeft]=useState(false);   /* open towards whichever side has room */
   const [open,setOpen]=useState(false);
@@ -5414,6 +5441,7 @@ function Root(){
   if(phase==='login')return html`<${Login} sb=${sb}/>`;
   if(phase==='setpw')return html`<${SetPassword} sb=${sb} first=${true} onDone=${()=>setPhase('loading')}/>`;
   if(phase==='empty')return html`<${FirstRun} canEdit=${role!=='viewer'} onStart=${start}/>`;
+  if(roleKey(role)==='prestart'&&needsInstall())return html`<${InstallGate} sb=${sb} email=${session.user.email}/>`;   /* operators on a phone use the installed app */
   return html`<${App} boot=${boot} live=${{sb,user:session.user,role,offline,canEdit:!offline&&(role==='admin'||role==='superuser'||role==='planner')}}/>`;
 }
 
