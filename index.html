@@ -14,7 +14,7 @@ html,body{margin:0}
 :root{
   --bg:#ECEDEF; --surface:#FFFFFF; --sunken:#F4F4F6; --line:#DBDDE2; --line-strong:#C3C7CF;
   --ink:#16181D; --muted:#5E636E; --faint:#8C919B;
-  --accent:#E0670F; --accent-ink:#FFFFFF; --accent-soft:#FDEBDB;
+  --accent:#990A2C; --accent-ink:#FFFFFF; --accent-soft:#F7E3E8;
   --weekend:#F1F1F4; --ok:#2F855A; --warn:#B7791F; --bad:#C53030; --night:#D93A2E; --night-ink:#FFFFFF; --night-edge:#8E1B13;
   --blk-l:91%; --blk-fg-l:25%; --blk-edge-l:47%; --hatch-l:86%;
   --shadow:0 1px 2px rgba(20,22,28,.06),0 8px 24px rgba(20,22,28,.06);
@@ -25,7 +25,7 @@ html,body{margin:0}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#0E0F12; --surface:#16181D; --sunken:#1B1E24; --line:#292C34; --line-strong:#373B45;
   --ink:#E8E9ED; --muted:#9CA0AA; --faint:#6F737D;
-  --accent:#F5873A; --accent-ink:#1B0D05; --accent-soft:#2D1C10;
+  --accent:#E46A84; --accent-ink:#1C0509; --accent-soft:#33141C;
   --weekend:#121418; --ok:#5CC08A; --warn:#E0A84A; --bad:#F07171; --night:#C93A2E; --night-ink:#FFFFFF; --night-edge:#FF8A7A;
   --blk-l:23%; --blk-fg-l:87%; --blk-edge-l:62%; --hatch-l:19%;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
@@ -34,7 +34,7 @@ html,body{margin:0}
 :root[data-theme="dark"]{
   --bg:#0E0F12; --surface:#16181D; --sunken:#1B1E24; --line:#292C34; --line-strong:#373B45;
   --ink:#E8E9ED; --muted:#9CA0AA; --faint:#6F737D;
-  --accent:#F5873A; --accent-ink:#1B0D05; --accent-soft:#2D1C10;
+  --accent:#E46A84; --accent-ink:#1C0509; --accent-soft:#33141C;
   --weekend:#121418; --ok:#5CC08A; --warn:#E0A84A; --bad:#F07171; --night:#C93A2E; --night-ink:#FFFFFF; --night-edge:#FF8A7A;
   --blk-l:23%; --blk-fg-l:87%; --blk-edge-l:62%; --hatch-l:19%;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
@@ -47,6 +47,9 @@ body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:1
 .mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 .tnum{font-variant-numeric:tabular-nums}
 .label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.brand-tag{display:block}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .brand-tag{filter:invert(1)}}
+:root[data-theme="dark"] .brand-tag{filter:invert(1)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
 .shell{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px}
 .btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:500;font-size:13px;cursor:pointer;transition:background .12s,border-color .12s}
@@ -98,6 +101,6 @@ tailwind.config={theme:{extend:{colors:{
 </head>
 <body>
 <div id="root"></div>
-<script src="/app.js?v=202610301148"></script>
+<script src="/app.js?v=202610301152"></script>
 </body>
 </html>
