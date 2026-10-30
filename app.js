@@ -2272,6 +2272,42 @@ async function vaultSeal(key,salt,obj){const iv=crypto.getRandomValues(new Uint8
   return {v:1,salt:vB64(salt),iv:vB64(iv),ct:vB64(ct)}}
 async function vaultOpen(key,vault){const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:vBytes(vault.iv)},key,vBytes(vault.ct));return JSON.parse(new TextDecoder().decode(pt))}
 
+/* suggestions from anyone: sealed with the board's public key (RSA-OAEP + AES-GCM), opened only with
+   the private key that lives inside the encrypted board */
+const RSA_ALG={name:'RSA-OAEP',hash:'SHA-256'};
+async function sealSuggestion(pubJwk,obj){
+  const pub=await crypto.subtle.importKey('jwk',pubJwk,RSA_ALG,false,['encrypt']);
+  const k=await crypto.subtle.generateKey({name:'AES-GCM',length:256},true,['encrypt']);const raw=await crypto.subtle.exportKey('raw',k);
+  const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},k,new TextEncoder().encode(JSON.stringify(obj)));
+  return {k:vB64(await crypto.subtle.encrypt({name:'RSA-OAEP'},pub,raw)),iv:vB64(iv),ct:vB64(ct)}}
+async function openSuggestion(priv,enc){
+  const raw=await crypto.subtle.decrypt({name:'RSA-OAEP'},priv,vBytes(enc.k));const k=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['decrypt']);
+  return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:vBytes(enc.iv)},k,vBytes(enc.ct))))}
+const pubOfPriv=j=>({kty:j.kty,n:j.n,e:j.e,alg:j.alg,ext:true,key_ops:['encrypt']});
+
+/* anyone can suggest an idea (it lands in the Ideas inbox) */
+function SuggestDialog({data,setData,onClose,notify}){
+  const [text,setText]=useState('');const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  useEffect(()=>{const h=e=>{if(e.key==='Escape'){e.stopPropagation();onClose()}};window.addEventListener('keydown',h,true);return()=>window.removeEventListener('keydown',h,true)},[]);
+  const pub=data.ideasPub&&data.ideasPub.n?data.ideasPub:null;
+  const send=async e=>{e.preventDefault();const t=text.trim();if(!t)return;setBusy(true);setErr('');
+    try{const enc=await sealSuggestion(pub,{text:t,by:window.__rosterMe||'',at:Date.now()});
+      setData(d=>({...d,suggestions:[...(d.suggestions||[]),{id:'s'+uid(),at:Date.now(),enc}]}));notify&&notify('Thanks! Your suggestion was sent');onClose()}
+    catch(x){setErr('The suggestion could not be sent.')}finally{setBusy(false)}};
+  return html`<div class="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <form class="panel pop w-full max-w-[480px] p-5 grid gap-3" role="dialog" aria-modal="true" aria-labelledby="sg-t" onSubmit=${send}>
+      <div class="flex items-start gap-3"><div class="min-w-0 flex-1"><div id="sg-t" class="font-display text-[18px] font-semibold">Suggest an idea</div>
+        <div class="text-[12.5px] text-muted">Something FraserFlow should do, or do better? Only administrators can read suggestions.</div></div>
+        <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button></div>
+      ${pub?html`<textarea id="sg-text" class="field" style=${{height:'auto',minHeight:120,padding:'8px 10px',resize:'vertical',fontSize:13.5}} rows="5" autoFocus=${true}
+            placeholder="e.g. Text each crew tomorrow’s start time at 3pm" value=${text} onInput=${e=>setText(e.target.value)}></textarea>
+          ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+          <div class="flex justify-end gap-2"><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="sg-send" type="submit" class="btn btn-primary" disabled=${busy||!text.trim()}>${busy?'Sending…':'Send suggestion'}</button></div>`
+        :html`<p class="text-[13px] text-muted">Suggestions aren’t switched on yet. An administrator needs to open the Ideas page once.</p>
+          <div class="flex justify-end"><button type="button" class="btn" onClick=${onClose}>Close</button></div>`}
+    </form></div>`;
+}
+
 const IDEA_COLS=[['idea','Ideas','Things worth doing one day'],['planned','Planned','Decided, not started'],['doing','In progress','Being built now'],['done','Done','Shipped']];
 const IDEA_PRI={high:['High','hsl(352 70% var(--blk-l))','hsl(352 60% var(--blk-fg-l))'],med:['Medium','hsl(38 85% var(--blk-l))','hsl(30 60% var(--blk-fg-l))'],low:['Low','var(--sunken)','var(--muted)']};
 const IDEA_LOCK_MS=15*60*1000;   /* locks itself after 15 minutes without changes */
@@ -2284,29 +2320,46 @@ function IdeasScreen({data,setData,notify}){
   const [q,setQ]=useState('');const [open,setOpen]=useState(null);const [confirmDel,setConfirmDel]=useState(null);
   const [draft,setDraft]=useState({title:'',priority:'med'});const [chg,setChg]=useState(null);
   const dirty=useRef(false);
-  const lock=msg=>{setKey(null);setItems([]);saltRef.current=null;lastCt.current=null;setOpen(null);setPw('');setPw2('');setChg(null);if(msg)setErr(msg)};
+  /* the board's key pair for suggestions: private half saved inside the encrypted board, public half for everyone */
+  const privJwk=useRef(null);const [priv,setPriv]=useState(null);const [inbox,setInbox]=useState({});
+  const content=xs=>({items:xs,priv:privJwk.current});
+  const useKeys=async o=>{let j=o&&o.priv;
+    if(!j){const kp=await crypto.subtle.generateKey({...RSA_ALG,modulusLength:2048,publicExponent:new Uint8Array([1,0,1])},true,['encrypt','decrypt']);
+      j=await crypto.subtle.exportKey('jwk',kp.privateKey);dirty.current=true}
+    privJwk.current=j;setPriv(await crypto.subtle.importKey('jwk',j,RSA_ALG,false,['decrypt']));
+    const pub=pubOfPriv(j);setData(d=>d.ideasPub&&d.ideasPub.n===pub.n?d:{...d,ideasPub:pub})};
+  /* read the suggestions waiting in the inbox */
+  const sugg=(data.suggestions||[]).slice().sort((a,b)=>(a.at||0)-(b.at||0));
+  useEffect(()=>{if(!priv)return;let gone=false;
+    Promise.all(sugg.map(s=>inbox[s.id]?Promise.resolve([s.id,inbox[s.id]]):openSuggestion(priv,s.enc).then(o=>[s.id,o]).catch(()=>[s.id,{bad:true}])))
+      .then(r=>{if(!gone)setInbox(Object.fromEntries(r))});return()=>{gone=true}},[priv,sugg.map(s=>s.id).join(',')]);
+  const dropSugg=id=>setData(d=>({...d,suggestions:(d.suggestions||[]).filter(x=>x.id!==id)}));
+  const takeSugg=(s,o)=>{const t=(o.text||'').trim();const first=t.split('\n')[0];const now=Date.now();
+    upd(xs=>[{id:'i'+uid(),title:first.length>90?first.slice(0,87)+'…':first,notes:`${first.length>90?t:t.split('\n').slice(1).join('\n').trim()}${first.length>90||t.includes('\n')?'\n\n':''}Suggested by ${o.by||'someone'} on ${new Date(o.at||s.at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})}`,status:'idea',priority:'med',created:now,updated:now},...xs]);
+    dropSugg(s.id);notify&&notify('Added to Ideas')};
+  const lock=msg=>{setKey(null);setItems([]);setPriv(null);privJwk.current=null;setInbox({});saltRef.current=null;lastCt.current=null;setOpen(null);setPw('');setPw2('');setChg(null);if(msg)setErr(msg)};
   /* save (encrypted) a moment after the last change */
   useEffect(()=>{if(!key||!dirty.current)return;const t=setTimeout(async()=>{dirty.current=false;
-      try{const v=await vaultSeal(key,saltRef.current,{items});lastCt.current=v.ct;setData(d=>({...d,ideasVault:v}))}catch(e){notify&&notify('The ideas board could not be saved.')}},500);
+      try{const v=await vaultSeal(key,saltRef.current,content(items));lastCt.current=v.ct;setData(d=>({...d,ideasVault:v}))}catch(e){notify&&notify('The ideas board could not be saved.')}},500);
     return()=>clearTimeout(t)},[items,key]);
   /* lock after a while with no changes */
   useEffect(()=>{if(!key)return;const t=setTimeout(()=>lock('Locked after 15 minutes without changes.'),IDEA_LOCK_MS);return()=>clearTimeout(t)},[items,key]);
   /* changed by another administrator: open the new copy (or lock if the password was changed) */
   useEffect(()=>{if(!key||!vault||vault.ct===lastCt.current||dirty.current)return;
-    vaultOpen(key,vault).then(o=>{lastCt.current=vault.ct;saltRef.current=vBytes(vault.salt);setItems((o&&o.items)||[])}).catch(()=>lock('The password was changed. Enter the new one.'))},[vault&&vault.ct]);
+    vaultOpen(key,vault).then(o=>{lastCt.current=vault.ct;saltRef.current=vBytes(vault.salt);if(o&&o.priv)privJwk.current=o.priv;setItems((o&&o.items)||[])}).catch(()=>lock('The password was changed. Enter the new one.'))},[vault&&vault.ct]);
   const upd=fn=>{dirty.current=true;setItems(fn)};
 
   const create=async e=>{e.preventDefault();setErr('');
     if(pw.length<8){setErr('Use at least 8 characters.');return}if(pw!==pw2){setErr('The two passwords don’t match.');return}
-    setBusy(true);try{const salt=crypto.getRandomValues(new Uint8Array(16));const k=await vaultKey(pw,salt);const v=await vaultSeal(k,salt,{items:[]});
+    setBusy(true);try{const salt=crypto.getRandomValues(new Uint8Array(16));const k=await vaultKey(pw,salt);await useKeys(null);dirty.current=false;const v=await vaultSeal(k,salt,content([]));
       saltRef.current=salt;lastCt.current=v.ct;setData(d=>({...d,ideasVault:v}));setItems([]);setKey(k);setPw('');setPw2('');notify&&notify('Ideas board created and locked with your password')}
     catch(x){setErr('This browser can’t encrypt the board. Open FraserFlow over https in an up-to-date browser.')}finally{setBusy(false)}};
   const unlock=async e=>{e.preventDefault();setErr('');if(!pw)return;setBusy(true);
-    try{const salt=vBytes(vault.salt);const k=await vaultKey(pw,salt);const o=await vaultOpen(k,vault);saltRef.current=salt;lastCt.current=vault.ct;setItems((o&&o.items)||[]);setKey(k);setPw('')}
+    try{const salt=vBytes(vault.salt);const k=await vaultKey(pw,salt);const o=await vaultOpen(k,vault);saltRef.current=salt;lastCt.current=vault.ct;await useKeys(o);setItems((o&&o.items)||[]);setKey(k);setPw('')}
     catch(x){setErr('That password is wrong.')}finally{setBusy(false)}};
   const changePw=async e=>{e.preventDefault();setErr('');const a=chg.a||'',b=chg.b||'';
     if(a.length<8){setErr('Use at least 8 characters.');return}if(a!==b){setErr('The two passwords don’t match.');return}
-    setBusy(true);try{const salt=crypto.getRandomValues(new Uint8Array(16));const k=await vaultKey(a,salt);const v=await vaultSeal(k,salt,{items});
+    setBusy(true);try{const salt=crypto.getRandomValues(new Uint8Array(16));const k=await vaultKey(a,salt);const v=await vaultSeal(k,salt,content(items));
       saltRef.current=salt;lastCt.current=v.ct;setData(d=>({...d,ideasVault:v}));setKey(k);setChg(null);notify&&notify('Ideas password changed')}
     catch(x){setErr('The password could not be changed.')}finally{setBusy(false)}};
 
@@ -2354,6 +2407,16 @@ function IdeasScreen({data,setData,notify}){
       <button type="submit" class="btn btn-primary" disabled=${busy}>Change password</button><button type="button" class="btn btn-ghost" onClick=${()=>setChg(null)}>Cancel</button>
       ${err&&html`<span class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}
       <span class="w-full text-[12px] text-muted">Other administrators will need the new password. It can’t be recovered if it’s lost.</span></form>`}
+    ${sugg.length>0&&html`<section id="ideas-inbox" class="panel px-4 py-3 grid gap-2" aria-label="Suggestions">
+      <div class="flex items-baseline gap-2"><span class="font-display text-[15px] font-semibold">Suggestions</span><span class="mono text-[12px] text-faint">${sugg.length}</span>
+        <span class="text-[12px] text-muted">Sent in by people using FraserFlow. Add the good ones to the board.</span></div>
+      <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        ${sugg.map(s=>{const o=inbox[s.id];return html`<article key=${s.id} class="rounded-lg border border-line bg-surface p-2.5 grid gap-1.5">
+          ${!o?html`<span class="text-[12.5px] text-faint">Opening…</span>`:o.bad?html`<span class="text-[12.5px] text-muted">This suggestion can’t be opened (it was sealed with an older key).</span>`
+            :html`<span class="text-[13px] whitespace-pre-line">${o.text}</span><span class="text-[11.5px] text-faint">${o.by||'Someone'} · ${new Date(o.at||s.at).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</span>`}
+          <div class="flex items-center gap-2">${o&&!o.bad&&html`<button type="button" class="btn btn-primary" style=${{height:28,fontSize:12.5}} onClick=${()=>takeSugg(s,o)}>${Icon.plus} Add to Ideas</button>`}
+            <button type="button" class="btn btn-ghost" style=${{height:28,fontSize:12.5}} onClick=${()=>dropSugg(s.id)}>Dismiss</button></div></article>`})}
+      </div></section>`}
     <div class="flex-1 min-h-0 overflow-auto">
       <div class="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4 min-h-full items-start">
         ${IDEA_COLS.map(([st,label,hint],ci)=>{const col=shown.filter(x=>x.status===st).sort((a,b)=>(pri[a.priority]??1)-(pri[b.priority]??1)||b.updated-a.updated);
@@ -2402,11 +2465,11 @@ const NAV_ICON={
   staff:svg(html`<circle cx="8" cy="5.2" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M3 14c.6-2.7 2.6-4.2 5-4.2s4.4 1.5 5 4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,20),
   machines:svg(html`<path d="M2 11.5V8.5l2-3h4l1.5 3H14v3" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="4.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/><circle cx="11.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/>`,20),
 };
-function NavRail({screen,go,isAdmin}){
+function NavRail({screen,go,isAdmin,badge={}}){
   const btn=([k,s])=>{const on=screen===k;
     return html`<button key=${k} class=${'flex flex-col items-center gap-1 rounded-lg py-2.5 text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
       style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
-      ${NAV_ICON[k]}<span>${s.label}</span></button>`};
+      <span class="relative inline-flex">${NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${s.label}</span></button>`};
   const all=Object.entries(SCREENS).filter(([,s])=>!s.admin||isAdmin);
   /* admin-only screens (Ideas) sit at the bottom of the bar */
   return html`<nav class="panel shrink-0 w-[68px] h-full flex flex-col gap-1 p-1.5" aria-label="Screens">
@@ -3515,7 +3578,9 @@ function App({boot,live}){
   const [data,setDataRaw]=useState(()=>({...boot,sectionOrder:boot.sectionOrder||[...DEFAULT_ORDER]}));
   const savedRef=useRef(data),remoteRef=useRef(null),pushQ=useRef(Promise.resolve());
   const setData=fn=>setDataRaw(cur=>{const next=typeof fn==='function'?fn(cur):fn;
-    if(!live.canEdit&&sharedKey(next)!==sharedKey(cur)){setTimeout(()=>setToast('You have view-only access. Ask an administrator for planner access to make changes.'),0);return cur}
+    /* view-only people may only add suggestions */
+    const noSugg=d=>({...d,suggestions:[]});const onlySugg=sharedKey(noSugg(next))===sharedKey(noSugg(cur))&&(cur.suggestions||[]).every(x=>(next.suggestions||[]).some(y=>y.id===x.id));
+    if(!live.canEdit&&!onlySugg){setTimeout(()=>setToast('You have view-only access. Ask an administrator for planner access to make changes.'),0);return cur}
     return withChangeLog(cur,next,live.user.email)});
   window.__rosterMe=live.user.email;
   const reloadAll=async()=>{try{const nd={...rowsToData(await fetchAllRows(live.sb))};nd.sectionOrder=nd.sectionOrder||[...DEFAULT_ORDER];remoteRef.current=nd;setDataRaw(nd)}catch(e){}};
@@ -3565,7 +3630,7 @@ function App({boot,live}){
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
   const [importing,setImporting]=useState(false);const [merging,setMerging]=useState(false);const [logOpen,setLogOpen]=useState(false);const [machImport,setMachImport]=useState(false);
-  const [forecast,setForecast]=useState(false);const [program,setProgram]=useState(false);
+  const [forecast,setForecast]=useState(false);const [suggest,setSuggest]=useState(false);const [program,setProgram]=useState(false);
   const [changePw,setChangePw]=useState(false);
   const [notifPrefs,setNotifPrefs]=useState(loadNotifPrefs);
   /* dark mode: remembered per person; until chosen, follows the device setting */
@@ -3662,7 +3727,7 @@ function App({boot,live}){
   const legend=[['Crews',['job','standby','crewtraining']],['Asphalt plant',['plantmaint','plantreduced']],['Machines',['onjob','service','repair','inspection']],['Staff',['leave','sick','rdo','training']]];
 
   return html`<div class="shell h-full flex gap-4">
-    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin}/>
+    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} badge=${{ideas:(data.suggestions||[]).length}}/>
     <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
@@ -3697,6 +3762,7 @@ function App({boot,live}){
           <button class="btn" onClick=${()=>setAnchor(mondayOf(TODAY))} disabled=${atToday}>Today</button>
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>`}
+        <button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
         ${boardScreen&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
@@ -3734,6 +3800,7 @@ function App({boot,live}){
     ${machImport&&html`<${MachineImport} data=${data} setData=${setData} onClose=${()=>setMachImport(false)} notify=${setToast}/>`}
     ${logOpen&&html`<${ChangeLogDialog} data=${data} onClose=${()=>setLogOpen(false)} onOpen=${b=>setEditing(b)}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
+    ${suggest&&html`<${SuggestDialog} data=${data} setData=${setData} notify=${setToast} onClose=${()=>setSuggest(false)}/>`}
     ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)}/>`}
     ${toast&&html`<div class="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-[13px] font-medium pop" role="status"
        style=${{bottom:'calc(20px + env(safe-area-inset-bottom, 0px))',background:'var(--ink)',color:'var(--surface)'}}>${toast}</div>`}
@@ -3748,9 +3815,9 @@ function App({boot,live}){
    Per-person choices stay in this browser: hidden rows, section order,
    view length, dark mode and notification settings.
    ===================================================================== */
-const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change']];
+const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault','ideasPub'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
@@ -3761,7 +3828,7 @@ const storedForm=(coll,item,i)=>{const {visible,pos,...rest}=item;return ORDERED
 /* rows from Supabase -> the app's data object */
 function rowsToData(rows){
   const hidden=new Set(readLocal(LOCAL_HIDDEN,[]));
-  const d={resources:[],jobs:[],blocks:[],quoteChanges:[],changeLog:[]};
+  const d={resources:[],jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[]};
   rows.forEach(r=>{
     if(r.kind==='setting'){if(SETTINGS.includes(r.id))d[r.id]=r.data&&r.data.value;return}
     const c=COLLECTIONS.find(([,k])=>k===r.kind);if(!c)return;
@@ -3823,7 +3890,7 @@ async function pushRows(sb,{upserts,deletes}){
 /* data for a brand-new, empty roster */
 function emptyRoster(){
   return {resources:[{id:'a'+uid(),type:'aplant',name:'Asphalt plant',sub:'Main plant',hue:8,visible:true}],
-    jobs:[],blocks:[],quoteChanges:[],changeLog:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},programLocs:[...PROGRAM_LOCATIONS],locColors:{...DEFAULT_LOC_COLORS},
+    jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},programLocs:[...PROGRAM_LOCATIONS],locColors:{...DEFAULT_LOC_COLORS},
     sectionOrder:[...DEFAULT_ORDER],orderV:2};
 }
 

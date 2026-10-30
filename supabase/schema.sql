@@ -113,3 +113,32 @@ begin
     alter publication supabase_realtime add table public.items;
   end if;
 end $$;
+
+-- 4. Ideas board and suggestions ---------------------------------------------
+--    Everyone signed in (viewers too) can send a suggestion. Suggestions and the
+--    Ideas board are encrypted in the browser, and only administrators can change
+--    or remove the Ideas board, its key, or suggestions.
+drop policy if exists "everyone suggests" on public.items;
+create policy "everyone suggests" on public.items
+  for insert to authenticated
+  with check (kind = 'suggestion');
+
+drop policy if exists "planners add" on public.items;
+create policy "planners add" on public.items
+  for insert to authenticated
+  with check (public.my_role() in ('admin','planner')
+    and (public.my_role() = 'admin' or not (kind = 'setting' and id in ('ideasVault','ideasPub'))));
+
+drop policy if exists "planners change" on public.items;
+create policy "planners change" on public.items
+  for update to authenticated
+  using (public.my_role() in ('admin','planner')
+    and (public.my_role() = 'admin' or not ((kind = 'setting' and id in ('ideasVault','ideasPub')) or kind = 'suggestion')))
+  with check (public.my_role() in ('admin','planner')
+    and (public.my_role() = 'admin' or not ((kind = 'setting' and id in ('ideasVault','ideasPub')) or kind = 'suggestion')));
+
+drop policy if exists "planners delete" on public.items;
+create policy "planners delete" on public.items
+  for delete to authenticated
+  using (public.my_role() in ('admin','planner')
+    and (public.my_role() = 'admin' or not ((kind = 'setting' and id in ('ideasVault','ideasPub')) or kind = 'suggestion')));
