@@ -911,7 +911,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             style=${{...blockStyle(it.b,data),top:10+it.lane*32,left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
               borderTopLeftRadius:it.cutL?0:6,borderBottomLeftRadius:it.cutL?0:6,borderTopRightRadius:it.cutR?0:6,borderBottomRightRadius:it.cutR?0:6,
               justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined}}
-            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.crewSize?`\n${it.b.crewSize} man crew`:''}${it.b.kind==='job'&&it.b.inductionReq?(it.b.inductionDone?'\nSite induction: paperwork sorted':'\nSite induction required: not sorted'):''}${it.b.kind==='job'&&!it.b.sapEntered?'\nNot entered into SAP':''}${it.b.kind==='job'&&it.b.creditIssue?'\nCredit issue':''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
+            title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.crewSize?`\n${it.b.crewSize} man crew`:''}${it.b.kind==='job'&&it.b.inductionReq?(it.b.inductionDone?'\nSite induction: paperwork sent':'\nSite induction required: paperwork not sent'):''}${it.b.kind==='job'&&!it.b.sapEntered?'\nNot entered into SAP':''}${it.b.kind==='job'&&it.b.creditIssue?'\nCredit issue':''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
             onPointerDown=${e=>v?e.stopPropagation():startDrag(e,it.b)}
             onClick=${v?()=>onEdit(it.b.parent):undefined}
             onKeyDown=${e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onEdit(v?it.b.parent:it.b)}
@@ -923,7 +923,7 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
             ${night&&html`<span class="shrink-0 inline-flex" title="Night works">${Icon.moon}</span>`}
             ${(src=>src&&src.kind==='job'&&html`
               ${!src.sapEntered&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:13,background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">${Icon.sap}</span>`}
-              ${src.inductionReq&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:14,background:src.inductionDone?'hsl(145 60% 34%)':'hsl(0 75% 46%)',color:'#fff'}} title=${src.inductionDone?'Site induction required: paperwork sorted':'Site induction required: not sorted yet'}>${Icon.induct}</span>`}
+              ${src.inductionReq&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:14,background:src.inductionDone?'hsl(145 60% 34%)':'hsl(0 75% 46%)',color:'#fff'}} title=${src.inductionDone?'Site induction required: paperwork sent':'Site induction required: paperwork not sent yet'}>${Icon.induct}</span>`}
               ${src.creditIssue&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-full font-bold" style=${{width:14,height:14,fontSize:10,lineHeight:1,background:'hsl(0 75% 46%)',color:'#fff',boxShadow:'0 0 0 1.5px #fff'}} title="Credit issue">$</span>`}`)(v?(it.b.cover?it.b.parent:null):it.b)}
             ${!v&&quoteFresh.has(it.b.id)&&html`<span class="shrink-0 w-2 h-2 rounded-full" style=${{background:'var(--accent)',boxShadow:'0 0 0 2px var(--surface)'}} title="Quote number changed in the last 48 hours"></span>`}
             ${v&&!compact&&!it.b.cover&&html`<span class="shrink-0 inline-flex opacity-80">${Icon.pin}</span>`}
@@ -1511,6 +1511,13 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
           <label class="grid gap-1"><span class="label">Site address</span>
             <input id="ed-address" class="field" placeholder="Street, suburb, postcode" value=${f.address||''} onInput=${e=>set({address:e.target.value})}/>
             <span class="text-[11.5px] text-faint">Shown on each machine assigned in the Machines tab.</span></label>
+          <div class="grid gap-1">
+            <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-induct" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!f.inductionReq} onChange=${e=>set({inductionReq:e.target.checked,...(e.target.checked?{}:{inductionDone:false})})}/>Site induction required</label>
+              ${f.inductionReq&&html`<label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-induct-done" type="checkbox" class="w-4 h-4" style=${{accentColor:'hsl(145 60% 36%)'}} checked=${!!f.inductionDone} onChange=${e=>set({inductionDone:e.target.checked})}/>Induction Paperwork Sent</label>`}
+            </div>
+            ${f.inductionReq&&html`<span class="text-[11.5px] text-faint">The bar shows a ${f.inductionDone?'green':'red'} induction icon${f.inductionDone?': paperwork sent.':' until the paperwork is sent.'}</span>`}
+          </div>
           <label class="grid gap-1"><span class="label">Notes</span>
             <textarea id="ed-notes" class="field" style=${{height:'auto',minHeight:60,padding:'8px 10px',resize:'vertical'}} rows="2" placeholder="Anything the crew or plant should know" value=${f.notes||''} onInput=${e=>set({notes:e.target.value})}></textarea></label>
           <div class="grid gap-1"><span class="label">Shift</span>
@@ -1527,12 +1534,7 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
             <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-sap" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!f.sapEntered} onChange=${e=>set({sapEntered:e.target.checked})}/>Entered into SAP</label>
             <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-credit" type="checkbox" class="w-4 h-4" style=${{accentColor:'hsl(0 72% 48%)'}} checked=${!!f.creditIssue} onChange=${e=>set({creditIssue:e.target.checked})}/>Credit issue</label>
           </div>
-          <span class="text-[11.5px] text-faint -mt-2">The bar shows a small SAP icon until this booking is entered into SAP, and a red $ while there's a credit issue.</span>
-          <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-induct" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!f.inductionReq} onChange=${e=>set({inductionReq:e.target.checked,...(e.target.checked?{}:{inductionDone:false})})}/>Site induction required</label>
-            ${f.inductionReq&&html`<label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-induct-done" type="checkbox" class="w-4 h-4" style=${{accentColor:'hsl(145 60% 36%)'}} checked=${!!f.inductionDone} onChange=${e=>set({inductionDone:e.target.checked})}/>Induction paperwork sorted</label>`}
-          </div>
-          ${f.inductionReq&&html`<span class="text-[11.5px] text-faint -mt-2">The bar shows a ${f.inductionDone?'green':'red'} induction icon${f.inductionDone?': paperwork sorted.':' until the paperwork is sorted.'}</span>`}`
+          <span class="text-[11.5px] text-faint -mt-2">The bar shows a small SAP icon until this booking is entered into SAP, and a red $ while there's a credit issue.</span>`
         :html`<label class="grid gap-1"><span class="label">Note</span>
             <input id="ed-label" class="field" placeholder=${KINDS[f.kind].hint||(rtype==='machine'?'e.g. 500 hr service, hydraulic leak':KINDS[f.kind].label)} value=${f.title||''} onInput=${e=>set({title:e.target.value})}/></label>
           ${f.kind==='plantmaint'&&html`<div class="grid gap-1"><span class="label">Plant unavailable for</span>
@@ -2154,7 +2156,7 @@ function bookingDiff(a,b,p,x,rname,jname,when){
   if(p.jobId!==x.jobId)ch('Job',jname(a,p.jobId),jname(b,x.jobId));
   if((p.crewSize||'')!==(x.crewSize||''))ch('Crew size',p.crewSize?p.crewSize+' man':'',x.crewSize?x.crewSize+' man':'');
   if(!!p.inductionReq!==!!x.inductionReq)ch('Site induction required',p.inductionReq?'Yes':'No',x.inductionReq?'Yes':'No');
-  if(!!p.inductionDone!==!!x.inductionDone)ch('Induction paperwork sorted',p.inductionDone?'Yes':'No',x.inductionDone?'Yes':'No');
+  if(!!p.inductionDone!==!!x.inductionDone)ch('Induction paperwork sent',p.inductionDone?'Yes':'No',x.inductionDone?'Yes':'No');
   if(!!p.sapEntered!==!!x.sapEntered)ch('Entered into SAP',p.sapEntered?'Yes':'No',x.sapEntered?'Yes':'No');
   if(!!p.creditIssue!==!!x.creditIssue)ch('Credit issue',p.creditIssue?'Yes':'No',x.creditIssue?'Yes':'No');
   [['address','Site address'],['projectNo','Project number'],['quoteNo','Quote number'],['supervisor','Supervisor'],['supervisorPhone','Supervisor phone'],['title','Label'],['maintShift','Maintenance shift'],['notes','Notes']]
