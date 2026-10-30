@@ -116,8 +116,6 @@ insert into storage.objects (bucket_id, name) values ('maintenance','prestarts/0
 select pg_temp.ok(true, 'operator uploads a photo and signature to their own folder');
 select pg_temp.refused($$insert into storage.objects (bucket_id, name) values ('maintenance','prestarts/00000000-0000-0000-0000-0000000000a8/x.jpg')$$, 'uploading into someone else''s folder');
 select pg_temp.refused($$insert into storage.objects (bucket_id, name) values ('maintenance','assets/t-mach-1/manual.pdf')$$, 'operator uploading a machine manual');
-with d as (delete from storage.objects where name like 'prestarts/00000000-0000-0000-0000-0000000000a6/%' returning 1)
-select pg_temp.ok((select count(*) from d) = 0, 'prestart photos can''t be deleted');
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a8');
 set local role authenticated;
@@ -138,9 +136,14 @@ select pg_temp.ok((select count(*) from d) = 0, 'mechanic cannot remove a manual
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
 set local role authenticated;
-with d as (delete from storage.objects where name = 'assets/t-mach-1/manual.pdf' returning 1)
-select pg_temp.ok((select count(*) from d) = 1, 'administrator removes a manual''s file');
+with d as (delete from public.maintenance_files where asset_id = 't-mach-1' returning 1)
+select pg_temp.ok((select count(*) from d) = 1, 'administrator removes a manual');
 reset role;
+-- files themselves can only be removed through Supabase's Storage API (as the app does), so here we check the rule it applies:
+-- the only remove rule on the file store covers machine documents, for administrators; prestart photos and signatures have none
+select pg_temp.ok((select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and cmd in ('DELETE','ALL') and qual like '%maintenance%') = 1
+  and (select qual from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'maintenance files: administrators remove documents') like '%assets%maint_is_manager%',
+  'only administrators can remove files, and only machine documents (never prestart photos or signatures)');
 
 -- 4. Submitting a prestart ---------------------------------------------------------------
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a5');
