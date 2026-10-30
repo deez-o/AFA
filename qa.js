@@ -106,7 +106,7 @@ function useQa(sb,me,filter,deps){
     catch(e){const saved=await ffStore.get(ck);if(saved)setSrv(s=>s||saved);else setErr(errMsg(e))}};
   const refreshOb=()=>obRead(me).then(setOb);
   useEffect(()=>{load();refreshOb();const go=()=>obFlush(sb,me);go();
-    const sent=()=>{refreshOb();load()};window.addEventListener('ff-qa-sent',sent);window.addEventListener('online',go);const iv=setInterval(()=>{if(navigator.onLine)go()},30000);
+    const sent=async()=>{await load();refreshOb()};   /* the server's copy first, then drop what was sent: never a moment showing the older copy */window.addEventListener('ff-qa-sent',sent);window.addEventListener('online',go);const iv=setInterval(()=>{if(navigator.onLine)go()},30000);
     let t=null,ch=null;try{ch=sb.channel('qa-'+newId());['qa_packs','qa_signatures'].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,400)}));ch.subscribe()}catch(e){}
     return()=>{window.removeEventListener('ff-qa-sent',sent);window.removeEventListener('online',go);clearInterval(iv);clearTimeout(t);try{if(ch)sb.removeChannel(ch)}catch(e){}}},deps);
   const view=useMemo(()=>{if(!srv)return null;const packs=new Map(srv.packs.map(p=>[p.id,p]));let sigs=[...srv.sigs];
@@ -192,7 +192,7 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
   const ticks=J.ticks||{};const nT=allTicks().filter(k=>ticks[k]).length;
   const hint=prestartHint(data,e.b,e.k);
   const jsaSigs=sigs.filter(s=>s.pack_id===p.id&&s.form==='jsa');
-  const submit=()=>{if(!jsaSigs.length){setMsg('At least one person needs to sign the JSA before it’s submitted.');return}
+  const submit=()=>{if(missAll.length){setShowMiss(true);setMsg('');try{const el=document.getElementById('qa-pack');const sc=el&&el.closest('.overflow-y-auto');if(sc)sc.scrollTop=0}catch(x){}return}
     clearTimeout(tm.current);tm.current=null;const n={...p,status:'submitted'};setP(n);save({t:'pack',row:rowOf(n)});setMsg('')};
   const reopen=()=>{const n={...p,status:'draft'};setP(n);save({t:'pack',row:rowOf(n)})};
   const [del,setDel]=useState(false);
@@ -202,9 +202,26 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
   const FF=window.FFQF;const forms=p.forms||{};
   const fctx={data,e,pack:p,sigs,ctx,canEdit,open:setDlg,set:(id,f)=>upd(x=>({...x,forms:{...(x.forms||{}),[id]:typeof f==='function'?f((x.forms||{})[id]):f}})),
     add:id=>upd(x=>{const fs0=x.forms||{};const lot=fs0.lot||FF.newLot(data,e,x);return {...x,forms:{...fs0,lot,[id]:FF.byId[id].make(data,e,x,ctx)}}}),
-    remove:id=>upd(x=>{const n={...(x.forms||{})};delete n[id];return {...x,forms:n}})};
-  const added=FF?FF.FORMS.filter(f=>forms[f.id]):[];const missing=FF?FF.FORMS.filter(f=>!forms[f.id]):[];
+    remove:id=>{upd(x=>{const n={...(x.forms||{})};delete n[id];return {...x,forms:n}});setSec('jsa')}};
   const head=J.head||{};
+  /* the forms in the pack: the JSA, lot details and the required forms; laying record and toolbox when added */
+  const [sec,setSec]=useState('jsa');const [showMiss,setShowMiss]=useState(false);
+  const go=id=>{setSec(id);try{const el=document.getElementById('qa-pack');const sc=el&&el.closest('.overflow-y-auto');if(sc)sc.scrollTop=0}catch(x){}};
+  const optOn=id=>id==='toolbox'?!!T:!!forms[id];
+  const tabs=[{id:'jsa',label:'JSA'},...(FF&&canFill?[{id:'lot',label:'Lot details'},...FF.FORMS.filter(f=>f.required).map(f=>({id:f.id,label:f.short})),...FF.FORMS.filter(f=>!f.required).map(f=>({id:f.id,label:f.short,opt:true,on:optOn(f.id)}))]:[]),
+    ...(canFill||T?[{id:'toolbox',label:'Toolbox meeting',opt:true,on:!!T}]:[])].filter(t=>!(t.opt&&!t.on&&!canEdit));
+  const order=tabs.filter(t=>!t.opt||t.on);
+  const o={p,sigs};
+  const jsaMiss=()=>{const need=[['job_no','Job number'],['location','Job location'],['customer','Customer'],['date','Date'],['time','Time'],['foreman','Foreman'],['supervisor','Supervisor']].filter(([k])=>!String(head[k]||'').trim()).map(([,l])=>l);
+    const ex=(J.extra||[]).filter(x=>String(x.hazard||'').trim()&&(!x.risk||!String(x.controls||'').trim()||!x.residual)).length;
+    return [...need,...(nT?[]:['Tick the control measures in place']),...(ex?[`${ex} added hazard${ex===1?'':'s'} missing a risk rating, controls or residual risk`]:[]),...(jsaSigs.length?[]:['At least one signature'])]};
+  const tbMiss=()=>T?[...(!(T.topics||[]).some(x=>String(x.topic||'').trim())?['At least one topic discussed']:[]),...(String(T.meeting_point||'').trim()?[]:['Emergency meeting point']),...(sigs.some(s=>s.pack_id===p.id&&s.form==='toolbox')?[]:['Attendees’ signatures'])]:[];
+  const missOf=id=>id==='jsa'?jsaMiss():id==='toolbox'?tbMiss():id==='lot'?(FF?FF.lotCheck(o):[]):FF&&FF.byId[id]?(forms[id]?FF.byId[id].check(forms[id],o):(FF.byId[id].required?['Not started']:[])):[];
+  const missAll=order.map(t=>({id:t.id,label:t.label,items:missOf(t.id)})).filter(g=>g.items.length);
+  const addOpt=id=>{if(id==='toolbox')upd(x=>({...x,toolbox:x.toolbox||newToolbox(x,myName)}));else fctx.add(id);go(id)};
+  /* a pack started before the forms were required gets them now */
+  useEffect(()=>{if(!canEdit||!FF)return;const need=FF.FORMS.filter(f=>f.required&&!(p.forms||{})[f.id]);if(!need.length&&(p.forms||{}).lot)return;
+    upd(x=>{const fs0={...(x.forms||{})};if(!fs0.lot)fs0.lot=FF.newLot(data,e,x);need.forEach(f=>{if(!fs0[f.id])fs0[f.id]=f.make(data,e,x,ctx)});return {...x,forms:fs0}})},[p.id,canEdit]);
   const body=html`<div class="grid grid-cols-[minmax(0,1fr)] gap-3 pb-4" id="qa-pack">
     <div class="panel px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1">
       ${!inModal&&html`<button type="button" class="btn px-2" onClick=${onBack} aria-label="Back">${Icon.chevL}</button>`}
@@ -215,8 +232,22 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
     </div>
     ${p.status==='submitted'&&html`<div class="rounded-lg px-3 py-2 text-[12.5px]" style=${{background:'hsl(145 50% var(--blk-l))'}}>Submitted${p.submitted_name?' by '+p.submitted_name:''}${p.submitted_at?' · '+fmtDT(p.submitted_at):''}. It can’t be changed${isManager?' unless you reopen it':''}.</div>`}
     ${!canFill&&p.status==='draft'&&html`<div class="rounded-lg px-3 py-2 text-[12.5px]" style=${{background:'var(--accent-soft)'}}>Read through the JSA, then sign at the bottom.</div>`}
+    <nav class="panel px-2 py-2 flex gap-1.5 overflow-x-auto sticky top-0" style=${{zIndex:6}} id="qa-tabs" aria-label="Forms in this pack">
+      ${tabs.map(t=>{const on=t.id===sec;const add=t.opt&&!t.on;const mi=add?[]:missOf(t.id);const ok=!add&&!mi.length;
+        return html`<button key=${t.id} type="button" id=${'qa-tab-'+t.id} class=${'shrink-0 inline-flex items-center gap-1.5 rounded-lg px-2.5 h-9 text-[12.5px] font-medium whitespace-nowrap border'+(add?' border-dashed':'')}
+          style=${{background:on?'var(--accent-soft)':'var(--surface)',borderColor:on?'var(--accent)':'var(--line)',color:add?'var(--muted)':'var(--ink)'}} aria-current=${on?'step':undefined}
+          onClick=${()=>add?addOpt(t.id):go(t.id)} title=${add?'Optional: add it if you need it':mi.length?'Still needed: '+mi.join(', '):'Complete'}>
+          ${add?Icon.plus:ok?html`<span class="w-4 h-4 rounded-full inline-flex items-center justify-center qa-tab-ok" style=${{background:'hsl(145 55% 36%)',color:'#fff'}}><svg width="9" height="9" viewBox="0 0 12 12"><path d="M2.5 6.2l2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
+            :html`<span class="min-w-[16px] h-4 px-1 rounded-full inline-flex items-center justify-center text-[10px] font-bold qa-tab-n" style=${{background:'hsl(38 90% 48%)',color:'#fff'}}>${mi.length}</span>`}
+          ${t.label}${t.opt?html`<span class="text-[10.5px] text-faint">${add?'optional':''}</span>`:''}</button>`})}
+    </nav>
+    ${showMiss&&missAll.length>0&&html`<section class="panel px-4 py-3 grid gap-2" id="qa-missing" style=${{boxShadow:'inset 0 0 0 1.5px hsl(38 90% 45%)'}}>
+      <div class="font-display text-[15px] font-semibold">Before this pack can be submitted</div>
+      ${missAll.map(g=>html`<div key=${g.id} class="grid gap-0.5"><button type="button" class="text-left text-[13px] font-semibold hover:underline qa-miss-go" style=${{color:'var(--accent)'}} onClick=${()=>go(g.id)}>${g.label} ›</button>
+        <ul class="text-[12.5px] text-muted pl-4 list-disc">${g.items.map((x,i)=>html`<li key=${i}>${x}</li>`)}</ul></div>`)}
+    </section>`}
 
-    <${Card} title="Job specific assessment (JSA)" sub=${`Version ${J.v||JSA_VERSION} · ${J.type==='seal'?'Spray seal':'Asphalt'}`} id="qa-head">
+    ${sec==='jsa'&&html`<${Card} title="Job specific assessment (JSA)" sub=${`Version ${J.v||JSA_VERSION} · ${J.type==='seal'?'Spray seal':'Asphalt'}`} id="qa-head">
       <fieldset disabled=${!canEdit} class="m-0 p-0 border-0 min-w-0 grid gap-3">
         <div class="seg w-max"><button type="button" aria-pressed=${J.type!=='seal'} onClick=${()=>setJ(()=>({type:'asphalt'}))}>Asphalt</button><button type="button" aria-pressed=${J.type==='seal'} onClick=${()=>setJ(()=>({type:'seal'}))}>Spray seal</button></div>
         <div class="grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-4 gap-3">${HEAD.map(([k,l])=>html`<${Fld} key=${k} label=${l}><input id=${'qa-h-'+k} class="field" style=${fs} type=${k==='date'?'date':k==='time'?'time':'text'} value=${head[k]||''} onInput=${ev=>setJ(j=>({head:{...j.head,[k]:ev.target.value}}))}/><//>`)}</div>
@@ -249,16 +280,12 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
 
     <${Card} title="Sign-off" id="qa-sign" sub=${`${jsaSigs.length} signed`}>
       <p class="text-[12px] text-muted">${AGREE}</p>
-      <${SignOff} form="jsa" pack=${p} sigs=${sigs} ctx=${ctx} canEdit=${canEdit} open=${setDlg}/><//>
+      <${SignOff} form="jsa" pack=${p} sigs=${sigs} ctx=${ctx} canEdit=${canEdit} open=${setDlg}/><//>`}
 
-    ${FF&&(added.length>0||canEdit)&&html`<section class="panel px-4 py-3 grid gap-2" id="qa-forms">
-      <div class="flex flex-wrap items-baseline gap-2"><span class="font-display text-[15.5px] font-semibold">Other QA forms</span><span class="text-[12px] text-muted">${added.length?added.map(f=>f.short).join(' · '):'Add the forms this shift needs'}</span></div>
-      ${canEdit&&missing.length>0&&html`<div class="flex flex-wrap gap-1.5">${missing.map(f=>html`<button key=${f.id} type="button" id=${'qa-add-'+f.id} class="btn" style=${{height:34,fontSize:12.5}} onClick=${()=>fctx.add(f.id)}>${Icon.plus} ${f.label}</button>`)}</div>`}
-    </section>`}
-    ${FF&&added.length>0&&html`<${FF.LotCard} f=${fctx}/>`}
-    ${FF&&added.map(f=>html`<${f.Editor} key=${f.id} f=${fctx}/>`)}
+    ${FF&&sec==='lot'&&html`<${FF.LotCard} f=${fctx}/>`}
+    ${FF&&FF.byId[sec]&&forms[sec]&&(Ed=>html`<${Ed} key=${sec} f=${fctx}/>`)(FF.byId[sec].Editor)}
 
-    ${T?html`<${Card} title="Toolbox meeting" id="qa-toolbox" sub=${`${sigs.filter(s=>s.pack_id===p.id&&s.form==='toolbox').length} attended`}>
+    ${sec==='toolbox'&&html`${T?html`<${Card} title="Toolbox meeting" id="qa-toolbox" sub=${`${sigs.filter(s=>s.pack_id===p.id&&s.form==='toolbox').length} attended`}>
         <fieldset disabled=${!canEdit} class="m-0 p-0 border-0 min-w-0 grid gap-3">
           <div class="grid grid-cols-2 gap-3">${[['location','Location'],['whs_rep','WHS&E rep'],['supervisor','Supervisor'],['manager','Manager']].map(([k,l])=>html`<${Fld} key=${k} label=${l}><input id=${'qa-tb-'+k} class="field" style=${fs} value=${T[k]||''} onInput=${ev=>setT(()=>({[k]:ev.target.value}))}/><//>`)}</div>
           <div class="label">Topics discussed</div>
@@ -274,13 +301,14 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
         </fieldset>
         <div class="label">Attendees</div>
         <${SignOff} form="toolbox" pack=${p} sigs=${sigs} ctx=${ctx} canEdit=${canEdit} open=${setDlg}/>
-        ${canEdit&&!sigs.some(s=>s.pack_id===p.id&&s.form==='toolbox')&&html`<div><button id="qa-tb-remove" type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>upd(x=>({...x,toolbox:null}))}>Remove the toolbox meeting</button></div>`}<//>`
-      :canEdit&&html`<button id="qa-add-toolbox" type="button" class="panel px-4 py-3 text-left flex items-center gap-2 hover:bg-sunken" onClick=${()=>upd(x=>({...x,toolbox:newToolbox(x,myName)}))}>${Icon.plus}<span><span class="block font-display text-[15px] font-semibold">Add a toolbox meeting</span><span class="block text-[12px] text-muted">Only when you hold one</span></span></button>`}
+        ${canEdit&&!sigs.some(s=>s.pack_id===p.id&&s.form==='toolbox')&&html`<div><button id="qa-tb-remove" type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>{upd(x=>({...x,toolbox:null}));setSec('jsa')}}>Remove the toolbox meeting</button></div>`}<//>`
+      :canEdit&&html`<button id="qa-add-toolbox" type="button" class="panel px-4 py-3 text-left flex items-center gap-2 hover:bg-sunken" onClick=${()=>upd(x=>({...x,toolbox:newToolbox(x,myName)}))}>${Icon.plus}<span><span class="block font-display text-[15px] font-semibold">Add a toolbox meeting</span><span class="block text-[12px] text-muted">Only when you hold one</span></span></button>`}`}
 
+    ${(()=>{const i=order.findIndex(t=>t.id===sec);const nx=order[i+1];return nx&&html`<div class="flex justify-end"><button id="qa-next" type="button" class="btn" onClick=${()=>go(nx.id)}>Next: ${nx.label} ${Icon.chevR}</button></div>`})()}
     <div class="panel px-4 py-3 flex flex-wrap items-center gap-2 sticky bottom-0" style=${{zIndex:5}}>
       ${msg&&html`<span id="qa-msg" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${msg}</span>`}
       <button id="qa-pdf" type="button" class="btn" disabled=${busy} onClick=${pdf}>${Icon.download} ${busy?'Making PDF…':'PDF'}</button>
-      <span class="text-[12px] text-muted flex-1">${nT} controls ticked · ${(J.extra||[]).length} added hazard${(J.extra||[]).length===1?'':'s'}</span>
+      <span class="text-[12px] text-muted flex-1" id="qa-progress">${order.length-missAll.length} of ${order.length} form${order.length===1?'':'s'} complete</span>
       ${canEdit&&!del&&html`<button id="qa-delete" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>${Icon.trash} Delete</button>`}
       ${canEdit&&del&&html`<span id="qa-del-confirm" class="w-full flex flex-wrap items-center gap-2"><span class="text-[12.5px] font-medium flex-1" style=${{color:'var(--bad)'}}>Delete this pack${jsaSigs.length?` and its ${sigs.filter(s=>s.pack_id===p.id).length} signature${sigs.filter(s=>s.pack_id===p.id).length===1?'':'s'}`:''}? This can’t be undone.</span>
         <button type="button" class="btn" onClick=${()=>setDel(false)}>Cancel</button><button id="qa-del-go" type="button" class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${remove}>Yes, delete</button></span>`}

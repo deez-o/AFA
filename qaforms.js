@@ -24,7 +24,7 @@ function LotCard({f}){const L=f.pack.forms.lot||{};const set=(k,v)=>f.set('lot',
       ${LOT.map(([k,l])=>html`<${Fld} key=${k} label=${l}><${In} id=${'qa-lot-'+k} type=${k==='date'?'date':'text'} v=${L[k]} on=${v=>set(k,v)}/><//>`)}</fieldset><//>`}
 /* a form's card, with "remove" while nothing on it is signed */
 function FormCard({f,id,title,sub,sigForms,children}){
-  const signed=f.sigs.some(s=>s.pack_id===f.pack.id&&sigForms.includes(s.form));
+  const signed=f.sigs.some(s=>s.pack_id===f.pack.id&&sigForms.includes(s.form))||(FORMS.find(x=>x.id===id)||{}).required;
   return html`<${Card} title=${title} sub=${sub} id=${'qa-f-'+id}>${children}
     ${f.canEdit&&!signed&&html`<div><button type="button" class="text-[12px] text-muted hover:text-ink qa-form-remove" onClick=${()=>f.remove(id)}>Remove this form</button></div>`}<//>`}
 const Rows=({f,id,items,make,render,addLabel,addId})=>html`<div class="grid gap-2">
@@ -161,15 +161,16 @@ const costRow=()=>({contractor:'',type:'',rego:'',docket:'',start:'',finish:''})
 const COSTS={id:'costs',label:'External costs summary',short:'External costs',
   make:(data,e,p,ctx)=>{const q=(e.b.shiftData||{})[e.k]||{};const rows=[...(q.subs||[]).filter(s=>s&&(s.name||s.info)).map(s=>({...costRow(),contractor:s.name||'',type:s.info||'',start:s.time||''})),
       ...(q.trucks||[]).filter(t=>t&&(t.co||t.driver)).map(t=>({...costRow(),contractor:t.co||t.driver||'',type:'Truck'+(t.w?' '+t.w:''),start:t.time||''}))];
-    return {supervisor:ctx.myName||'',start_paving:'',finish_paving:'',rows:rows.length?rows:[costRow()],comments:''}},
+    return {supervisor:ctx.myName||'',start_paving:'',finish_paving:'',rows:rows.length?rows:[costRow()],comments:'',none:false}},
   Editor:({f})=>{const d=f.pack.forms.costs;const set=p=>f.set('costs',x=>({...x,...p}));
     return html`<${FormCard} f=${f} id="costs" title="QA external costs summary" sub=${`${(d.rows||[]).filter(r=>r.contractor).length} contractor${(d.rows||[]).filter(r=>r.contractor).length===1?'':'s'}`} sigForms=${[]}>
       <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid grid-cols-2 lg:grid-cols-3 gap-3">
         <${Fld} label="Supervisor name"><${In} v=${d.supervisor} on=${v=>set({supervisor:v})}/><//><${Fld} label="Start paving"><${In} type="time" v=${d.start_paving} on=${v=>set({start_paving:v})}/><//><${Fld} label="Finish paving"><${In} type="time" v=${d.finish_paving} on=${v=>set({finish_paving:v})}/><//></fieldset>
-      <${Rows} f=${f} id="costs" items=${d.rows||[]} make=${costRow} addLabel="Add contractor" addId="qa-cost-add" render=${(r,i,s)=>html`
+      <label class="inline-flex items-center gap-2 text-[13px] cursor-pointer"><input id="qa-cost-none" type="checkbox" class="w-4 h-4" disabled=${!f.canEdit} checked=${!!d.none} onChange=${e=>set({none:e.target.checked})}/>No external contractors on this shift</label>
+      ${!d.none&&html`<${Rows} f=${f} id="costs" items=${d.rows||[]} make=${costRow} addLabel="Add contractor" addId="qa-cost-add" render=${(r,i,s)=>html`
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2"><${Fld} label="Contractor"><${In} v=${r.contractor} on=${v=>s({contractor:v})} ph="e.g. Big Daves"/><//><${Fld} label="Type"><${In} v=${r.type} on=${v=>s({type:v})} ph="e.g. Profiling"/><//>
           <${Fld} label="Rego"><${In} v=${r.rego} on=${v=>s({rego:v.toUpperCase()})}/><//><${Fld} label="Start time"><${In} type="time" v=${r.start} on=${v=>s({start:v})}/><//><${Fld} label="Finish time"><${In} type="time" v=${r.finish} on=${v=>s({finish:v})}/><//>
-          <${Fld} label="Docket no (office use)"><${In} v=${r.docket} on=${v=>s({docket:v})}/><//></div>`}/>
+          <${Fld} label="Docket no (office use)"><${In} v=${r.docket} on=${v=>s({docket:v})}/><//></div>`}/>`}
       <${Fld} label="Comments"><textarea class="field" rows="2" style=${{height:'auto',padding:'6px 10px',fontSize:13}} disabled=${!f.canEdit} value=${d.comments} onInput=${e=>set({comments:e.target.value})}></textarea><//><//>`},
   pdf:o=>{const d=o.p.forms.costs;o.newPage('p');o.page('QA EXTERNAL COSTS SUMMARY');let y=24;
     y=kvGrid(o,y,[['Date',dateTxt(o.lot.date)],['Customer',o.lot.client],['Project number',o.lot.job_no],['Supervisor name',d.supervisor],['Job location',o.lot.location],['Start paving',d.start_paving],['Finish paving',d.finish_paving]],2);
@@ -197,11 +198,24 @@ function sigBlock(o,y,form,label){const doc=o.doc;const W=doc.internal.pageSize.
     o.img(s.signature,o.M+cw[0]+cw[1]+cw[2]+2,y+1,28,10,'sig-'+s.id)}else{doc.setFont('helvetica','italic');doc.setFontSize(8);doc.setTextColor(140,145,155);o.txt('Not signed',o.M+1.2,y+7)}
   return y+14}
 
+/* ---------- what each form needs before the pack can be submitted ---------- */
+const signedOn=(o,form)=>o.sigs.some(s=>s.pack_id===o.p.id&&s.form===form);
+const blank=v=>!String(v==null?'':v).trim();
+const LOT_NEED=[['client','Client / customer'],['job_no','Job number'],['location','Job location'],['date','Date'],['lot_no','Lot number']];
+const lotCheck=o=>{const L=(o.p.forms||{}).lot||{};return LOT_NEED.filter(([k])=>blank(L[k])).map(([,l])=>l)};
+AQR.check=(d,o)=>[...(!(d.rows||[]).some(r=>!blank(r.product)&&claimedOf(r)>0)?['At least one product with its quantity']:[]),...(signedOn(o,'aqr_afa')?[]:['AFA quality rep’s signature']),...(signedOn(o,'aqr_client')?[]:['Client rep’s signature'])];
+HOLD.check=(d,o)=>[...(blank(d.lot_numbers)?['Lot numbers']:[]),...(signedOn(o,'hold_afa')?[]:['AFA quality rep’s signature']),...(!d.released&&blank(d.attention)?['Client response: release it, or say what needs attention']:[]),...(signedOn(o,'hold_client')?[]:['Client rep’s signature'])];
+DIAGRAM.check=d=>[...(!d.sketch&&!(d.photos||[]).length?['The diagram (draw it, or add a photo)']:[]),...(blank(d.mix)?['Mix type']:[]),...(blank(d.depth)?['Nominal depth']:[]),...(blank(d.prepared_by)?['Map prepared by']:[])];
+ENV.check=(d,o)=>{const it=d.items||{};const pre=ENV_ITEMS.filter(([k])=>!(it[k]||{}).pre).length,post=ENV_ITEMS.filter(([k])=>!(it[k]||{}).post).length;
+  return [...(pre?[`${pre} item${pre===1?'':'s'} not answered before surfacing`]:[]),...(post?[`${post} item${post===1?'':'s'} not answered after surfacing`]:[]),...(blank(d.before)?['Condition of the site before paving']:[]),...(blank(d.after)?['Condition of the site after the job']:[]),...(signedOn(o,'env')?[]:['Signature of whoever prepared it'])]};
+COSTS.check=d=>[...(blank(d.supervisor)?['Supervisor name']:[]),...(blank(d.start_paving)?['Start paving time']:[]),...(blank(d.finish_paving)?['Finish paving time']:[]),...(!d.none&&!(d.rows||[]).some(r=>!blank(r.contractor))?['The external contractors (or tick “No external contractors”)']:[])];
+LAYING.check=d=>[...(!(d.rows||[]).some(r=>!blank(r.docket)&&n0(r.tonnes)>0)?['At least one load with its docket number and tonnes']:[]),...(blank(d.device)?['Calibrated temperature device']:[]),...(blank(d.serial)?['Its serial number']:[]),...(blank(d.prepared_by)?['Prepared by']:[])];
+[AQR,HOLD,DIAGRAM,ENV,COSTS].forEach(f=>f.required=true);LAYING.required=false;
 const FORMS=[AQR,HOLD,DIAGRAM,LAYING,ENV,COSTS];
 const SIGN_TITLES={aqr_afa:'Agree the quantities (AFA)',aqr_client:'Agree the quantities (client)',hold_afa:'Hold point (AFA quality rep)',hold_client:'Release the hold point (client)',env:'Sign the environmental checklist'};
 const SIGN_NOTES={aqr_afa:'I agree the quantities on this record.',aqr_client:'I agree the quantities on this record.',hold_afa:'Hold point inspection by the Alex Fraser Asphalt quality representative.',
   hold_client:'Signing records the client response above. Tick “Release granted” on the form when work on this lot may proceed.',env:'I prepared this checklist.'};
 /* the PDF hooks need the shared lot details */
 FORMS.forEach(F=>{const inner=F.pdf;F.pdf=o=>inner({...o,lot:(o.p.forms||{}).lot||newLot(o.data,o.e,o.p)})});
-window.FFQF={FORMS,byId:Object.fromEntries(FORMS.map(f=>[f.id,f])),LotCard,newLot,signTitle:k=>SIGN_TITLES[k],signNote:k=>SIGN_NOTES[k]};
+window.FFQF={FORMS,byId:Object.fromEntries(FORMS.map(f=>[f.id,f])),LotCard,newLot,lotCheck,signTitle:k=>SIGN_TITLES[k],signNote:k=>SIGN_NOTES[k]};
 })();
