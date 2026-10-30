@@ -89,6 +89,7 @@ Fleet's sections sit in a bar below the header: **Dashboard · Machines · Calen
 - `supabase/maintenance.sql`: the maintenance tables, roles and database rules
 - `supabase/prestarts.sql`: prestart checklists and prestarts, the `maintenance` file store, and the link from each login to its Staff record
 - `supabase/defects.sql`: defects, restrictions, and how work orders carry defects through repair
+- `qa.js` and `supabase/qa.sql`: Site QA packs (JSA and toolbox meetings), their signatures and PDFs
 - `supabase/planner_link.sql`: stops restricted machines being added to bookings or plans; `machine_alerts` for the planner's warnings; `maintenance_feed` for the notifications bell
 - `tests/maintenance_test.sql`, `tests/prestarts_test.sql`, `tests/defects_test.sql`, `tests/planner_link_test.sql`: check the database rules; they leave no data behind
 
@@ -104,12 +105,25 @@ Fleet's sections sit in a bar below the header: **Dashboard · Machines · Calen
 | `admin` | Everything | Everything: service plans, verify & close, meter corrections. Also sees features still in progress |
 | `superuser` | Everything | Everything an admin can do, except features the admin hasn't released yet |
 | `planner` | Edit | View |
-| `supervisor` | View | Record work, verify & close work orders |
+| `supervisor` | View, plus **Prestarts** and **Site QA** (fills in QA packs). No other screens | None on screen (Fleet isn't in their menu) |
 | `mechanic` | View | Record services, readings and work order progress |
-| `prestart` | Prestarts only (once Prestarts is released; until then, View) | Prestarts |
+| `prestart` | Prestarts and Site QA (signing) only, once released; until then, View | Prestarts |
 | `viewer` | View | None |
 
 **Ideas** is for the `admin` only, never superusers.
+
+### Site QA (JSA and toolbox meetings)
+Run `supabase/qa.sql` once in Supabase → SQL Editor (then `tests/qa_test.sql` to check it). Then release **Site QA** in the Settings menu (*Features in progress*).
+
+- **QA** in the left menu lists the day's jobs. Supervisors (and planners and administrators) tap **Start JSA** for a crew's shift: the header fills itself in from the job (job number, location, customer, date, time, supervisor), Asphalt or Spray seal from the crew.
+- Tick each control measure actually implemented (Health & Safety, Environment, Quality, with the temperature device serial), **+ Add hazard** for site-specific hazards (risk rating, additional controls, residual risk), then the checklists and communications. "Plant prestarts completed" shows how many of the job's machines have done today's prestart.
+- **Sign-off**: everyone signs with their finger on their own phone (*Sign as …*, under their own login, so it carries their roster name). Visitors and subbies sign on the supervisor's phone (*Visitor / subbie signs*, with their company). Signatures can be taken back until the pack is submitted.
+- **+ Add a toolbox meeting** only when one is held: topics and actions, training covered, emergency meeting point, and the attendees' signatures.
+- **+ Add another QA pack for this shift** when a shift needs a separate pack (e.g. a second work area): it copies everything from the latest pack (not the signatures), as a new draft you can name.
+- **Submit pack** when it's done (at least one JSA signature): it's locked; an administrator or superuser can reopen it. **PDF** gives the pack laid out like the paper JSA and toolbox forms, signatures included.
+- In the office: a booking's **QA** tab lists each shift's packs with their status, opens them and makes the PDFs.
+- Works without reception: changes and signatures wait on the phone and are sent when it's back.
+- Operators (the Prestart role) see QA next to Prestarts and can only read and sign.
 
 ### Prestarts
 - **Checklists** (Fleet › Checklists, admin and superuser): one per machine category, plus an optional one for *all other machines*. Start from the standard list and change it. Saving a change makes a new version; prestarts already done keep the questions they answered. Mark questions **critical**: a fail means *Do not operate*.
