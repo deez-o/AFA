@@ -1545,7 +1545,8 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
   </div>`;
 }
 
-function Editor({initial,data,onSave,onDelete,onClose}){
+function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify}){
+  const [planView,setPlanView]=useState(null);
   const [f,setF]=useState(initial);
   const [confirmDel,setConfirmDel]=useState(false);
   const isNew=!initial.id;
@@ -1630,7 +1631,11 @@ function Editor({initial,data,onSave,onDelete,onClose}){
         .label:has(+ #ed-shift)::after,.label:has(+ #ed-crewsize)::after{content:' *';color:var(--bad)}
         ${tried?missing.map(m=>`#${m.id}`).join(',')+'{border-color:var(--bad)!important;box-shadow:0 0 0 1px var(--bad)!important}':''}</style>`}
       <div class="flex-1 min-h-0 overflow-y-auto px-5 py-5" role="tabpanel" id=${'panel-'+active.id} aria-labelledby=${'tab-'+active.id}>
+        ${f.kind==='job'&&active.id==='details'&&(()=>{const pl=planFor(data,f);return pl?html`<div class="mb-4 rounded-lg px-3 py-2.5 flex flex-wrap items-center gap-2" style=${{background:'var(--accent-soft)'}}>
+            <span class="text-[13px]"><span class="font-semibold" style=${{color:'var(--accent)'}}>Job plan:</span> ${pl.title||pl.jobName||'Untitled plan'}${pl.appliedAt?'':' (not sent to the schedule yet)'}</span>
+            <span class="flex-1"></span><button type="button" class="btn" style=${{height:30}} onClick=${()=>setPlanView(pl)}>View full plan</button></div>`:null})()}
         ${active.render({f,set,data,rtype,err,changeRes})}
+        ${planView&&html`<${PlanViewDialog} data=${data} plan=${planView} onClose=${()=>setPlanView(null)} notify=${notify||(()=>{})} onOpenPlan=${id=>{setPlanView(null);onOpenPlan&&onOpenPlan(id)}}/>`}
       </div>
       <div class="px-5 py-3 border-t border-line bg-sunken flex flex-wrap items-center gap-2">
         ${!isNew&&(confirmDel
@@ -2109,7 +2114,7 @@ const recentQuoteChanges=data=>(data.quoteChanges||[]).filter(c=>Date.now()-c.at
 const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.round(m/60);return `${h} hr${h===1?'':'s'} ago`};
 /* ---------- change log: every change to the shared roster becomes a notification ---------- */
 const CHANGE_KEEP=7*DAY_MS;
-const LIST_SETTINGS=[['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['programLocs','Locations'],['locColors','Location colours'],['truckDefs','Truck defaults'],['machineCats','Machine categories'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders'],['sealTwoCoat','Two coat seals']];
+const LIST_SETTINGS=[['planQuick','Planning quick-add subcontractors'],['planSteps','Planning quick-add method steps'],['truckCos','Trucks'],['subCos','Subcontractors'],['subServices','Subcontractor services'],['programLocs','Locations'],['locColors','Location colours'],['truckDefs','Truck defaults'],['machineCats','Machine categories'],['mixTypes','Mixes'],['binders','Binders'],['mixRap','Mix RAP %'],['mixBinder','Mix default binders'],['sealTypes','Seal types'],['sealBinders','Seal binders'],['sealBinder','Seal default binders'],['sealTwoCoat','Two coat seals']];
 const RES_WORD={crew:'Crew',person:'Staff member',machine:'Machine',aplant:'Plant'};
 /* exactly what changed on one booking, as "Field: before → after" lines */
 function bookingDiff(a,b,p,x,rname,jname,when){
@@ -2184,6 +2189,9 @@ function describeChanges(a,b){
       out.push({type:'resource',text:`${w} changed: ${r.name}`,sub:parts.join(', ')})});
     a.resources.forEach(p=>{if(!bm.has(p.id))out.push({type:'resource',text:`${RES_WORD[p.type]||'Resource'} removed: ${p.name}`,sub:''})});
   }
+  if(a.plans!==b.plans){const am=new Map((a.plans||[]).map(x=>[x.id,x])),bm=new Map((b.plans||[]).map(x=>[x.id,x]));const nm=x=>x.title||x.jobName||'Untitled plan';
+    (b.plans||[]).forEach(x=>{const o=am.get(x.id);if(!o)out.push({type:'job',text:`Plan started: ${nm(x)}`,sub:''});else if(o.appliedAt!==x.appliedAt&&x.appliedAt)out.push({type:'job',text:`Plan sent to the schedule: ${nm(x)}`,sub:''})});
+    (a.plans||[]).forEach(x=>{if(!bm.has(x.id))out.push({type:'job',text:`Plan deleted: ${nm(x)}`,sub:''})})}
   const lists=LIST_SETTINGS.filter(([k])=>a[k]!==b[k]&&!same(a[k],b[k])).map(([,l])=>l);
   if(lists.length)out.push({type:'lists',text:`${lists.join(', ')} updated`,sub:''});
   /* a big batch (import, merge) becomes one notification */
@@ -2393,12 +2401,14 @@ const SCREENS={
   schedule:{label:'Schedule',title:'FraserFlow',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
+  planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
   ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',admin:true},   /* administrators only (button hidden for everyone else) */
 };
 const NAV_ICON={
   ideas:svg(html`<path d="M8 1.8a4.4 4.4 0 00-2.6 7.9c.5.4.8 1 .8 1.6v.4h3.6v-.4c0-.6.3-1.2.8-1.6A4.4 4.4 0 008 1.8z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M6.4 13.6h3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,20),
   schedule:svg(html`<rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M5 9h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`,20),
   staff:svg(html`<circle cx="8" cy="5.2" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M3 14c.6-2.7 2.6-4.2 5-4.2s4.4 1.5 5 4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,20),
+  planning:svg(html`<path d="M4 2.5h6l2.5 2.5v8.5H4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 7h4.5M6 9.5h4.5M6 12h2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`,20),
   machines:svg(html`<path d="M2 11.5V8.5l2-3h4l1.5 3H14v3" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="4.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/><circle cx="11.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/>`,20),
 };
 function NavRail({screen,go,isAdmin,badge={}}){
@@ -2740,6 +2750,7 @@ function ProgramShifts({f,set,data,part}){
     <fieldset disabled=${lockedP} class="grid gap-4 border-0 p-0 m-0 min-w-0" style=${lockedP?{opacity:.5}:null}>
     ${part==='trucks'&&!sealJob&&html`<div class="grid gap-2">
       <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Trucks</span><span class="text-[12px] text-muted tnum">${tl.length} · ${fmtN(totT)}T</span><span class="flex-1 h-px bg-line self-center"></span></div>
+      <${PlanTruckNote} data=${data} f=${f} k=${k}/>
       <div class="text-[12px] text-muted -mt-1">Trucks are grouped by location. Each location has a first truck time and a gap: its trucks follow on in order. Pick a time on a truck to set it by hand. Drag a location by its ⋮⋮ handle to change the order they appear on the daily program.</div>
       ${(()=>{const groups=[];realTrucks.forEach((t,j)=>{const kk=lkey(t);let g=groups.find(x=>x.key===kk);if(!g){g={key:kk,label:(t.loc||'').trim(),items:[]};groups.push(g)}g.items.push({t,j})});
         return groups.map(g=>{const tT=g.items.reduce((a,{t})=>a+truckT(t.w),0);const sw=g.label?locColorOf(data,g.key===(f.address||'').trim().toLowerCase()?'SITE':g.label):'var(--line-strong)';
@@ -2946,10 +2957,12 @@ function drawProgram(doc,data,{b,k,crewId}){
   font(6,false,[130,130,130]);
   doc.text(`${crew.name} · ${jobLabel(job)} · printed ${new Date().toLocaleString('en-AU',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'})}`,M,290);
 }
-async function buildDailyProgramPdf(data,entries){
+async function buildDailyProgramPdf(data,entries,withPlans=true){
   const JsPDF=await loadJsPDF();
   const doc=new JsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-  entries.forEach((e,n)=>{if(n)doc.addPage();drawProgram(doc,data,e)});
+  /* each job's daily program, followed by that shift's page(s) from the job plan when there is one */
+  for(let n=0;n<entries.length;n++){const e=entries[n];if(n)doc.addPage();drawProgram(doc,data,e);
+    const pl=withPlans?planFor(data,e.b):null;if(pl&&planDates(pl,data).includes(e.k))await buildPlanPdf(data,pl,{doc,shiftDate:e.k})}
   return doc.output('blob');
 }
 const programFileName=(data,e)=>{const crew=data.resources.find(r=>r.id===e.crewId);const j=data.jobs.find(x=>x.id===e.b.jobId)||{};const d=parse(e.k);
@@ -2957,6 +2970,7 @@ const programFileName=(data,e)=>{const crew=data.resources.find(r=>r.id===e.crew
 
 function DailyProgramDialog({data,onClose,notify}){
   const [day,setDay]=useState(()=>iso(addDays(TODAY,1)));
+  const [incPlan,setIncPlan]=useState(true);
   const [off,setOff]=useState({});const [busy,setBusy]=useState(false);const [err,setErr]=useState('');const [dl,setDl]=useState(undefined);
   useEffect(()=>{let live=true;
     try{const p=window.claude?.use?.('downloads');if(p&&p.then)p.then(x=>{if(live)setDl(x)},()=>{if(live)setDl(null)});else setDl(null)}catch(e){setDl(null)}
@@ -2964,7 +2978,7 @@ function DailyProgramDialog({data,onClose,notify}){
   const entries=programEntries(data,day);const key=e=>e.b.id+'|'+e.k;
   const chosen=entries.filter(e=>!off[key(e)]);
   const step=n=>{setDay(iso(addDays(parse(day),n)));setOff({});setErr('')};
-  const save=async(list,fn)=>{const blob=await buildDailyProgramPdf(data,list);await dl.save({filename:fn,data:blob})};
+  const save=async(list,fn)=>{const blob=await buildDailyProgramPdf(data,list,incPlan);await dl.save({filename:fn,data:blob})};
   const go=async combined=>{
     if(!dl){setErr('Saving files isn’t available in this view.');return}
     setBusy(true);setErr('');
@@ -2999,14 +3013,15 @@ function DailyProgramDialog({data,onClose,notify}){
             <input type="checkbox" class="w-4 h-4 mt-0.5" style=${{accentColor:'var(--accent)'}} checked=${!off[key(e)]} onChange=${ev=>setOff(o=>({...o,[key(e)]:!ev.target.checked}))}/>
             <span class="min-w-0 grid gap-0.5">
               <span class="text-[13px] font-medium truncate">${jobLabel(j)}</span>
-              <span class="text-[12px] text-muted">${crew?crew.name:''}${e.b.shift==='night'?' · night':' · day'}${e.crewId!==e.b.resourceId?' · covering':''}</span>
+              <span class="text-[12px] text-muted">${crew?crew.name:''}${e.b.shift==='night'?' · night':' · day'}${e.crewId!==e.b.resourceId?' · covering':''}${(()=>{const pl=planFor(data,e.b);return pl&&planDates(pl,data).includes(e.k)?html` · <span class="font-semibold" style=${{color:'var(--accent)'}}>+ job plan</span>`:''})()}</span>
               ${sealE?html`<span class="text-[12px] text-muted">${pl} plant · ${sb} subcontractor${sb===1?'':'s'} · seal</span>`
                 :html`<span class=${'text-[12px] '+(tr?'text-muted':'')} style=${tr?{}:{color:'var(--warn)'}}>${pl} plant · ${tr} truck${tr===1?'':'s'} · ${sb} subcontractor${sb===1?'':'s'}${tr?'':' (no trucks yet)'}</span>`}
             </span></label>`})}
       </div>
       ${err&&html`<div class="px-5 pb-2 text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
       <div class="px-5 py-3 border-t border-line flex flex-wrap items-center gap-2">
-        <span class="text-[12px] text-muted mr-auto">${chosen.length} of ${entries.length} selected</span>
+        <label class="inline-flex items-center gap-1.5 text-[12.5px] cursor-pointer mr-auto"><input id="dp-plans" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${incPlan} onChange=${e=>setIncPlan(e.target.checked)}/>Add the job plan for the shift</label>
+        <span class="text-[12px] text-muted">${chosen.length} of ${entries.length} selected</span>
         <button type="button" class="btn" disabled=${busy||chosen.length<2} onClick=${()=>go(true)}>One combined PDF</button>
         <button type="button" class="btn btn-primary" disabled=${busy||!chosen.length} onClick=${()=>go(false)}>${busy?'Building…':chosen.length>1?`Download ${chosen.length} PDFs`:'Download PDF'}</button>
       </div>
@@ -3158,6 +3173,714 @@ function MachineImport({data,setData,onClose,notify}){
             <button type="button" class="btn btn-primary" disabled=${!chosen.length} onClick=${run}>Import ${chosen.length}</button>
           </div>`}
     </div>
+  </div>`;
+}
+
+/* =====================================================================
+   Planning: the supervisor's site inspection and job methodology.
+   A plan holds the site details, map pins, shift-by-shift asphalt and profiling,
+   machines, trucking, subcontractors and safety. "Send to schedule" turns it into
+   (or updates) the crew booking: dates, quantities per shift, machines, subcontractors.
+   ===================================================================== */
+const PLAN_PPE=['Hi-vis (day/night)','Steel cap boots','Long sleeves & pants','Wide brim hat','Sunscreen','Safety glasses','Gloves','Hearing protection','2-way radios (UHF)','Head lamps (nights)'];
+const PLAN_TRUCK_TYPES=['Walking Floor','Body Truck'];
+const PLAN_STEPS=['Put environmental protection out before profiler starts','Communicate with traffic control for all truck and plant movements',
+  'Bring out sand for clean-up','Use watercart to wet down base and minimise dust','Use water at the end to help with clean-up',
+  'Use straight edge on all joins to ensure transitions are correct','Use a 50mm block to mark out the ramp to be cut by the profiler',
+  'Cut out ramps from last night’s work to the numbers on the ground','Tack coat before paving'];
+const PLAN_HAZARDS=[
+  {hazard:'Open trenches / uneven ground',control:'Exclusion zones, watch your step, paint ramps'},
+  {hazard:'Slips, trips and falls',control:'Keep work area clear, good housekeeping'},
+  {hazard:'Open drains and pits',control:'Cover pits with environmental covers; enviro trailer on site'},
+  {hazard:'Sediment control',control:'Environmental protection out before profiling starts'},
+  {hazard:'Lighting (night works)',control:'Light towers for night works, head lamps for the crew'},
+  {hazard:'Traffic',control:'Traffic control to set out the job to the TGS and control trucks entering and leaving site'},
+  {hazard:'Trucks and plant movements',control:'Spotters to communicate with trucks once on site'}];
+const PIN_TYPES=[
+  {id:'site',label:'Job location',color:'#9b0a1e'},
+  {id:'access',label:'Site access',color:'#26548c'},
+  {id:'float',label:'Float gear to / drop-off',color:'#407034'},
+  {id:'dump',label:'Dump site',color:'#966014'},
+  {id:'meet',label:'Truck meeting point',color:'#603c82'},
+  {id:'other',label:'Other',color:'#3a3a3a'}];
+const pinType=id=>PIN_TYPES.find(t=>t.id===id)||PIN_TYPES[PIN_TYPES.length-1];
+const gmapsLink=p=>`https://www.google.com/maps/search/?api=1&query=${(+p.lat).toFixed(6)},${(+p.lng).toFixed(6)}`;
+/* coordinates from a Google Maps link or typed "lat, lng" (short maps.app.goo.gl links can't be read: open them and copy the long link) */
+function parseLatLng(s){
+  s=String(s||'').trim();let m=s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/)||s.match(/[?&](?:q|query|ll|destination)=(-?\d+(?:\.\d+)?)(?:,|%2C)\s*(-?\d+(?:\.\d+)?)/i)
+    ||s.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/)||s.match(/^\s*(-?\d{1,2}\.\d+)\s*[, ]\s*(-?\d{1,3}\.\d+)\s*$/);
+  if(!m)return null;const lat=+m[1],lng=+m[2];return Math.abs(lat)<=90&&Math.abs(lng)<=180?{lat,lng}:null;
+}
+const plansOf=d=>(d&&d.plans)||[];
+/* trucking is set per shift (plans made before then had one setting for the whole job) */
+const spTruck=(p,sp)=>(sp&&sp.trucking)||(p&&p.trucking)||{};
+const spRounds=(p,sp)=>{const tr=spTruck(p,sp);const pr=num(tr.perRound);const st=((sp&&sp.lines)||[]).reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);return pr&&st?Math.ceil(st/pr*10)/10:0};
+/* pictures for a shift: stored on their own (planImgs), shrunk to keep the roster light */
+const planImgsOf=d=>(d&&d.planImgs)||[];
+/* seal crew per shift: {on, onSite, area, type, binder} (older plans had one "product" box, read as the seal type); booked for the seal section's AFA crew unless another is picked */
+const spSeal=sp=>!!(sp&&sp.seal&&sp.seal.on);
+const sealCrewsOf=d=>d.resources.filter(isSealCrew);
+const sealCrewDefault=d=>{const cs=sealCrewsOf(d);return cs.find(c=>/\bafa\b/i.test(c.name))||cs[0]||null};
+const planSealCrew=(d,p)=>d.resources.find(r=>r.id===p.sealCrewId&&isSealCrew(r))||sealCrewDefault(d);
+const slType=sl=>((sl&&(sl.type??sl.product))||'').trim();
+const sealDefBinder=(d,t)=>{const m=sealBinderOf(d);t=(t||'').trim().toLowerCase();const k=Object.keys(m).find(x=>x.toLowerCase()===t);return k?m[k]:''};
+const sealText=(sl,pm)=>[num(sl.area)?`${fmtN(num(sl.area))} m²`:'',[slType(sl),(sl.binder||'').trim()].filter(Boolean).join(' · '),sl.onSite?`on site ${fmtTime(sl.onSite)}`:''].filter(Boolean).join(' · ');
+/* quick-add subcontractor buttons in a plan, each with an optional default supplier */
+const PLAN_QUICK_DEFAULT=['2m profiler','1m profiler','350 profiler','Full service bobcat','Traffic control','Lighting towers'].map(label=>({label,supplier:''}));
+const planQuickOf=d=>d&&Array.isArray(d.planQuick)?d.planQuick:PLAN_QUICK_DEFAULT;
+/* quick-add steps for each shift's method / notes (edited in the plan, used on every plan) */
+const planStepsOf=d=>d&&Array.isArray(d.planSteps)?d.planSteps:PLAN_STEPS;
+/* profiling is ticked per shift; older plans had one tick for the whole job, used until a shift is set */
+const spProf=(p,sp)=>!!(sp&&sp.profiling!=null?sp.profiling:p&&p.profiling);
+function shrinkImage(file){return new Promise((res,rej)=>{const url=URL.createObjectURL(file);const im=new Image();
+  im.onload=()=>{try{const max=1400;let w=im.naturalWidth,h=im.naturalHeight;const k=Math.min(1,max/Math.max(w,h));w=Math.round(w*k);h=Math.round(h*k);
+    const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,w,h);g.drawImage(im,0,0,w,h);
+    let q=.78,out=c.toDataURL('image/jpeg',q);while(out.length>650000&&q>.35){q-=.1;out=c.toDataURL('image/jpeg',q)}
+    URL.revokeObjectURL(url);res({data:out,w,h})}catch(e){rej(e)}};
+  im.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('That file isn’t a picture this browser can read.'))};im.src=url})}
+const planTonnes=l=>{if(filledNum(l.tonnes)&&l._tManual)return num(l.tonnes);const a=num(l.area),dp=num(l.depth);return a&&dp?Math.round(a*dp/1000*DEFAULT_DENSITY*2)/2:num(l.tonnes)};
+const planBlock=p=>({start:p.start,end:p.start,shift:p.shift||'day',...(p.fri!==undefined?{friShift:!!p.fri}:{}),...(p.sat!==undefined?{satShift:!!p.sat}:{}),...(p.sun!==undefined?{sunShift:!!p.sun}:{})});
+/* the plan's booking on the schedule: its start date, crew, day/night and weekend ticks are the plan's */
+const planBooking=(d,p)=>d&&p&&p.bookingId?d.blocks.find(b=>b.id===p.bookingId)||null:null;
+function planDates(p,d){
+  const bk=planBooking(d,p);if(bk)return shiftDates(bk);
+  if(!p||!p.start||!(num(p.shifts)>0))return [];const pb=planBlock(p);const out=[];let x=parse(p.start);
+  for(let g=0;out.length<num(p.shifts)&&g<400;g++){if(worksOn(pb,x))out.push(iso(x));x=addDays(x,1)}
+  return out;
+}
+const planFor=(d,b)=>b&&(plansOf(d).find(p=>p.id===b.planId)||plansOf(d).find(p=>p.bookingId&&p.bookingId===b.id))||null;
+/* changing the number of shifts in the plan moves the booking's end date */
+function setBookingShifts(d,bookingId,n){const bk=d.blocks.find(b=>b.id===bookingId);if(!bk||!(n>0))return d;let x=parse(bk.start),c=0,end=bk.start;
+  for(let g=0;g<400;g++){if(worksOn(bk,x)){c++;end=iso(x);if(c>=n)break}x=addDays(x,1)}
+  return end===bk.end?d:{...d,blocks:d.blocks.map(b=>b.id===bookingId?{...b,end}:b)}}
+function newPlan(d){
+  return {id:'p'+uid(),title:'',status:'draft',bookingId:'',uhf:'',induction:false,supply:'AFA',
+    ppe:['Hi-vis (day/night)','Steel cap boots','2-way radios (UHF)'],pins:[],sections:[],shiftPlans:[],jobSubs:[],machineIds:[],
+    seal:{},
+    hazards:PLAN_HAZARDS.map(h=>({...h})),createdAt:Date.now(),...(window.__rosterMe?{createdBy:window.__rosterMe}:{})};
+}
+/* what's in the way: machines on other jobs or down, and the crew already booked, on the plan's dates */
+function planConflicts(d,p){
+  const dates=planDates(p,d);if(!dates.length)return {machines:{},crew:[]};
+  const has=b=>dates.some(k=>k>=b.start&&k<=b.end);const machines={};
+  (p.machineIds||[]).forEach(id=>{const list=[];
+    d.blocks.forEach(b=>{if(b.id===p.bookingId||!has(b))return;
+      if(b.kind==='job'&&(b.plantIds||[]).includes(id)){const c=d.resources.find(r=>r.id===b.resourceId);const j=d.jobs.find(x=>x.id===b.jobId);list.push(`On ${c?c.name:'another crew'}'s job${j?` (${j.name})`:''}, ${fmtShort(parse(b.start))}${b.end!==b.start?'–'+fmtShort(parse(b.end)):''}`)}
+      else if(b.resourceId===id&&KINDS[b.kind]&&KINDS[b.kind].down)list.push(`${b.title||KINDS[b.kind].label}, ${fmtShort(parse(b.start))}${b.end!==b.start?'–'+fmtShort(parse(b.end)):''}`)});
+    /* other plans that want the same machine on the same dates (not on the schedule yet) */
+    plansOf(d).forEach(o=>{if(o.id===p.id||o.status==='scheduled'||!(o.machineIds||[]).includes(id))return;const od=planDates(o,d);
+      if(od.some(k=>dates.includes(k)))list.push(`Also planned for ${o.title||o.jobName||'another plan'} (${fmtShort(parse(od[0]))}${od.length>1?'–'+fmtShort(parse(od[od.length-1])):''})`)});
+    if(list.length)machines[id]=list});
+  const bkc=planBooking(d,p);const crewId=bkc?bkc.resourceId:p.crewId;
+  const crew=crewId?d.blocks.filter(b=>b.resourceId===crewId&&b.id!==p.bookingId&&has(b)).map(b=>{const j=d.jobs.find(x=>x.id===b.jobId);return `${b.kind==='job'?(j?jobLabel(j):'Job'):(b.title||KINDS[b.kind].label)}, ${fmtShort(parse(b.start))}${b.end!==b.start?'–'+fmtShort(parse(b.end)):''}`}):[];
+  return {machines,crew};
+}
+/* what sending the plan will do to seal bookings, so it can be checked first:
+   new = book the seal crew; update = this plan's own seal booking for that day; existing = a seal booking for this job is
+   already on the schedule that day (kept, no double-up, plan details only fill its empty fields); remove = this plan booked it before but the shift no longer needs the seal crew */
+function sealPlanOf(d,p){
+  const old=planBooking(d,p);if(!old)return {items:[],removes:[],crew:null};
+  const want=shiftDates(old).map((k,i)=>({k,sl:((p.shiftPlans||[])[i]||{}).seal})).filter(x=>x.sl&&x.sl.on);
+  const crew=want.length?planSealCrew(d,p):null;
+  const own=d.blocks.filter(x=>x.planSealOf===p.id);
+  const others=d.blocks.filter(x=>x.kind==='job'&&x.jobId===old.jobId&&x.planSealOf!==p.id&&isSealCrew(d.resources.find(r=>r.id===x.resourceId)));
+  const items=want.map(({k,sl})=>{const mine=own.find(x=>x.start===k);
+    const other=others.find(x=>x.start<=k&&x.end>=k&&worksOn(x,parse(k)));
+    const busy=crew?d.blocks.filter(x=>x.resourceId===crew.id&&x.start<=k&&x.end>=k&&x.jobId!==old.jobId&&x.kind==='job'&&worksOn(x,parse(k))).map(x=>(d.jobs.find(j=>j.id===x.jobId)||{}).name||'another job'):[];
+    if(other&&!mine)return {k,sl,act:'existing',b:other,busy};
+    return {k,sl,act:mine?'update':'new',b:mine||null,busy,dupe:mine&&other?other:null}});
+  return {items,removes:own.filter(x=>!want.some(w=>w.k===x.start)),crew};
+}
+/* turn the plan into the crew booking (creating the job if needed) */
+function applyPlan(d,p){
+  const old=planBooking(d,p);if(!old)return {data:d,err:'Pick the job from the schedule first.'};
+  const dates=shiftDates(old);const sd={...(old.shiftData||{})};
+  dates.forEach((k,i)=>{const sp=(p.shiftPlans||[])[i]||{};const q=sd[k]||{};
+    const lines=(sp.lines||[]).filter(lineHas).map(l=>{const {_tManual,...r}=l;return cleanLine({...r,tonnes:planTonnes(l)})});
+    const subs=[...(p.jobSubs||[]),...(sp.subs||[])].filter(subHas).map(s=>({name:(s.name||'').trim(),info:(s.info||'').trim(),time:s.time||p.crewOnSite||''}));
+    sd[k]={...q,lines:lines.length?lines:linesOnly(q),...(subs.length?{subs}:{}),...(p.crewOnSite?{start:p.crewOnSite}:{})}});
+  const b={...old,plantIds:[...(p.machineIds||[])],shiftData:sd,planId:p.id,...((p.address||'').trim()?{address:p.address.trim()}:{})};
+  [['quoteNo',p.quoteNo],['projectNo',p.projectNo],['supervisor',p.supervisor],['siteContact',p.siteContact],['sitePhone',p.sitePhone]].forEach(([k,v])=>{v=(v||'').trim();if(v)b[k]=v});
+  let blocks=d.blocks.map(x=>x.id===old.id?b:x);
+  /* seal crew shifts: a one-shift booking for each shift that needs the seal crew (updated, not duplicated, when sent again) */
+  const sp0=sealPlanOf(d,p);const sc=sp0.crew;let sealN=0,sealKept=0;
+  if(sp0.items.length&&!sc)return {data:d,err:'No seal crew to book. Add a crew in the Seal section first.'};
+  const rm=new Set(sp0.removes.map(x=>x.id));blocks=blocks.filter(x=>!rm.has(x.id));
+  sp0.items.forEach(({k,sl,act,b:ex})=>{const q=(ex&&ex.shiftData&&ex.shiftData[k])||{};
+    const line=slType(sl)||(sl.binder||'').trim()||num(sl.area)?[cleanLine({type:slType(sl),binder:(sl.binder||'').trim(),area:sl.area,twoCoat:sealIsTwoCoat(d,slType(sl))})]:null;
+    if(act==='existing'){   /* already booked: no second booking, just fill what's empty on that day */
+      const nq={...q};if(line&&!linesOf(q).some(lineHas))nq.lines=line;if(sl.onSite&&!q.start)nq.start=sl.onSite;
+      blocks=blocks.map(x=>x.id===ex.id?{...x,shiftData:{...(x.shiftData||{}),[k]:nq}}:x);sealKept++;return}
+    const nb={...(ex||{id:uid(),kind:'job',title:'',plantIds:[]}),resourceId:sc.id,jobId:old.jobId,start:k,end:k,shift:old.shift||'day',planSealOf:p.id,planId:p.id,
+      weekendShifts:true,satShift:true,sunShift:true,friShift:true,shiftData:{[k]:{...q,...(line?{lines:line}:{}),...(sl.onSite?{start:sl.onSite}:{})}}};
+    ['address','quoteNo','projectNo','supervisor','siteContact','sitePhone'].forEach(f=>{if(b[f])nb[f]=b[f]});
+    if(ex)blocks=blocks.map(x=>x.id===ex.id?nb:x);else blocks=[...blocks,nb];sealN++});
+  const plans=plansOf(d).map(x=>x.id===p.id?{...p,jobId:old.jobId,status:'scheduled',appliedAt:Date.now()}:x);
+  return {data:{...d,blocks,plans},bookingId:b.id,created:false,sealN,sealKept,sealCrew:sc&&sc.name};
+}
+
+/* ---------- map with pins (Leaflet + OpenStreetMap / satellite tiles) ---------- */
+function loadLeaflet(){
+  if(window.L&&window.L.map)return Promise.resolve(window.L);
+  return new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js';
+    s.onload=()=>window.L?res(window.L):rej(new Error('Map library missing'));s.onerror=()=>rej(new Error('Could not load the map'));document.head.appendChild(s)});
+}
+const pinIcon=(L,p)=>L.divIcon({className:'afa-pin',iconSize:[26,34],iconAnchor:[13,32],tooltipAnchor:[0,-30],
+  html:`<svg width="26" height="34" viewBox="0 0 26 34"><path d="M13 33c-1-3.6-11-12.8-11-20A11 11 0 0 1 24 13c0 7.2-10 16.4-11 20z" fill="${pinType(p.type).color}" stroke="#fff" stroke-width="2"/><circle cx="13" cy="13" r="4" fill="#fff"/></svg>`});
+function PlanMap({pins,onChange,readOnly,height=360}){
+  const box=useRef(null),mapRef=useRef(null),layer=useRef(null),tiles=useRef({});
+  const [err,setErr]=useState('');const [tileErr,setTileErr]=useState(false);const [addType,setAddType]=useState('site');const [sat,setSat]=useState(false);
+  const [q,setQ]=useState('');const [searching,setSearching]=useState(false);const [paste,setPaste]=useState('');
+  const pinsRef=useRef(pins);pinsRef.current=pins;const addRef=useRef(addType);addRef.current=addType;
+  useEffect(()=>{let gone=false;loadLeaflet().then(L=>{if(gone||!box.current||mapRef.current)return;
+      const first=(pins||[])[0];const m=L.map(box.current,{zoomControl:true,attributionControl:true}).setView(first?[first.lat,first.lng]:[-27.25,153.0],first?16:10);
+      const street=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'});
+      const imagery=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Imagery &copy; Esri'});
+      [street,imagery].forEach(t=>t.on('tileerror',()=>setTileErr(true)));
+      tiles.current={street,imagery};street.addTo(m);layer.current=L.layerGroup().addTo(m);mapRef.current=m;
+      if(!readOnly)m.on('click',e=>{const t=addRef.current;const n={id:'pin'+uid(),type:t,label:pinType(t).label,lat:+e.latlng.lat.toFixed(6),lng:+e.latlng.lng.toFixed(6)};onChangeRef.current([...(pinsRef.current||[]),n])});
+      draw();setTimeout(()=>m.invalidateSize(),60);
+    }).catch(e=>setErr(e.message||'The map could not load.'));
+    return()=>{gone=true;if(mapRef.current){mapRef.current.remove();mapRef.current=null}}},[]);
+  const onChangeRef=useRef(onChange);onChangeRef.current=onChange;
+  const draw=()=>{const L=window.L;const g=layer.current;if(!L||!g)return;g.clearLayers();
+    (pinsRef.current||[]).forEach(p=>{if(!isFinite(+p.lat)||!isFinite(+p.lng))return;
+      const mk=L.marker([+p.lat,+p.lng],{icon:pinIcon(L,p),draggable:!readOnly,title:p.label||pinType(p.type).label});
+      mk.bindTooltip(p.label||pinType(p.type).label,{direction:'top',permanent:true,className:'afa-pin-label'});
+      if(!readOnly)mk.on('dragend',()=>{const ll=mk.getLatLng();onChangeRef.current((pinsRef.current||[]).map(x=>x.id===p.id?{...x,lat:+ll.lat.toFixed(6),lng:+ll.lng.toFixed(6)}:x))});
+      g.addLayer(mk)})};
+  useEffect(draw,[pins]);
+  useEffect(()=>{const m=mapRef.current,t=tiles.current;if(!m||!t.street)return;if(sat){m.removeLayer(t.street);t.imagery.addTo(m)}else{m.removeLayer(t.imagery);t.street.addTo(m)}},[sat]);
+  const fit=()=>{const m=mapRef.current,L=window.L;const ps=(pins||[]).filter(p=>isFinite(+p.lat));if(!m||!ps.length)return;
+    if(ps.length===1)m.setView([+ps[0].lat,+ps[0].lng],17);else m.fitBounds(L.latLngBounds(ps.map(p=>[+p.lat,+p.lng])),{padding:[40,40]})};
+  const search=async()=>{const v=q.trim();if(!v)return;const ll=parseLatLng(v);if(ll&&mapRef.current){mapRef.current.setView([ll.lat,ll.lng],17);return}
+    setSearching(true);setErr('');
+    try{const r=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=au&q=${encodeURIComponent(v)}`,{headers:{'Accept':'application/json'}});
+      const j=await r.json();if(j&&j[0]&&mapRef.current)mapRef.current.setView([+j[0].lat,+j[0].lon],17);else setErr('Address not found. Try a nearby street or suburb.')}
+    catch(e){setErr('Address search isn’t available here. Zoom the map by hand, or paste a Google Maps link below.')}finally{setSearching(false)}};
+  const addPasted=()=>{const ll=parseLatLng(paste);if(!ll){setErr(/goo\.gl|maps\.app/.test(paste)?'Short Google links can’t be read. Open the link, then copy the long address from the browser bar (it has @-27.2…,153.0… in it).':'No coordinates found. Paste a Google Maps link or type "lat, lng".');return}
+    setErr('');onChange([...(pins||[]),{id:'pin'+uid(),type:addType,label:pinType(addType).label,...ll}]);setPaste('');if(mapRef.current)mapRef.current.setView([ll.lat,ll.lng],17)};
+  const setPin=(id,p)=>onChange((pins||[]).map(x=>x.id===id?{...x,...p}:x));
+  const fs={height:30,fontSize:13};
+  return html`<div class="grid gap-2">
+    ${!readOnly&&html`<div class="flex flex-wrap items-center gap-2">
+      <span class="flex-1 min-w-[200px]"><input id="map-q" class="field field-sm" style=${fs} placeholder="Find an address, or paste coordinates" value=${q} onInput=${e=>setQ(e.target.value)}
+        onKeyDown=${e=>{if(e.key==='Enter'){e.preventDefault();search()}}} aria-label="Find an address on the map"/></span>
+      <button type="button" class="btn" style=${{height:30}} onClick=${search} disabled=${searching||!q.trim()}>${searching?'Finding…':'Find'}</button>
+      <span class="text-[12px] text-muted ml-2">Click the map to drop a</span>
+      <select id="map-type" class="field field-sm w-auto" style=${{height:30,fontSize:12.5}} value=${addType} onChange=${e=>setAddType(e.target.value)} aria-label="Type of pin to drop">
+        ${PIN_TYPES.map(t=>html`<option key=${t.id} value=${t.id}>${t.label}</option>`)}</select>
+    </div>`}
+    <div class="relative rounded-lg border border-line overflow-hidden" style=${{height}}>
+      <div ref=${box} class="absolute inset-0" style=${{background:'var(--sunken)'}}></div>
+      <div class="absolute right-2 top-2 z-[1000] flex gap-1">
+        <button type="button" class="btn bg-surface" style=${{height:28,fontSize:12}} onClick=${()=>setSat(s=>!s)}>${sat?'Street map':'Satellite'}</button>
+        ${(pins||[]).length>0&&html`<button type="button" class="btn bg-surface" style=${{height:28,fontSize:12}} onClick=${fit}>Show all pins</button>`}
+      </div>
+      ${tileErr&&html`<div class="absolute left-2 bottom-6 right-2 z-[1000] text-[11.5px] px-2 py-1 rounded bg-surface border border-line text-muted">Some map tiles didn’t load here. Pins and their Google Maps links still work.</div>`}
+    </div>
+    ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--warn)'}}>${err}</div>`}
+    ${!readOnly&&html`<div class="flex flex-wrap items-center gap-2">
+      <span class="flex-1 min-w-[220px]"><input id="map-paste" class="field field-sm" style=${fs} placeholder="…or paste a Google Maps link to drop a pin there" value=${paste} onInput=${e=>setPaste(e.target.value)}
+        onKeyDown=${e=>{if(e.key==='Enter'){e.preventDefault();addPasted()}}} aria-label="Google Maps link"/></span>
+      <button type="button" class="btn" style=${{height:30}} onClick=${addPasted} disabled=${!paste.trim()}>Add pin</button>
+    </div>`}
+    ${(pins||[]).length>0&&html`<ul class="grid gap-1.5">
+      ${pins.map(p=>html`<li key=${p.id} class="flex flex-wrap items-center gap-2 rounded-md border border-line px-2 py-1.5">
+        <span class="w-3 h-3 rounded-full shrink-0" style=${{background:pinType(p.type).color}}></span>
+        ${readOnly?html`<span class="text-[13px] font-medium">${p.label||pinType(p.type).label}</span><span class="text-[12px] text-muted">${pinType(p.type).label}</span>`
+          :html`<select class="field field-sm w-auto" style=${{height:28,fontSize:12}} value=${p.type} onChange=${e=>setPin(p.id,{type:e.target.value})} aria-label="Pin type">
+              ${PIN_TYPES.map(t=>html`<option key=${t.id} value=${t.id}>${t.label}</option>`)}</select>
+            <span class="flex-1 min-w-[140px]"><input class="field field-sm" style=${{height:28,fontSize:12.5}} value=${p.label||''} placeholder="Label" onInput=${e=>setPin(p.id,{label:e.target.value})} aria-label="Pin label"/></span>`}
+        <span class="mono text-[11px] text-faint">${(+p.lat).toFixed(5)}, ${(+p.lng).toFixed(5)}</span>
+        <a class="text-[12px] font-medium underline underline-offset-2" style=${{color:'var(--accent)'}} href=${gmapsLink(p)} target="_blank" rel="noopener">Google Maps</a>
+        ${!readOnly&&html`<button type="button" class="w-6 h-6 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>onChange(pins.filter(x=>x.id!==p.id))} aria-label=${'Remove pin '+(p.label||'')}>${Icon.x}</button>`}
+      </li>`)}</ul>`}
+  </div>`;
+}
+
+/* ---------- the plan form ---------- */
+function PlanCard({id,title,sub,children,right}){
+  return html`<section id=${id} class="panel p-4 grid gap-3 scroll-mt-4" aria-labelledby=${id+'-t'}>
+    <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1"><h3 id=${id+'-t'} class="font-display text-[15px] font-semibold">${title}</h3>${sub&&html`<span class="text-[12px] text-muted">${sub}</span>`}<span class="flex-1"></span>${right}</div>
+    ${children}
+  </section>`;
+}
+function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShifts,onAddImg,onDelImg,onQuick,onSteps}){
+  const [p,setP]=useState(plan);const dirty=useRef(false);const pRef=useRef(p);pRef.current=p;
+  const [editPast,setEditPast]=useState(false);   /* shifts before today are locked unless this is ticked */
+  const [quickSetup,setQuickSetup]=useState(false);
+  const [stepsSetup,setStepsSetup]=useState(null);   /* which shift's method quick-adds are being edited */   /* editing the quick-add buttons and their default suppliers */
+  useEffect(()=>{setP(plan);dirty.current=false},[plan.id]);
+  /* pick up changes made elsewhere (e.g. sent to the schedule) when nothing is waiting to save */
+  useEffect(()=>{if(!dirty.current)setP(plan)},[plan]);
+  /* autosave a second after the last change, and when leaving the plan */
+  useEffect(()=>{if(!dirty.current)return;const t=setTimeout(()=>{save(pRef.current);dirty.current=false},900);return()=>clearTimeout(t)},[p]);
+  useEffect(()=>()=>{if(dirty.current)save(pRef.current)},[plan.id]);
+  /* seal crew is per shift now: older plans had one set of details for the whole job */
+  useEffect(()=>{const sl=plan.seal||{};if(!(num(sl.sealArea)||num(sl.tackArea)||sl.onSite))return;
+    set(x=>{const n=planDates(x,data).length;const arr=[...(x.shiftPlans||[])];while(arr.length<n)arr.push({lines:[{}]});
+      return {seal:{},shiftPlans:arr.map(sp=>sp&&sp.seal?sp:{...(sp||{}),seal:{on:true,onSite:sl.onSite||'',area:num(sl.sealArea)||num(sl.tackArea)||''}})}})},[plan.id]);
+  /* subcontractors are for the whole job now: move any added to a single shift (older plans) into the job list */
+  useEffect(()=>{if(!(plan.shiftPlans||[]).some(sp=>(sp&&sp.subs||[]).some(subHas)))return;
+    set(x=>{const js=[...(x.jobSubs||[])];const key=s=>[s.name,s.info,s.time].map(v=>(v||'').trim().toLowerCase()).join('|');
+      (x.shiftPlans||[]).forEach(sp=>(sp&&sp.subs||[]).filter(subHas).forEach(s=>{if(!js.some(o=>key(o)===key(s)))js.push({...s})}));
+      return {jobSubs:js,shiftPlans:(x.shiftPlans||[]).map(sp=>{if(!sp)return sp;const {subs,...r}=sp;return r})}})},[plan.id]);
+  const set=patch=>{dirty.current=true;setP(x=>({...x,...(typeof patch==='function'?patch(x):patch),updatedAt:Date.now()}))};
+  const bk=planBooking(data,p);
+  const crew=bk?data.resources.find(c=>c.id===bk.resourceId):null;
+  const seal=isSealCrew(crew);const job=bk?data.jobs.find(j=>j.id===bk.jobId):null;const night=bk?bk.shift==='night':p.shift==='night';
+  const dates=planDates(p,data);const conf=planConflicts(data,p);
+  /* jobs on the schedule that can be planned: crew job bookings from a fortnight ago on */
+  const bookable=data.blocks.filter(b=>b.kind==='job'&&(b.end>=iso(addDays(TODAY,-14))||b.id===p.bookingId)).sort((a,c)=>a.start<c.start?-1:a.start>c.start?1:0);
+  const bLabel=b=>{const j=data.jobs.find(x=>x.id===b.jobId);const c=data.resources.find(r=>r.id===b.resourceId);return `${j?jobLabel(j):'Job'} · ${c?c.name:''} · ${fmtShort(parse(b.start))}${b.end!==b.start?'–'+fmtShort(parse(b.end)):''}${b.shift==='night'?' (night)':''}`};
+  const pickBooking=id=>{const b=data.blocks.find(x=>x.id===id);if(!b){set({bookingId:''});return}const j=data.jobs.find(x=>x.id===b.jobId)||{};
+    set(x=>({bookingId:b.id,jobId:b.jobId,crewId:b.resourceId,title:x.title||j.name||'',jobName:j.name||'',customer:j.customer||'',address:x.address||b.address||j.address||'',
+      quoteNo:x.quoteNo||b.quoteNo||'',projectNo:x.projectNo||b.projectNo||j.projectNo||'',supervisor:x.supervisor||b.supervisor||'',siteContact:x.siteContact||b.siteContact||'',sitePhone:x.sitePhone||b.sitePhone||'',
+      machineIds:(x.machineIds||[]).length?x.machineIds:[...(b.plantIds||[])]}))};
+  const fs={height:32,fontSize:13};const fsm={height:30,fontSize:13};
+  /* crew start: the plan's on-site time, else the start time on the booking's first shift */
+  const crewStart=p.crewOnSite||(bk&&dates[0]&&((bk.shiftData||{})[dates[0]]||{}).start)||'';
+  const MIXES=seal?sealTypesOf(data):mixTypesOf(data);const BINDS=seal?sealBindersOf(data):bindersOf(data);
+  const sps=dates.map((_,i)=>(p.shiftPlans||[])[i]||{lines:[{}]});
+  const setSP=(i,patch)=>set(x=>{const arr=[...(x.shiftPlans||[])];while(arr.length<=i)arr.push({lines:[{}]});arr[i]={...arr[i],...patch};return {shiftPlans:arr}});
+  const setLine=(i,j,patch)=>{const ls=[...(sps[i].lines||[{}])];ls[j]={...ls[j],...patch};setSP(i,{lines:ls})};
+  const totals=new Map();sps.forEach(sp=>(sp.lines||[]).filter(lineHas).forEach(l=>{const k=mixLabel(l);const t=totals.get(k)||{t:0,a:0};t.t+=planTonnes(l);t.a+=num(l.area);totals.set(k,t)}));
+  const totalT=[...totals.values()].reduce((a,v)=>a+v.t,0);
+  const setTr=(i,patch)=>setSP(i,{trucking:{...spTruck(p,sps[i]),...patch}});
+  const addPics=async(i,files)=>{for(const f of [...(files||[])]){try{const r=await shrinkImage(f);const img={id:'img'+uid(),planId:p.id,name:f.name||'',...r};onAddImg(img);
+      set(x=>{const arr=[...(x.shiftPlans||[])];while(arr.length<=i)arr.push({lines:[{}]});arr[i]={...arr[i],images:[...(arr[i].images||[]),img.id]};return {shiftPlans:arr}})}catch(e){alert(e.message||'Couldn’t add that picture.')}}};
+  const toggleIn=(arr,v)=>arr.includes(v)?arr.filter(x=>x!==v):[...arr,v];
+  const machines=data.resources.filter(r=>r.type==='machine');const picked=new Set(p.machineIds||[]);
+  const subRow=(list,onList,prefix)=>html`<div class="grid gap-1.5">
+    ${list.map((s,j)=>html`<div key=${j} class="grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.2fr_1.2fr_170px_28px] items-center">
+      <${Combo} id=${`${prefix}-n${j}`} style=${fsm} placeholder="Subcontractor, e.g. BCM" value=${s.name||''} onChange=${v=>onList(list.map((x,k)=>k===j?{...x,name:v}:x))} label="Subcontractor" options=${subCosOf(data)}/>
+      <${Combo} id=${`${prefix}-i${j}`} style=${fsm} placeholder="Service, e.g. 2m profiler" value=${s.info||''} onChange=${v=>onList(list.map((x,k)=>k===j?{...x,info:v}:x))} label="Service" options=${servicesFor(data,s.name)}/>
+      <${TimeSelect} id=${`${prefix}-t${j}`} label="Start time" value=${s.time||''} pm=${night} onChange=${v=>onList(list.map((x,k)=>k===j?{...x,time:v}:x))}/>
+      <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>onList(list.filter((_,k)=>k!==j))} aria-label="Remove subcontractor">${Icon.x}</button>
+    </div>`)}
+    <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>onList([...list,{time:crewStart}])}>${Icon.plus} Add subcontractor</button></div>
+  </div>`;
+  const nav=[['pl-site','Site'],['pl-map','Map'],['pl-shifts','Shifts'],['pl-machines','Machines'],['pl-subs','Subcontractors'],['pl-safety','Safety'],['pl-notes','Notes']];
+  const machConf=Object.keys(conf.machines).length;
+  return html`<div class="grid gap-3">
+    <div class="panel px-4 py-3 grid gap-2 sticky top-0 z-10">
+      <div class="flex flex-wrap items-center gap-2">
+        <input id="pl-title" class="field font-display font-semibold flex-1 min-w-[220px]" style=${{height:36,fontSize:16}} placeholder="Plan name, e.g. Discovery Drive deep lift" value=${p.title||''} onInput=${e=>set({title:e.target.value})} aria-label="Plan name"/>
+        <select id="pl-status" class="field field-sm w-auto" style=${fs} value=${p.status||'draft'} onChange=${e=>set({status:e.target.value})} aria-label="Status">
+          <option value="draft">Draft</option><option value="ready">Ready to schedule</option><option value="scheduled">On the schedule</option></select>
+        <button type="button" class="btn" onClick=${()=>{save(pRef.current);dirty.current=false;onPdf(pRef.current)}}>${Icon.download} Plan PDF</button>
+        ${p.bookingId&&data.blocks.some(b=>b.id===p.bookingId)&&html`<button type="button" class="btn" onClick=${()=>{save(pRef.current);dirty.current=false;onOpenBooking(p.bookingId)}}>Open booking</button>`}
+        <button type="button" class="btn btn-primary" disabled=${!bk} onClick=${()=>{save(pRef.current);dirty.current=false;onSchedule(pRef.current)}}>${p.appliedAt?'Update the schedule':'Send to schedule'}</button>
+      </div>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+        ${nav.map(([h,l])=>html`<a key=${h} href=${'#'+h} class="text-muted hover:text-ink underline-offset-2 hover:underline" onClick=${e=>{e.preventDefault();const el=document.getElementById(h);if(el)el.scrollIntoView({behavior:'smooth',block:'start'})}}>${l}</a>`)}
+        <span class="flex-1"></span>
+        ${(machConf>0||conf.crew.length>0)&&html`<span class="font-semibold" style=${{color:'var(--warn)'}}>${[machConf&&`${machConf} machine${machConf===1?'':'s'} clash`,conf.crew.length&&'crew already booked'].filter(Boolean).join(' · ')}</span>`}
+        <span class="text-faint">${p.appliedAt?`Sent to schedule ${agoText(p.appliedAt)}`:'Not on the schedule yet'}</span>
+      </div>
+    </div>
+
+    <${PlanCard} id="pl-site" title="Job & site" sub="From the site inspection">
+      <label class="grid gap-1"><span class="label">Job on the schedule</span>
+        <select id="pl-booking" class="field" style=${fs} value=${p.bookingId||''} onChange=${e=>pickBooking(e.target.value)}>
+          <option value="">Pick the job booking…</option>
+          ${bookable.map(b=>{const other=plansOf(data).find(x=>x.id!==p.id&&x.bookingId===b.id);return html`<option key=${b.id} value=${b.id}>${bLabel(b)}${other?' — already has a plan':''}</option>`})}</select>
+        <span class="text-[11.5px] text-faint">Add the job to the schedule first. Its start date, crew and day/night come from the booking and are changed in the schedule.</span></label>
+      ${!bk?html`<div class="text-[13px] text-muted rounded-lg border border-dashed border-line px-3 py-4 text-center">Pick the job from the schedule to start planning it.</div>`:html`
+      <div class="grid gap-3 sm:grid-cols-4 rounded-lg bg-sunken px-3 py-2.5">
+        <div><div class="label">Crew</div><div class="text-[13.5px] font-semibold">${crew?crew.name:'—'}</div></div>
+        <div><div class="label">Works</div><div class="text-[13.5px] font-semibold">${night?'Night':'Day'}</div></div>
+        <div><div class="label">First shift</div><div class="text-[13.5px] font-semibold">${WD[parse(bk.start).getDay()]} ${fmtShort(parse(bk.start))}</div></div>
+        <label class="grid gap-0.5"><span class="label">Number of shifts</span>
+          <input id="pl-shifts" type="number" min="1" max="60" class="field field-sm mono w-[90px]" style=${{height:30,fontSize:13}} value=${dates.length||''}
+            onChange=${e=>{const n=Math.max(1,Math.min(60,parseInt(e.target.value)||1));onShifts(bk.id,n)}} title="Changes the booking's end date on the schedule"/></label>
+      </div>
+      <div class="text-[12.5px] text-muted">${dates.length} shift${dates.length===1?'':'s'}: ${dates.map(k=>`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`).join(' · ')}</div>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <label class="grid gap-1"><span class="label">Job location (address)</span>
+          <input id="pl-addr" class="field" style=${fs} placeholder="Street, suburb" value=${p.address||''} onInput=${e=>set({address:e.target.value})}/></label>
+        <label class="grid gap-1"><span class="label">Access to site</span>
+          <input id="pl-access" class="field" style=${fs} placeholder="e.g. via Diamond Jubilee Way" value=${p.access||''} onInput=${e=>set({access:e.target.value})}/></label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="grid gap-1"><span class="label">Quote number</span><input id="pl-quote" class="field mono" style=${fs} value=${p.quoteNo||''} onInput=${e=>set({quoteNo:e.target.value})}/></label>
+          <label class="grid gap-1"><span class="label">Project number</span><input id="pl-proj" class="field mono" style=${fs} value=${p.projectNo||''} onInput=${e=>set({projectNo:e.target.value})}/></label>
+        </div>
+        <label class="grid gap-1"><span class="label">Crew on site</span>
+          <${TimeSelect} id="pl-onsite" label="Crew on site time" value=${p.crewOnSite||''} pm=${night} onChange=${v=>set(x=>{const was=x.crewOnSite||crewStart;return {crewOnSite:v,jobSubs:(x.jobSubs||[]).map(s=>!s.time||s.time===was?{...s,time:v}:s)}})}/></label>
+      </div>`}
+      ${conf.crew.length>0&&html`<div class="text-[12.5px] rounded-md px-2.5 py-1.5" style=${{background:'hsl(38 90% var(--blk-l))',color:'hsl(30 60% var(--blk-fg-l))'}}>${crew?crew.name:'The crew'} is already booked: ${conf.crew.join('; ')}</div>`}
+      <div class="h-px bg-line"></div>
+      <div class="grid gap-3 sm:grid-cols-3">
+        <label class="grid gap-1"><span class="label">Supervisor</span>
+          <${Combo} id="pl-super" className="field" style=${fs} label="Supervisor" value=${p.supervisor||''} onChange=${v=>set({supervisor:v})} options=${data.resources.filter(r=>r.type==='person').map(x=>x.name)}/></label>
+        <label class="grid gap-1"><span class="label">Site contact</span><input id="pl-contact" class="field" style=${fs} value=${p.siteContact||''} onInput=${e=>set({siteContact:e.target.value})}/></label>
+        <label class="grid gap-1"><span class="label">Contact phone</span><input id="pl-phone" type="tel" class="field mono" style=${fs} value=${p.sitePhone||''} onInput=${e=>set({sitePhone:e.target.value})}/></label>
+        <label class="grid gap-1"><span class="label">Site UHF channel</span><input id="pl-uhf" class="field mono" style=${fs} placeholder="e.g. 12" value=${p.uhf||''} onInput=${e=>set({uhf:e.target.value})}/></label>
+        <label class="grid gap-1"><span class="label">Asphalt supplied from</span>
+          <select id="pl-supply" class="field" style=${fs} value=${p.supply||'AFA'} onChange=${e=>set({supply:e.target.value})}>
+            ${['AFA',...EXBIN_SUPPLIERS,...(p.supply&&p.supply!=='AFA'&&!EXBIN_SUPPLIERS.includes(p.supply)?[p.supply]:[])].map(o=>html`<option key=${o} value=${o}>${o==='AFA'?'AFA asphalt plant':o+' (exbin)'}</option>`)}</select></label>
+        <label class="inline-flex items-center gap-2 text-[13px] cursor-pointer self-end h-[32px]"><input id="pl-ind" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!p.induction} onChange=${e=>set({induction:e.target.checked})}/>Site induction required</label>
+      </div>
+    <//>
+
+    ${bk&&html`
+    <${PlanCard} id="pl-map" title="Map" sub="Pin the job, site access, drop-off points and the dump site">
+      <${PlanMap} pins=${p.pins||[]} onChange=${pins=>set({pins})}/>
+    <//>
+
+    <${PlanCard} id="pl-shifts" right=${html`<span class="inline-flex flex-wrap items-center gap-4">
+      ${dates.some(k=>k<iso(TODAY))&&html`<label class="inline-flex items-center gap-1.5 text-[13px] cursor-pointer" title="Shifts before today are locked so they aren't changed by accident"><input id="pl-editpast" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${editPast} onChange=${e=>setEditPast(e.target.checked)}/><span class=${editPast?'font-semibold':'text-muted'}>Edit past shifts</span></label>`}</span>`} title="Shift by shift" sub=${dates.length?`${fmtN(totalT)} t ${seal?'':'asphalt '}over ${dates.length} shift${dates.length===1?'':'s'}`:'Set the first shift and number of shifts above'}>
+      ${totals.size>0&&html`<div class="flex flex-wrap gap-1.5">${[...totals.entries()].map(([k,v])=>html`<span key=${k} class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] bg-sunken border border-line">
+        <span class="font-semibold mono">${k}</span><span class="text-muted tnum">${fmtN(v.t)} t · ${fmtN(v.a)} m²</span></span>`)}</div>`}
+      ${dates.map((k,i)=>{const sp=sps[i];const lines=sp.lines&&sp.lines.length?sp.lines:[{}];const st=lines.reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);
+        const vol=num(sp.profArea)&&num(sp.profDepth)?num(sp.profArea)*num(sp.profDepth)/1000:0;
+        const lockedK=k<iso(TODAY)&&!editPast;
+        return html`<fieldset key=${k} disabled=${lockedK} class="rounded-lg border border-line m-0 p-0 min-w-0" style=${lockedK?{opacity:.55}:null} title=${lockedK?'Past shift: tick "Edit past shifts" to change it':undefined}>
+          <div class="flex flex-wrap items-center gap-2 px-3 py-2 bg-sunken border-b border-line rounded-t-lg">
+            <span class="font-semibold text-[13.5px]">${night?'Night':'Shift'} ${i+1}</span><span class="mono text-[12px] text-muted">${WD[parse(k).getDay()]} ${fmtShort(parse(k))}</span>
+            ${lockedK&&html`<span class="text-[11px] font-semibold uppercase tracking-wide text-muted">Past shift</span>`}
+            <span class="text-[12px] text-muted tnum">${fmtN(st)} t${!seal&&spRounds(p,sp)?` · ${fmtN(spRounds(p,sp))} rounds`:''}</span>
+            <span class="flex-1"></span>
+            ${i>0&&html`<button type="button" class="text-[12px] font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>{const pv=sps[i-1];
+                const have=new Set((sp.images||[]).map(id=>planImgsOf(data).find(x=>x.id===id)?.data).filter(Boolean));
+                const copies=(pv.images||[]).map(id=>planImgsOf(data).find(x=>x.id===id)).filter(im=>im&&!have.has(im.data)).map(im=>({...im,id:'img'+uid()}));
+                copies.forEach(im=>onAddImg(im));
+                setSP(i,{lines:(pv.lines||[]).map(l=>({...l})),profiling:spProf(p,pv),profArea:pv.profArea,profDepth:pv.profDepth,images:[...(sp.images||[]),...copies.map(im=>im.id)],sections:pv.sections,notes:pv.notes,seal:pv.seal?{...pv.seal}:undefined,trucking:{...spTruck(p,pv),types:[...(spTruck(p,pv).types||[])]}})}}>Same as ${night?'night':'shift'} ${i}</button>`}
+          </div>
+          <div class="p-3 grid gap-3">
+            <label class="grid gap-1"><span class="label">Area / sections this shift</span>
+              <input id=${`pl-s${i}-sec`} class="field field-sm" style=${fsm} placeholder="e.g. Main run section 1, half of the roundabout" value=${sp.sections||''} onInput=${e=>setSP(i,{sections:e.target.value})}/></label>
+            ${!seal&&html`<label class="inline-flex items-center gap-2 text-[13px] cursor-pointer w-max"><input id=${`pl-s${i}-prof`} type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${spProf(p,sp)} onChange=${e=>setSP(i,{profiling:e.target.checked})}/>Profiling required this ${night?'night':'shift'}</label>`}
+            ${!seal&&spProf(p,sp)&&html`<div class="flex flex-wrap items-end gap-3">
+              <label class="grid gap-1"><span class="label">Profiling m²</span><input id=${`pl-s${i}-pa`} type="number" min="0" step="any" class="field field-sm mono w-[110px]" style=${fsm} value=${sp.profArea??''} onInput=${e=>setSP(i,{profArea:e.target.value})}/></label>
+              <label class="grid gap-1"><span class="label">Profile depth mm</span><input id=${`pl-s${i}-pd`} type="number" min="0" step="any" class="field field-sm mono w-[110px]" style=${fsm} value=${sp.profDepth??''} onInput=${e=>setSP(i,{profDepth:e.target.value})}/></label>
+              ${vol>0&&html`<span class="text-[12px] text-muted pb-2 tnum">≈ ${fmtN(Math.round(vol*10)/10)} m³ to profile</span>`}
+            </div>`}
+            ${!seal&&html`<label class="inline-flex items-center gap-2 text-[13px] cursor-pointer w-max"><input id=${`pl-s${i}-seal`} type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${spSeal(sp)} onChange=${e=>setSP(i,{seal:{...(sp.seal||{}),on:e.target.checked}})}/>Seal crew needed this ${night?'night':'shift'}</label>`}
+            ${!seal&&spSeal(sp)&&html`<div class="flex flex-wrap items-end gap-3">
+              <label class="grid gap-1"><span class="label">Seal crew on site</span><${TimeSelect} id=${`pl-s${i}-son`} label="Seal crew on site" pm=${night} value=${sp.seal.onSite||''} onChange=${v=>setSP(i,{seal:{...sp.seal,onSite:v}})}/></label>
+              <label class="grid gap-1"><span class="label">m²</span><input id=${`pl-s${i}-sarea`} type="number" min="0" step="any" class="field field-sm mono w-[110px]" style=${fsm} value=${sp.seal.area??''} onInput=${e=>setSP(i,{seal:{...sp.seal,area:e.target.value}})}/></label>
+              <label class="grid gap-1 min-w-[170px] flex-1 max-w-[240px]"><span class="label">Seal type</span><${Combo} id=${`pl-s${i}-stype`} style=${fsm} label="Seal type" placeholder="e.g. 10mm Seal" value=${slType(sp.seal)}
+                options=${sealTypesOf(data)} onChange=${v=>{const sl=sp.seal;const was=sealDefBinder(data,slType(sl));const keep=(sl.binder||'').trim()&&sl.binder!==was;
+                  const {product,...rest}=sl;setSP(i,{seal:{...rest,type:v,binder:keep?sl.binder:(sealDefBinder(data,v)||sl.binder||'')}})}}/></label>
+              <label class="grid gap-1 min-w-[140px] flex-1 max-w-[200px]"><span class="label">Binder</span><${Combo} id=${`pl-s${i}-sbind`} style=${fsm} label="Seal binder" placeholder="e.g. CRS60" value=${sp.seal.binder||''}
+                options=${sealBindersOf(data)} onChange=${v=>setSP(i,{seal:{...sp.seal,binder:v}})}/></label>
+            </div>`}
+            <div class="grid gap-1.5">
+              <div class="hidden sm:grid gap-2 grid-cols-[1.1fr_1fr_90px_80px_90px_28px]"><span class="label">${seal?'Seal type':'Mix'}</span><span class="label">Binder</span><span class="label">Area m²</span><span class="label">${seal?'':'Depth mm'}</span><span class="label">${seal?'':'Tonnes'}</span><span></span></div>
+              ${lines.map((l,j)=>html`<div key=${j} class="grid gap-2 grid-cols-2 sm:grid-cols-[1.1fr_1fr_90px_80px_90px_28px] items-center">
+                <select class="field field-sm mono" style=${fsm} value=${l.type||''} onChange=${e=>{const v=e.target.value;const b=binderForProduct(data,crew,v);setLine(i,j,b&&!l.binder?{type:v,binder:b}:{type:v})}} aria-label="Mix">
+                  <option value="">${seal?'Seal':'Mix'}</option>${MIXES.map(m=>html`<option key=${m} value=${m}>${m}</option>`)}${l.type&&!MIXES.includes(l.type)&&html`<option value=${l.type}>${l.type}</option>`}</select>
+                <select class="field field-sm mono" style=${fsm} value=${l.binder||''} onChange=${e=>setLine(i,j,{binder:e.target.value})} aria-label="Binder">
+                  <option value="">Binder</option>${BINDS.map(m=>html`<option key=${m} value=${m}>${m}</option>`)}${l.binder&&!BINDS.includes(l.binder)&&html`<option value=${l.binder}>${l.binder}</option>`}</select>
+                <input type="number" min="0" step="any" class="field field-sm mono" style=${fsm} placeholder="m²" value=${l.area??''} onInput=${e=>setLine(i,j,{area:e.target.value})} aria-label="Area"/>
+                ${seal?html`<span></span>`:html`<input type="number" min="0" step="any" class="field field-sm mono" style=${fsm} placeholder="mm" value=${l.depth??''} onInput=${e=>setLine(i,j,{depth:e.target.value})} aria-label="Depth"/>`}
+                ${seal?html`<span></span>`:html`<input type="number" min="0" step="any" class="field field-sm mono" style=${fsm} placeholder="t" title="Works out from area × depth × 2.4. Type a number to set it yourself."
+                  value=${l._tManual?(l.tonnes??''):(lineHas(l)&&planTonnes(l)?planTonnes(l):'')} onInput=${e=>setLine(i,j,e.target.value===''?{tonnes:'',_tManual:false}:{tonnes:e.target.value,_tManual:true})} aria-label="Tonnes"/>`}
+                <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>setSP(i,{lines:lines.length>1?lines.filter((_,x)=>x!==j):[{}]})} aria-label="Remove line">${Icon.x}</button>
+              </div>`)}
+              <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>setSP(i,{lines:[...lines,{}]})}>${Icon.plus} Add another ${seal?'seal':'mix'}</button></div>
+            </div>
+            ${!seal&&(()=>{const tr=spTruck(p,sp);const rd=spRounds(p,sp);return html`<div class="grid gap-2 rounded-lg border border-line px-3 py-2.5">
+              <div class="flex flex-wrap items-end gap-3">
+                <label class="grid gap-1"><span class="label">Tonnes per round</span><input id=${`pl-s${i}-round`} type="number" min="0" step="any" class="field field-sm mono w-[110px]" style=${fsm} placeholder="e.g. 185" value=${tr.perRound??''} onInput=${e=>setTr(i,{perRound:e.target.value})}/></label>
+                <label class="grid gap-1"><span class="label">Start loading trucks</span><span style=${{width:176}}><${TimeSelect} id=${`pl-s${i}-load`} label="Start loading trucks" value=${tr.loadStart||''} pm=${night} onChange=${v=>setTr(i,{loadStart:v})}/></span></label>
+                <div class="grid gap-1"><span class="label">Rounds</span><div class="h-[30px] flex items-center text-[14px] font-semibold tnum">${rd?`${fmtN(rd)} round${rd===1?'':'s'}`:html`<span class="text-[12px] font-normal text-muted">${num(tr.perRound)?'Add tonnes above':'Set tonnes per round'}</span>`}</div></div>
+                <div class="grid gap-1"><span class="label">Truck sizes</span><div class="h-[30px] flex items-center gap-3 text-[13px]">
+                  ${PLAN_TRUCK_TYPES.map(t=>html`<label key=${t} class="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${(tr.types||[]).includes(t)} onChange=${()=>setTr(i,{types:toggleIn(tr.types||[],t)})}/>${t}</label>`)}</div></div>
+              </div>
+              <input id=${`pl-s${i}-trnote`} class="field field-sm" style=${fsm} placeholder="Trucking note, e.g. Trucking will be adjusted if needed" value=${tr.note||''} onInput=${e=>setTr(i,{note:e.target.value})} aria-label="Trucking note"/>
+            </div>`})()}
+            <div class="grid gap-1.5"><span class="label">Pictures</span>
+              <div class="flex flex-wrap gap-2">
+                ${(sp.images||[]).map(id=>{const im=planImgsOf(data).find(x=>x.id===id);return im?html`<div key=${id} class="relative w-[120px] h-[90px] rounded-md overflow-hidden border border-line bg-sunken">
+                    <img src=${im.data} alt=${im.name||'Shift picture'} class="w-full h-full object-cover"/>
+                    <button type="button" class="absolute top-1 right-1 w-6 h-6 inline-flex items-center justify-center rounded bg-surface/90 text-muted hover:text-ink border border-line"
+                      onClick=${()=>{setSP(i,{images:(sp.images||[]).filter(x=>x!==id)});onDelImg(id)}} aria-label="Remove picture">${Icon.x}</button></div>`:null})}
+                <label class="w-[120px] h-[90px] rounded-md border-2 border-dashed border-line flex flex-col items-center justify-center gap-1 text-[12px] text-muted cursor-pointer hover:bg-sunken hover:text-ink">
+                  ${Icon.plus}<span>Add picture</span>
+                  <input id=${`pl-s${i}-pic`} type="file" accept="image/*" multiple class="sr-only" onChange=${e=>{const fl=[...e.target.files];e.target.value='';addPics(i,fl)}}/></label>
+              </div>
+              <span class="text-[11.5px] text-faint">Marked-up maps, photos of the site… They go on the plan PDF under this ${night?'night':'shift'}.</span></div>
+            <label class="grid gap-1"><span class="label">Method / notes for the crew</span>
+              <textarea id=${`pl-s${i}-notes`} class="field" style=${{height:'auto',minHeight:70,padding:'8px 10px',resize:'vertical',fontSize:13}} rows="3" placeholder="One step per line" value=${sp.notes||''} onInput=${e=>setSP(i,{notes:e.target.value})}></textarea></label>
+            <div class="flex flex-wrap items-center gap-1.5">
+              ${planStepsOf(data).map(t=>(t||'').trim()).filter(t=>t&&!(sp.notes||'').includes(t)).map(t=>html`<button key=${t} type="button" class="text-[11.5px] rounded-full border border-line px-2 py-0.5 text-muted hover:text-ink hover:bg-sunken" onClick=${()=>setSP(i,{notes:((sp.notes||'').trim()?(sp.notes||'').trimEnd()+'\n':'')+t})}>+ ${t}</button>`)}
+              ${onSteps&&html`<button id=${`pl-s${i}-steps-edit`} type="button" class="ml-1 text-[11.5px] font-medium inline-flex items-center gap-1 text-muted hover:text-ink underline underline-offset-2" aria-expanded=${stepsSetup===i} onClick=${()=>setStepsSetup(stepsSetup===i?null:i)}>${Icon.gear} ${stepsSetup===i?'Done':'Edit quick adds'}</button>`}
+            </div>
+            ${onSteps&&stepsSetup===i&&(st=>html`<div class="rounded-lg border border-line bg-sunken p-3 grid gap-2">
+              <div class="text-[12px] text-muted">Quick-add steps for the method / notes, on every shift of every plan.</div>
+              ${st.map((t,j)=>html`<div key=${j} class="grid grid-cols-[1fr_28px] gap-2 items-center">
+                <input id=${`pl-step${j}`} class="field field-sm" style=${fsm} aria-label=${'Quick-add step '+(j+1)} placeholder="e.g. Sweep the area before tacking" value=${t} onInput=${e=>onSteps(st.map((x,k)=>k===j?e.target.value:x))}/>
+                <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-surface" onClick=${()=>onSteps(st.filter((_,k)=>k!==j))} aria-label=${'Remove quick-add step '+(j+1)}>${Icon.x}</button></div>`)}
+              <button id="pl-step-add" type="button" class="justify-self-start text-[12px] font-medium inline-flex items-center gap-1 text-muted hover:text-ink" onClick=${()=>onSteps([...st,''])}>${Icon.plus} Add a quick-add step</button>
+            </div>`)(planStepsOf(data))}
+          </div>
+        </fieldset>`})}
+      ${!seal&&sps.some(spSeal)&&(sc=>html`<div class="flex flex-wrap items-center gap-2 text-[13px] rounded-lg border border-line bg-sunken px-3 py-2">
+        <label for="pl-seal-crew" class="font-medium">Seal crew</label>
+        ${sealCrewsOf(data).length?html`<select id="pl-seal-crew" class="field field-sm w-auto" style=${fsm} value=${sc?sc.id:''} onChange=${e=>set({sealCrewId:e.target.value})}>
+            ${sealCrewsOf(data).map(c=>html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select>`
+          :html`<span class="text-muted">No crews in the Seal section yet</span>`}
+        <span class="text-[12px] text-muted">Each ticked ${night?'night':'shift'} is booked for this crew when you send the plan to the schedule.</span></div>`)(planSealCrew(data,p))}
+    <//>
+
+    <${PlanCard} id="pl-machines" title="Machines needed" sub=${`${picked.size} selected`}
+      right=${machConf>0&&html`<span class="text-[12px] font-semibold" style=${{color:'var(--warn)'}}>${machConf} clash${machConf===1?'':'es'} on these dates</span>`}>
+      ${machines.length===0?html`<div class="text-[12.5px] text-muted">No machines yet. Add or import them on the Machines screen.</div>`
+        :html`<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">${groupMachines(machines,data).map(g=>html`<div key=${g.key} class="grid gap-1 content-start">
+          <div class="label" style=${{color:'var(--ink)'}}>${g.label}</div>
+          ${g.rows.map(m=>{const c=conf.machines[m.id];return html`<label key=${m.id} class="flex items-start gap-2 rounded-md px-1.5 py-1 cursor-pointer hover:bg-sunken" title=${c?c.join('\n'):''}>
+            <input type="checkbox" class="w-4 h-4 mt-0.5 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} onChange=${()=>set({machineIds:toggleIn(p.machineIds||[],m.id)})}/>
+            <span class="min-w-0"><span class="text-[13px] font-semibold mono">${m.name}</span> <span class="text-[12.5px] text-muted">${m.sub||''}</span>
+              ${c&&html`<span class="block text-[11.5px] font-medium" style=${{color:'var(--warn)'}}>${c[0]}${c.length>1?` (+${c.length-1} more)`:''}</span>`}</span></label>`})}
+        </div>`)}</div>`}
+    <//>
+
+
+    <${PlanCard} id="pl-subs" title="Subcontractors" sub="For the whole job. Added to every shift when you send the plan to the schedule">
+      ${subRow(p.jobSubs||[],v=>set({jobSubs:v}),'pl-js')}
+      <div class="flex flex-wrap items-center gap-1.5">${planQuickOf(data).filter(q=>(q.label||'').trim()).map((q,j)=>html`<button key=${j} type="button" class="text-[11.5px] rounded-full border border-line px-2 py-0.5 text-muted hover:text-ink hover:bg-sunken"
+          title=${q.supplier?`Adds ${q.label} from ${q.supplier}`:`Adds ${q.label}`} onClick=${()=>set({jobSubs:[...(p.jobSubs||[]),{name:(q.supplier||'').trim(),info:q.label.trim(),time:crewStart}]})}>+ ${q.label}${q.supplier?html` <span class="text-faint">· ${q.supplier}</span>`:''}</button>`)}
+        ${onQuick&&html`<button id="pl-quick-setup" type="button" class="ml-1 text-[11.5px] font-medium inline-flex items-center gap-1 text-muted hover:text-ink underline underline-offset-2" aria-expanded=${quickSetup} onClick=${()=>setQuickSetup(!quickSetup)}>${Icon.gear} ${quickSetup?'Done':'Set default suppliers'}</button>`}</div>
+      ${quickSetup&&onQuick&&(ql=>html`<fieldset class="rounded-lg border border-line bg-sunken p-3 grid gap-2 m-0 min-w-0" disabled=${false}>
+        <div class="text-[12px] text-muted">Quick-add buttons for every plan. Pick the supplier each one adds by default; leave it blank to choose each time.</div>
+        ${ql.map((q,j)=>html`<div key=${j} class="grid gap-2 grid-cols-[1fr_1fr_28px] items-center">
+          <input id=${`pl-q${j}-l`} class="field field-sm" style=${fsm} placeholder="Button, e.g. 2m profiler" aria-label="Quick-add button" value=${q.label||''} onInput=${e=>onQuick(ql.map((x,k)=>k===j?{...x,label:e.target.value}:x))}/>
+          <${Combo} id=${`pl-q${j}-s`} style=${fsm} placeholder="Default supplier (optional)" value=${q.supplier||''} label="Default supplier" options=${subCosOf(data)} onChange=${v=>onQuick(ql.map((x,k)=>k===j?{...x,supplier:v}:x))}/>
+          <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-surface" onClick=${()=>onQuick(ql.filter((_,k)=>k!==j))} aria-label=${'Remove quick-add '+(q.label||'')}>${Icon.x}</button></div>`)}
+        <button id="pl-quick-add" type="button" class="justify-self-start text-[12px] font-medium inline-flex items-center gap-1 text-muted hover:text-ink" onClick=${()=>onQuick([...ql,{label:'',supplier:''}])}>${Icon.plus} Add a quick-add button</button>
+      </fieldset>`)(planQuickOf(data))}
+    <//>
+
+
+    <${PlanCard} id="pl-safety" title="Safety & environment">
+      <div class="grid gap-1.5"><span class="label">PPE</span>
+        <div class="flex flex-wrap gap-x-4 gap-y-1.5 text-[13px]">${PLAN_PPE.map(t=>html`<label key=${t} class="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${(p.ppe||[]).includes(t)} onChange=${()=>set({ppe:toggleIn(p.ppe||[],t)})}/>${t}</label>`)}</div>
+        <input class="field field-sm" style=${fsm} placeholder="Other PPE" value=${p.ppeOther||''} onInput=${e=>set({ppeOther:e.target.value})} aria-label="Other PPE"/></div>
+      <div class="grid gap-1.5"><span class="label">Hazards and controls</span>
+        ${(p.hazards||[]).map((h,j)=>html`<div key=${j} class="grid gap-2 grid-cols-[1fr_28px] sm:grid-cols-[1fr_1.6fr_28px] items-start">
+          <input class="field field-sm" style=${fsm} placeholder="Hazard" value=${h.hazard||''} onInput=${e=>set({hazards:p.hazards.map((x,k)=>k===j?{...x,hazard:e.target.value}:x)})} aria-label="Hazard"/>
+          <input class="field field-sm sm:col-start-2" style=${fsm} placeholder="Control" value=${h.control||''} onInput=${e=>set({hazards:p.hazards.map((x,k)=>k===j?{...x,control:e.target.value}:x)})} aria-label="Control"/>
+          <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken row-start-1 col-start-2 sm:col-start-3" onClick=${()=>set({hazards:p.hazards.filter((_,k)=>k!==j)})} aria-label="Remove hazard">${Icon.x}</button></div>`)}
+        <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>set({hazards:[...(p.hazards||[]),{}]})}>${Icon.plus} Add hazard</button></div></div>
+
+    <//>
+
+    <${PlanCard} id="pl-notes" title="Site rules & notes">
+      <div class="grid gap-3 sm:grid-cols-2">
+        <label class="grid gap-1"><span class="label">Traffic control</span><textarea class="field" style=${{height:'auto',minHeight:80,padding:'8px 10px',fontSize:13}} rows="3" placeholder="e.g. Set up as per TGS each night; manage driveways; mark out clean-up area" value=${p.traffic||''} onInput=${e=>set({traffic:e.target.value})}></textarea></label>
+        <label class="grid gap-1"><span class="label">Leave the site clean</span><textarea class="field" style=${{height:'auto',minHeight:80,padding:'8px 10px',fontSize:13}} rows="3" placeholder="e.g. No rubbish left on site; gear parked neatly in the same place each night; sticky stomps down" value=${p.cleanup||''} onInput=${e=>set({cleanup:e.target.value})}></textarea></label>
+      </div>
+      <label class="grid gap-1"><span class="label">Other notes</span><textarea class="field" style=${{height:'auto',minHeight:70,padding:'8px 10px',fontSize:13}} rows="3" value=${p.notes||''} onInput=${e=>set({notes:e.target.value})}></textarea></label>
+    <//>`}
+    <div class="flex justify-end px-1"><button type="button" class="text-[12px] font-medium underline underline-offset-2" style=${{color:'var(--bad)'}} onClick=${()=>onDelete(p.id)}>Delete this plan</button></div>
+  </div>`;
+}
+
+/* ---------- the Planning screen ---------- */
+function PlanningScreen({data,setData,notify,onOpenBooking}){
+  const plans=plansOf(data);
+  const [sel,setSel]=useState(()=>{try{return localStorage.getItem(KEY+':plan')||''}catch(e){return ''}});
+  const [q,setQ]=useState('');const [confirmDel,setConfirmDel]=useState(null);const [sched,setSched]=useState(null);
+  const cur=plans.find(p=>p.id===sel)||null;
+  const pick=id=>{setSel(id);try{localStorage.setItem(KEY+':plan',id)}catch(e){}};
+  const save=p=>setData(d=>({...d,plans:plansOf(d).some(x=>x.id===p.id)?plansOf(d).map(x=>x.id===p.id?p:x):[...plansOf(d),p]}));
+  const add=()=>{const p=newPlan(data);setData(d=>({...d,plans:[...plansOf(d),p]}));pick(p.id)};
+  const del=id=>{setData(d=>({...d,plans:plansOf(d).filter(x=>x.id!==id),planImgs:planImgsOf(d).filter(x=>x.planId!==id),blocks:d.blocks.map(b=>b.planId===id?(({planId,...r})=>r)(b):b)}));setConfirmDel(null);pick('');notify('Plan deleted')};
+  const [sealOk,setSealOk]=useState(false);   /* the person ticks that the seal shifts are right */
+  const doSchedule=p=>{setSealOk(false);setSched(p)};
+  const runSchedule=()=>{const p=sched;setSched(null);let res=null;
+    setData(d=>{const cur=plansOf(d).find(x=>x.id===p.id)||p;res=applyPlan(d,cur);return res.err?d:res.data});
+    setTimeout(()=>{if(res&&res.err)notify(res.err);else if(res)notify(['Booking updated',res.sealN?`${res.sealN} seal shift${res.sealN===1?'':'s'} booked for ${res.sealCrew}`:'',res.sealKept?`${res.sealKept} already on the schedule`:''].filter(Boolean).join(' · '))},0)};
+  const ql=q.trim().toLowerCase();
+  const shown=plans.filter(p=>{if(!ql)return true;const j=data.jobs.find(x=>x.id===p.jobId);const c=data.resources.find(r=>r.id===p.crewId);
+    return [p.title,p.jobName,p.customer,p.address,j&&j.name,c&&c.name].join(' ').toLowerCase().includes(ql)})
+    .sort((a,b)=>((a.start||'9')<(b.start||'9')?-1:(a.start||'9')>(b.start||'9')?1:0));
+  const STATUS={draft:['Draft','var(--muted)'],ready:['Ready','var(--warn)'],scheduled:['On schedule','var(--ok)']};
+  const label=p=>p.title||(data.jobs.find(j=>j.id===p.jobId)||{}).name||p.jobName||'Untitled plan';
+  const schedInfo=sched&&(()=>{const p=plansOf(data).find(x=>x.id===sched.id)||sched;const ds=planDates(p,data);const c=planConflicts(data,p);const bk0=planBooking(data,p);const crew=bk0&&data.resources.find(r=>r.id===bk0.resourceId);
+    const old=data.blocks.find(b=>b.id===p.bookingId);return {p,ds,c,crew,old,seal:sealPlanOf(data,p)}})();
+  return html`<div class="flex-1 min-h-0 flex gap-3">
+    <aside class="panel w-[280px] shrink-0 flex flex-col min-h-0 overflow-hidden">
+      <div class="p-3 border-b border-line grid gap-2">
+        <button type="button" class="btn btn-primary justify-center" onClick=${add}>${Icon.plus} New plan</button>
+        <input class="field field-sm" style=${{height:30,fontSize:13}} placeholder="Search plans" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search plans"/>
+      </div>
+      <ul class="flex-1 min-h-0 overflow-y-auto p-2 grid gap-1 content-start">
+        ${shown.length===0&&html`<li class="px-3 py-6 text-center text-[13px] text-muted">${plans.length?'No plans match.':'No plans yet. Start one with New plan.'}</li>`}
+        ${shown.map(p=>{const bk1=planBooking(data,p);const c=bk1&&data.resources.find(r=>r.id===bk1.resourceId);const ds=planDates(p,data);const [sl,sc]=STATUS[p.status]||STATUS.draft;const on=p.id===sel;
+          return html`<li key=${p.id}><button type="button" class=${'w-full text-left rounded-lg px-2.5 py-2 grid gap-0.5 '+(on?'':'hover:bg-sunken')} style=${on?{background:'var(--accent-soft)'}:null} onClick=${()=>pick(p.id)}>
+            <span class="text-[13px] font-semibold truncate">${label(p)}</span>
+            <span class="text-[12px] text-muted truncate">${c?c.name:'No crew'}${ds.length?` · ${fmtShort(parse(ds[0]))}${ds.length>1?' – '+fmtShort(parse(ds[ds.length-1])):''} · ${ds.length} ${p.shift==='night'?'night':'shift'}${ds.length===1?'':'s'}`:''}</span>
+            <span class="text-[11px] font-semibold" style=${{color:sc}}>${sl}</span></button></li>`})}
+      </ul>
+    </aside>
+    <div class="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1">
+      ${!cur?html`<div class="panel p-8 text-center grid gap-3 place-items-center">
+          <div class="font-display text-[18px] font-semibold">Job planning</div>
+          <p class="text-[13px] text-muted max-w-[520px]">Fill in the site inspection and the method for a job: site details and map pins, asphalt and profiling for each shift, the machines, trucking and subcontractors needed, and the safety checks. Send it to the schedule to create or update the crew’s booking, then print the plan as a PDF for the crew.</p>
+          <button type="button" class="btn btn-primary" onClick=${add}>${Icon.plus} New plan</button></div>`
+        :html`<${PlanForm} key=${cur.id} plan=${cur} data=${data} save=${save} onDelete=${id=>setConfirmDel(id)} onSchedule=${doSchedule} onOpenBooking=${onOpenBooking}
+            onShifts=${(bid,n)=>setData(d=>setBookingShifts(d,bid,n))}
+            onQuick=${list=>setData(d=>({...d,planQuick:list}))} onSteps=${list=>setData(d=>({...d,planSteps:list}))}
+            onAddImg=${img=>setData(d=>({...d,planImgs:[...planImgsOf(d),img]}))} onDelImg=${id=>setData(d=>({...d,planImgs:planImgsOf(d).filter(x=>x.id!==id)}))}
+            onPdf=${async p=>{try{const blob=await buildPlanPdf(data,p);const dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null;if(!dl){notify('Saving files isn’t available in this view.');return}
+              await dl.save({filename:`${(label(p)).replace(/[\\/:*?"<>|]+/g,' ').trim()} - job plan.pdf`,data:blob});notify('Plan PDF saved')}catch(e){notify(e&&e.code==='declined'?'Download cancelled.':(e&&e.message)||'The PDF could not be built.')}}}/>`}
+    </div>
+    ${confirmDel&&html`<div class="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setConfirmDel(null)}}>
+      <div class="panel pop w-full max-w-[420px] p-5 grid gap-3" role="dialog" aria-modal="true">
+        <div class="font-display text-[17px] font-semibold">Delete this plan?</div>
+        <p class="text-[13px] text-muted">The plan is removed. A booking already made from it stays on the schedule.</p>
+        <div class="flex justify-end gap-2"><button class="btn" onClick=${()=>setConfirmDel(null)}>Keep</button><button class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${()=>del(confirmDel)}>Delete</button></div>
+      </div></div>`}
+    ${schedInfo&&html`<div class="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setSched(null)}}>
+      <div class="panel pop w-full max-w-[520px] p-5 grid gap-3" role="dialog" aria-modal="true" aria-labelledby="ps-t">
+        <div id="ps-t" class="font-display text-[17px] font-semibold">${schedInfo.p.appliedAt?'Update the booking from this plan?':'Send this plan to the schedule?'}</div>
+        ${!schedInfo.old?html`<p class="text-[13px]" style=${{color:'var(--bad)'}}>Pick the job from the schedule first.</p>`
+          :html`<ul class="text-[13px] grid gap-1">
+            <li>${schedInfo.crew.name} · ${schedInfo.old&&schedInfo.old.shift==='night'?'night':'day'} works · ${fmtShort(parse(schedInfo.ds[0]))}${schedInfo.ds.length>1?' – '+fmtShort(parse(schedInfo.ds[schedInfo.ds.length-1])):''} (${schedInfo.ds.length} shift${schedInfo.ds.length===1?'':'s'})</li>
+            <li>Quantities for each shift, ${(schedInfo.p.machineIds||[]).length} machine${(schedInfo.p.machineIds||[]).length===1?'':'s'}, subcontractors and the crew start time</li>
+            <li class="text-muted">Dates stay as they are on the schedule. Trucks already entered on the booking are kept.</li></ul>
+          ${(Object.keys(schedInfo.c.machines).length>0||schedInfo.c.crew.length>0)&&html`<div class="text-[12.5px] rounded-md px-2.5 py-2 grid gap-1" style=${{background:'hsl(38 90% var(--blk-l))',color:'hsl(30 60% var(--blk-fg-l))'}}>
+            <span class="font-semibold">Clashes (you can still go ahead):</span>
+            ${schedInfo.c.crew.length>0&&html`<span>${schedInfo.crew.name} is already booked: ${schedInfo.c.crew.join('; ')}</span>`}
+            ${Object.entries(schedInfo.c.machines).map(([id,l])=>html`<span key=${id}>${(data.resources.find(r=>r.id===id)||{}).name}: ${l.join('; ')}</span>`)}</div>`}
+          ${(schedInfo.seal.items.length>0||schedInfo.seal.removes.length>0)&&(S=>html`<div id="ps-seal" class="grid gap-2 rounded-lg border border-line p-3">
+            <div class="text-[13px] font-semibold">Seal crew${S.crew?` · ${S.crew.name}`:''}: check these are right</div>
+            ${!S.crew&&S.items.length>0&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>No crew in the Seal section to book. Add one in Settings › Crews first.</div>`}
+            <ul class="grid gap-1.5 text-[12.5px]">
+              ${S.items.map(it=>{const tag={new:['New booking','var(--ok)'],update:['Update this plan’s booking','var(--muted)'],existing:['Already on the schedule','hsl(30 70% var(--blk-edge-l))']}[it.act];
+                const bc=it.b&&data.resources.find(r=>r.id===it.b.resourceId);
+                return html`<li key=${it.k} class="grid grid-cols-[86px_1fr] gap-2">
+                  <span class="mono">${WD[parse(it.k).getDay()]} ${fmtShort(parse(it.k))}</span>
+                  <span class="grid gap-0.5"><span><span class="font-semibold" style=${{color:tag[1]}}>${tag[0]}</span> · ${sealText(it.sl)||'no details yet'}</span>
+                    ${it.act==='existing'&&html`<span class="text-muted">${bc?bc.name:'Seal crew'} ${it.b.start===it.b.end?'':`(${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}) `}is already booked for this job. No second booking is made; the plan only fills in details that are empty on it.</span>`}
+                    ${it.busy&&it.busy.length>0&&html`<span style=${{color:'hsl(30 70% var(--blk-edge-l))'}}>${S.crew.name} is also booked on ${it.busy.join(', ')} that day.</span>`}</span></li>`})}
+              ${S.removes.map(x=>html`<li key=${x.id} class="grid grid-cols-[86px_1fr] gap-2"><span class="mono">${WD[parse(x.start).getDay()]} ${fmtShort(parse(x.start))}</span>
+                <span><span class="font-semibold" style=${{color:'var(--bad)'}}>Remove</span> · this plan booked the seal crew here, but the shift no longer needs it</span></li>`)}
+            </ul>
+            <label class="inline-flex items-center gap-2 text-[13px] font-medium cursor-pointer"><input id="ps-seal-ok" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${sealOk} onChange=${e=>setSealOk(e.target.checked)}/>I’ve checked the seal shifts above</label>
+          </div>`)(schedInfo.seal)}`}
+        <div class="flex justify-end gap-2"><button class="btn" onClick=${()=>setSched(null)}>Cancel</button>
+          <button class="btn btn-primary" disabled=${!schedInfo.old||((schedInfo.seal.items.length>0||schedInfo.seal.removes.length>0)&&(!sealOk||(schedInfo.seal.items.length>0&&!schedInfo.seal.crew)))} onClick=${runSchedule}>Update booking</button></div>
+      </div></div>`}
+  </div>`;
+}
+
+/* ---------- the plan as a PDF (site inspection + methodology) ---------- */
+/* opt.shiftDate: just that shift's plan; opt.doc: add the pages to an existing PDF (the daily program) */
+async function buildPlanPdf(data,p,opt={}){
+  const JsPDF=await loadJsPDF();const doc=opt.doc||new JsPDF({orientation:'portrait',unit:'mm',format:'a4'});if(opt.doc)doc.addPage();const firstPage=doc.getNumberOfPages();
+  const M=12,W=186;let y=0;
+  const bkp=planBooking(data,p);const crew=data.resources.find(r=>r.id===(bkp?bkp.resourceId:p.crewId));const job=data.jobs.find(j=>j.id===(bkp?bkp.jobId:p.jobId));const seal=isSealCrew(crew);const dates=planDates(p,data);const night=bkp?bkp.shift==='night':p.shift==='night';
+  const font=(s,b,c)=>{doc.setFont('helvetica',b?'bold':'normal');doc.setFontSize(s);doc.setTextColor(...(c||[0,0,0]))};
+  const clean=t=>String(t??'').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[–—]/g,'-').replace(/²/g,'2').replace(/³/g,'3').replace(/°/g,' deg');
+  const room=h=>{if(y+h>284){doc.addPage();y=14}};
+  const head=t=>{room(12);doc.setFillColor(...AFA_DARK);doc.rect(M,y,W,7,'F');font(9,true,[255,255,255]);doc.text(clean(t),M+2,y+4.8);y+=9};
+  const kv=(rows)=>{rows.filter(r=>r[1]!==undefined&&r[1]!==null&&String(r[1]).trim()!=='').forEach(([k,v])=>{font(8.5,false);const lines=doc.splitTextToSize(clean(v),W-52);
+    font(8.5,true);const kl=doc.splitTextToSize(clean(k),46);const h=Math.max(lines.length,kl.length)*4;room(h+2);
+    font(8.5,true,[80,80,80]);doc.text(kl,M,y+3.5);font(8.5,false);doc.text(lines,M+50,y+3.5);y+=h+1.6})};
+  const para=(t,indent=0)=>{const lines=doc.splitTextToSize(clean(t),W-indent);font(8.5,false);lines.forEach(l=>{room(4.4);doc.text(l,M+indent,y+3.5);y+=4.2})};
+  const bullets=t=>String(t||'').split('\n').map(s=>s.trim()).filter(Boolean).forEach(s=>{const lines=doc.splitTextToSize(clean(s.replace(/^[-*•]\s*/,'')),W-6);font(8.5,false);room(lines.length*4.2);doc.text('-',M+1,y+3.5);doc.text(lines,M+5,y+3.5);y+=lines.length*4.2});
+  try{doc.addImage(AFA_LOGO,'PNG',M,8,44,17)}catch(e){}
+  font(14,true);doc.text(seal?'SEAL JOB PLAN':'JOB PLAN & METHODOLOGY',198,14,{align:'right'});
+  const one=opt.shiftDate?planDates(p,data).indexOf(opt.shiftDate):-1;
+  font(10,true,AFA_RED);doc.text(clean(p.title||(job&&job.name)||p.jobName||''),198,20,{align:'right'});
+  if(one>=0){font(9,true);doc.text(`${p.shift==='night'||(bkp&&bkp.shift==='night')?'Night':'Shift'} ${one+1} of ${planDates(p,data).length} - ${WD[parse(opt.shiftDate).getDay()]} ${fmtShort(parse(opt.shiftDate))} ${parse(opt.shiftDate).getFullYear()}`,198,25.5,{align:'right'})}
+  font(7.5,false,[110,110,110]);doc.text(`Printed ${new Date().toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})}`,198,one>=0?30:25,{align:'right'});
+  y=one>=0?34:31;
+  head('Job & site');
+  kv([['Job',job?jobLabel(job):[p.customer,p.jobName].filter(Boolean).join(' - ')],['Client',p.customer||(job&&job.customer)],['Job location',p.address],['Access to site',p.access],
+      ['Quote / project',[p.quoteNo&&`Quote ${p.quoteNo}`,p.projectNo&&`Project ${p.projectNo}`].filter(Boolean).join(' · ')],
+      ['Crew',crew&&crew.name],['Shifts',dates.length?`${dates.length} ${night?'night':'day'} shift${dates.length===1?'':'s'}: ${dates.map(k=>`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`).join(', ')}`:''],
+      ['Crew on site',fmtTime(p.crewOnSite)],['Supervisor',p.supervisor],['Site contact',[p.siteContact,p.sitePhone].filter(Boolean).join(' · ')],['Site UHF channel',p.uhf],
+      ['Site induction',p.induction?'Required':'Not required'],['Asphalt supply',p.supply==='AFA'||!p.supply?'AFA asphalt plant':`${p.supply} (exbin)`],
+      ['PPE',[...(p.ppe||[]),p.ppeOther].filter(Boolean).join(', ')]]);
+  if((p.pins||[]).length){head('Locations');(p.pins||[]).forEach(pin=>{room(5);font(8.5,true);doc.text(clean(pin.label||pinType(pin.type).label),M,y+3.5);
+    font(8,false,[90,90,90]);doc.text(clean(pinType(pin.type).label),M+60,y+3.5);font(8,false,[38,84,140]);doc.textWithLink(`${(+pin.lat).toFixed(5)}, ${(+pin.lng).toFixed(5)} (Google Maps)`,M+105,y+3.5,{url:gmapsLink(pin)});y+=5})}
+  const sps=dates.map((_,i)=>(p.shiftPlans||[])[i]||{});
+  const idxs=one>=0?[one]:dates.map((_,i)=>i);
+  const tot=new Map();if(one<0)sps.forEach(sp=>(sp.lines||[]).filter(lineHas).forEach(l=>{const k=mixLabel(l);const t=tot.get(k)||{t:0,a:0};t.t+=planTonnes(l);t.a+=num(l.area);tot.set(k,t)}));
+  if(tot.size){head('Totals');[...tot.entries()].forEach(([k,v])=>{room(5);font(8.5,true);doc.text(clean(k),M,y+3.5);font(8.5,false);doc.text(seal?`${fmtN(v.a)} m2`:`${fmtN(v.t)} t over ${fmtN(v.a)} m2`,M+46,y+3.5);y+=4.6})}
+  if(dates.length){head(one>=0?'This shift':'Shift by shift');
+    idxs.forEach(i=>{const sp=sps[i];const k=dates[i];room(14);doc.setFillColor(241,241,244);doc.rect(M,y,W,6,'F');font(9,true);doc.text(`${night?'Night':'Shift'} ${i+1} - ${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`,M+2,y+4.2);
+      const st=(sp.lines||[]).reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);const rd=seal?0:spRounds(p,sp);if(st){font(8.5,true,AFA_RED);doc.text(`${fmtN(st)} t${rd?` - ${fmtN(rd)} rounds`:''}`,198-2,y+4.2,{align:'right'})}
+      y+=7.5;
+      if(sp.sections)kv([['Area / sections',sp.sections]]);
+      if(spProf(p,sp)&&num(sp.profArea))kv([['Profiling',`${fmtN(num(sp.profArea))} m2 @ ${fmtN(num(sp.profDepth))} mm${num(sp.profDepth)?` (about ${fmtN(Math.round(num(sp.profArea)*num(sp.profDepth)/100)/10)} m3)`:''}`]]);
+      if(!seal&&spSeal(sp))kv([['Seal crew',`${sealText(sp.seal)}${planSealCrew(data,p)?` (${planSealCrew(data,p).name})`:''}`]]);
+      (sp.lines||[]).filter(lineHas).forEach(l=>kv([[seal?'Seal':'Asphalt',seal?`${l.type||''} ${l.binder||''} - ${fmtN(num(l.area))} m2`:`${fmtN(num(l.area))} m2 - ${fmtN(planTonnes(l))} t @ ${fmtN(num(l.depth))} mm ${mixLabel(l)}`]]));
+      const subs=[...(p.jobSubs||[]),...(sp.subs||[])].filter(subHas);if(subs.length)kv([['Subcontractors',subs.map(s=>[s.name,s.info,fmtTime(s.time||p.crewOnSite)].filter(Boolean).join(' - ')).join('\n')]]);
+      const tr=spTruck(p,sp);if(!seal&&(num(tr.perRound)||tr.loadStart||(tr.types||[]).length||tr.note))kv([['Trucking',[num(tr.perRound)&&`${fmtN(num(tr.perRound))} t per round${spRounds(p,sp)?` = ${fmtN(spRounds(p,sp))} rounds`:''}`,tr.loadStart&&`start loading ${fmtTime(tr.loadStart)}`,(tr.types||[]).length&&tr.types.join(', '),tr.note].filter(Boolean).join(' · ')]]);
+      if((sp.notes||'').trim()){room(5);font(8.5,true,[80,80,80]);doc.text('Method',M,y+3.5);y+=4.6;bullets(sp.notes)}
+      (sp.images||[]).map(id=>planImgsOf(data).find(x=>x.id===id)).filter(Boolean).forEach(im=>{const mw=W,mh=100;let w=mw,h=im.h&&im.w?mw*im.h/im.w:mw*.66;if(h>mh){w=w*mh/h;h=mh}
+        room(h+3);try{doc.addImage(im.data,'JPEG',M+(W-w)/2,y+1,w,h);doc.setDrawColor(...AFA_GRID);doc.rect(M+(W-w)/2,y+1,w,h,'S')}catch(e){}y+=h+3});
+      y+=2})}
+  const machines=(p.machineIds||[]).map(id=>data.resources.find(r=>r.id===id)).filter(Boolean);
+  if(machines.length){head('Machines');groupMachines(machines,data).forEach(g=>kv([[g.label,g.rows.map(m=>`${m.name}${m.sub?' '+m.sub:''}`).join(', ')]]))}
+  if((p.jobSubs||[]).filter(subHas).length){head('Subcontractors (whole job)');kv((p.jobSubs||[]).filter(subHas).map(s=>[s.name||'-',[s.info,fmtTime(s.time||p.crewOnSite)].filter(Boolean).join(' - ')]))}
+  const sl=p.seal||{};if(num(sl.tackArea)||num(sl.sealArea)||sl.onSite){head('Seal crew');kv([['On site',fmtTime(sl.onSite)],['Tack area',num(sl.tackArea)?`${fmtN(num(sl.tackArea))} m2`:''],['Seal area',num(sl.sealArea)?`${fmtN(num(sl.sealArea))} m2`:'']])}
+  if((p.hazards||[]).some(h=>h.hazard||h.control)){head('Safety / environmental - hazards and controls');(p.hazards||[]).filter(h=>h.hazard||h.control).forEach(h=>kv([[h.hazard||'-',h.control||'']]))}
+  if(p.traffic||p.cleanup||p.notes){head('Site rules & notes');if(p.traffic){font(8.5,true,[80,80,80]);room(5);doc.text('Traffic control',M,y+3.5);y+=4.6;bullets(p.traffic)}
+    if(p.cleanup){font(8.5,true,[80,80,80]);room(5);doc.text('Leave the site clean',M,y+3.5);y+=4.6;bullets(p.cleanup)}if(p.notes){font(8.5,true,[80,80,80]);room(5);doc.text('Notes',M,y+3.5);y+=4.6;bullets(p.notes)}}
+  const n=doc.getNumberOfPages();const cnt=n-firstPage+1;for(let i=firstPage;i<=n;i++){doc.setPage(i);font(7,false,[130,130,130]);doc.text(`${clean(p.title||'Job plan')}${one>=0?` - ${dates[one]?fmtShort(parse(dates[one])):''} plan`:''} - page ${i-firstPage+1} of ${cnt}`,105,292,{align:'center'})}
+  return opt.doc?doc:doc.output('blob');
+}
+
+/* view a plan from the booking (read only) */
+function PlanViewDialog({data,plan,onClose,onOpenPlan,notify}){
+  useEffect(()=>{const h=e=>{if(e.key==='Escape'){e.stopPropagation();onClose()}};window.addEventListener('keydown',h,true);return()=>window.removeEventListener('keydown',h,true)},[]);
+  const p=plan;const bkv=planBooking(data,p);const crew=data.resources.find(r=>r.id===(bkv?bkv.resourceId:p.crewId));const dates=planDates(p,data);const seal=isSealCrew(crew);const night=bkv?bkv.shift==='night':p.shift==='night';
+  const sps=dates.map((_,i)=>(p.shiftPlans||[])[i]||{});
+  const machines=(p.machineIds||[]).map(id=>data.resources.find(r=>r.id===id)).filter(Boolean);
+  const row=(k,v)=>v&&String(v).trim()?html`<div class="grid grid-cols-[150px_1fr] gap-2 text-[13px]"><span class="text-muted">${k}</span><span class="whitespace-pre-line">${v}</span></div>`:null;
+  const pdf=async()=>{try{const blob=await buildPlanPdf(data,p);const dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null;if(!dl){notify('Saving files isn’t available in this view.');return}
+    await dl.save({filename:`${(p.title||'Job plan').replace(/[\\/:*?"<>|]+/g,' ').trim()} - job plan.pdf`,data:blob});notify('Plan PDF saved')}catch(e){notify((e&&e.message)||'The PDF could not be built.')}};
+  return html`<div class="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div class="panel pop w-full max-w-[860px] flex flex-col max-h-full overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="pv-t">
+      <div class="px-5 pt-5 pb-3 border-b border-line flex items-start gap-3">
+        <div class="min-w-0 flex-1"><div id="pv-t" class="font-display text-[18px] font-semibold">${p.title||'Job plan'}</div>
+          <div class="text-[12.5px] text-muted">${[crew&&crew.name,dates.length&&`${dates.length} ${night?'night':'day'} shift${dates.length===1?'':'s'} from ${fmtShort(parse(dates[0]))}`].filter(Boolean).join(' · ')}</div></div>
+        <button type="button" class="btn" onClick=${pdf}>${Icon.download} PDF</button>
+        <button type="button" class="btn" onClick=${()=>onOpenPlan(p.id)}>Open in Planning</button>
+        <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button>
+      </div>
+      <div class="overflow-y-auto p-5 grid gap-5">
+        <div class="grid gap-1.5">${row('Job location',p.address)}${row('Access to site',p.access)}${row('Crew on site',fmtTime(p.crewOnSite))}${row('Supervisor',p.supervisor)}
+          ${row('Site contact',[p.siteContact,p.sitePhone].filter(Boolean).join(' · '))}${row('UHF channel',p.uhf)}${row('Site induction',p.induction?'Required':'')}${row('PPE',[...(p.ppe||[]),p.ppeOther].filter(Boolean).join(', '))}</div>
+        ${(p.pins||[]).length>0&&html`<${PlanMap} pins=${p.pins} readOnly=${true} height=${300} onChange=${()=>{}}/>`}
+        <div class="grid gap-2"><div class="font-display text-[15px] font-semibold">Shift by shift</div>
+          ${sps.map((sp,i)=>{const st=(sp.lines||[]).reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);const subs=[...(p.jobSubs||[]),...(sp.subs||[])].filter(subHas);
+            return html`<div key=${i} class="rounded-lg border border-line p-3 grid gap-1.5">
+              <div class="flex items-baseline gap-2"><span class="font-semibold text-[13.5px]">${night?'Night':'Shift'} ${i+1}</span><span class="mono text-[12px] text-muted">${WD[parse(dates[i]).getDay()]} ${fmtShort(parse(dates[i]))}</span>
+                <span class="flex-1"></span>${st>0&&html`<span class="text-[12.5px] font-semibold tnum">${fmtN(st)} t${!seal&&spRounds(p,sp)?` · ${fmtN(spRounds(p,sp))} rounds`:''}</span>`}</div>
+              ${row('Area / sections',sp.sections)}${spProf(p,sp)&&num(sp.profArea)?row('Profiling',`${fmtN(num(sp.profArea))} m² @ ${fmtN(num(sp.profDepth))} mm`):null}${!seal&&spSeal(sp)?row('Seal crew',sealText(sp.seal)):null}
+              ${(sp.lines||[]).filter(lineHas).map((l,j)=>html`<div key=${j}>${row(seal?'Seal':'Asphalt',seal?`${l.type||''} ${l.binder||''} · ${fmtN(num(l.area))} m²`:`${fmtN(num(l.area))} m² · ${fmtN(planTonnes(l))} t @ ${fmtN(num(l.depth))} mm ${mixLabel(l)}`)}</div>`)}
+              ${subs.length>0&&row('Subcontractors',subs.map(s=>[s.name,s.info,fmtTime(s.time||p.crewOnSite)].filter(Boolean).join(' · ')).join('\n'))}
+              ${!seal&&(()=>{const tr=spTruck(p,sp);return row('Trucking',[num(tr.perRound)&&`${fmtN(num(tr.perRound))} t per round`,tr.loadStart&&`start loading ${fmtTime(tr.loadStart)}`,(tr.types||[]).join(', '),tr.note].filter(Boolean).join(' · '))})()}
+              ${row('Method',sp.notes)}
+              ${(sp.images||[]).length>0&&html`<div class="flex flex-wrap gap-2 pt-1">${(sp.images||[]).map(id=>{const im=planImgsOf(data).find(x=>x.id===id);return im?html`<a key=${id} href=${im.data} target="_blank" rel="noopener"><img src=${im.data} alt=${im.name||'Shift picture'} class="h-[110px] rounded-md border border-line"/></a>`:null})}</div>`}
+            </div>`})}
+        </div>
+        ${machines.length>0&&html`<div class="grid gap-1.5"><div class="font-display text-[15px] font-semibold">Machines</div>${groupMachines(machines,data).map(g=>html`<div key=${g.key}>${row(g.label,g.rows.map(m=>`${m.name} ${m.sub||''}`).join(', '))}</div>`)}</div>`}
+        ${(p.hazards||[]).some(h=>h.hazard)&&html`<div class="grid gap-1.5"><div class="font-display text-[15px] font-semibold">Hazards and controls</div>${p.hazards.filter(h=>h.hazard).map((h,j)=>html`<div key=${j}>${row(h.hazard,h.control)}</div>`)}</div>`}
+        ${(p.traffic||p.cleanup||p.notes)&&html`<div class="grid gap-1.5"><div class="font-display text-[15px] font-semibold">Site rules & notes</div>${row('Traffic control',p.traffic)}${row('Leave the site clean',p.cleanup)}${row('Notes',p.notes)}</div>`}
+      </div>
+    </div>
+  </div>`;
+}
+/* the trucking note from the plan, shown in the booking's Trucks tab */
+function PlanTruckNote({data,f,k}){
+  const p=planFor(data,f);if(!p)return null;const i=planDates(p,data).indexOf(k);if(i<0)return null;
+  const sp=(p.shiftPlans||[])[i]||{};const tr=spTruck(p,sp);const perRound=num(tr.perRound);const rd=spRounds(p,sp);
+  const st=(sp.lines||[]).reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);
+  if(!perRound&&!(tr.types||[]).length&&!tr.loadStart&&!tr.note)return null;
+  return html`<div class="rounded-lg px-3 py-2 text-[12.5px] grid gap-0.5" style=${{background:'var(--accent-soft)'}}>
+    <div class="font-semibold" style=${{color:'var(--accent)'}}>From the job plan${p.title?`: ${p.title}`:''}</div>
+    <div>${[perRound&&`${fmtN(perRound)} t of trucks per round${rd?` · ${fmtN(rd)} rounds this shift (${fmtN(st)} t)`:''}`,tr.loadStart&&`start loading ${fmtTime(tr.loadStart)}`,(tr.types||[]).length&&`truck sizes: ${tr.types.join(', ')}`].filter(Boolean).join(' · ')}</div>
+    ${tr.note&&html`<div class="text-muted">${tr.note}</div>`}
   </div>`;
 }
 
@@ -3704,7 +4427,8 @@ function App({boot,live}){
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
         <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${live.role==='admin'?()=>setLogOpen(true):null}/>
       </header>
-      ${screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:html`
+
+      ${screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
       <section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
         <${Stat} k="Crews on jobs today" v=${`${crewsOnJob.length}/${vis('crew').length}`} sub=${`${util}% of crew-days booked`}/>
         <${Stat} k="Machines down today" v=${downToday.length} sub=${downToday.length?downToday.map(m=>m.name).join(', '):'all available'} tone=${downToday.length?'var(--bad)':null}/>
@@ -3737,7 +4461,8 @@ function App({boot,live}){
     ${logOpen&&html`<${ChangeLogDialog} data=${data} onClose=${()=>setLogOpen(false)} onOpen=${b=>setEditing(b)}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${suggest&&html`<${SuggestDialog} setData=${setData} notify=${setToast} onClose=${()=>setSuggest(false)}/>`}
-    ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)}/>`}
+    ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)} notify=${setToast}
+      onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}setEditing(null);goScreen('planning')}}/>`}
     ${toast&&html`<div class="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-[13px] font-medium pop" role="status"
        style=${{bottom:'calc(20px + env(safe-area-inset-bottom, 0px))',background:'var(--ink)',color:'var(--surface)'}}>${toast}</div>`}
   </div>`;
@@ -3751,9 +4476,9 @@ function App({boot,live}){
    Per-person choices stay in this browser: hidden rows, section order,
    view length, dark mode and notification settings.
    ===================================================================== */
-const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion'],['ideas','idea']];
+const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion'],['ideas','idea'],['plans','plan'],['planImgs','plan_img']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault','ideasPub'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault','ideasPub','planQuick','planSteps'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
@@ -3764,7 +4489,7 @@ const storedForm=(coll,item,i)=>{const {visible,pos,...rest}=item;return ORDERED
 /* rows from Supabase -> the app's data object */
 function rowsToData(rows){
   const hidden=new Set(readLocal(LOCAL_HIDDEN,[]));
-  const d={resources:[],jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[],ideas:[]};
+  const d={resources:[],jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[],ideas:[],plans:[],planImgs:[]};
   rows.forEach(r=>{
     if(r.kind==='setting'){if(SETTINGS.includes(r.id))d[r.id]=r.data&&r.data.value;return}
     const c=COLLECTIONS.find(([,k])=>k===r.kind);if(!c)return;
@@ -3829,7 +4554,7 @@ async function pushRows(sb,{upserts,deletes}){
 /* data for a brand-new, empty roster */
 function emptyRoster(){
   return {resources:[{id:'a'+uid(),type:'aplant',name:'Asphalt plant',sub:'Main plant',hue:8,visible:true}],
-    jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[],ideas:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},programLocs:[...PROGRAM_LOCATIONS],locColors:{...DEFAULT_LOC_COLORS},
+    jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[],ideas:[],plans:[],planImgs:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},programLocs:[...PROGRAM_LOCATIONS],locColors:{...DEFAULT_LOC_COLORS},
     sectionOrder:[...DEFAULT_ORDER],orderV:2};
 }
 
