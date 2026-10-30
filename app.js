@@ -2589,19 +2589,19 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
   </div>`;
 }
 
-/* ---------- Fleet & Maintenance and Prestarts: their own files (maint.js, then prestart.js), loaded the first time either screen opens ---------- */
+/* ---------- Fleet & Maintenance and Prestarts: their own files (maint.js, prestart.js, defects.js), loaded the first time either screen opens ---------- */
 let maintLoading=null;
 function loadMaint(){
-  if(window.FleetScreen&&window.PrestartScreen)return Promise.resolve();
+  if(window.FleetScreen&&window.PrestartScreen&&window.FFD)return Promise.resolve();
   if(maintLoading)return maintLoading;
   const v=((document.querySelector('script[src*="/app.js"]')||{}).src||'').split('?v=')[1]||Date.now();
   const one=f=>new Promise((res,rej)=>{const s=document.createElement('script');s.src='/'+f+'?v='+v;s.onload=res;s.onerror=rej;document.body.appendChild(s)});
-  maintLoading=(window.FleetScreen?Promise.resolve():one('maint.js')).then(()=>window.PrestartScreen?null:one('prestart.js')).catch(e=>{maintLoading=null;throw e});
+  maintLoading=(window.FleetScreen?Promise.resolve():one('maint.js')).then(()=>window.PrestartScreen?null:one('prestart.js')).then(()=>window.FFD?null:one('defects.js')).catch(e=>{maintLoading=null;throw e});
   return maintLoading;
 }
 function LazyFleet(props){
   const comp=props.comp||'FleetScreen';
-  const [ok,setOk]=useState(!!(window.FleetScreen&&window.PrestartScreen));const [err,setErr]=useState('');
+  const [ok,setOk]=useState(!!(window.FleetScreen&&window.PrestartScreen&&window.FFD));const [err,setErr]=useState('');
   useEffect(()=>{if(ok)return;loadMaint().then(()=>setOk(true),()=>setErr('Couldn’t load '+(comp==='PrestartScreen'?'Prestarts':'Fleet & Maintenance')+'. Check the connection and reload.'))},[]);
   if(err)return html`<div class="panel p-6 text-[13px]" style=${{color:'var(--bad)'}}>${err}</div>`;
   if(!ok||!window[comp])return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;

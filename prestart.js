@@ -92,13 +92,14 @@ function SignPad({padRef,onInk}){
 }
 
 /* ---------- one question ---------- */
-function Question({it,a,set,onPhoto,busy,urls,n}){
+function Question({it,a,set,onPhoto,busy,urls,n,known}){
   const k=kindOf(it);const ans=a.answer||'';
   const opt=(v,l,ic,col)=>html`<button type="button" id=${`ps-${it.key}-${v}`} class="rounded-lg border text-[14px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors" aria-pressed=${ans===v}
     style=${{height:48,borderColor:ans===v?col:'var(--line)',background:ans===v?col:'var(--surface)',color:ans===v?'#fff':'var(--ink)'}} onClick=${()=>set({answer:ans===v?'':v})}>${ic} ${l}</button>`;
   return html`<div id=${'ps-q-'+it.key} class="panel p-3 grid gap-2.5" style=${ans==='fail'?{boxShadow:'inset 0 0 0 1.5px hsl(0 72% 47%)'}:null}>
     <div class="flex items-start gap-2"><span class="mono text-[11px] text-faint mt-1 w-5 shrink-0">${n}</span>
       <div class="text-[15px] font-medium leading-snug flex-1">${it.text}${it.critical&&html` <span class="align-middle ml-1 text-[10.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style=${{background:'hsl(0 72% 47%)',color:'#fff'}} title="A fault here means the machine must not be used">Critical</span>`}</div></div>
+    ${known&&html`<div class="text-[12.5px] rounded-md px-2 py-1" style=${{background:'var(--sunken)'}}>Already reported: D-${known.number}, ${({reported:'reported',acknowledged:'waiting for repair',in_repair:'in repair',repaired:'repaired, to be checked'})[known.status]||known.status}. If it’s still faulty, fail it again.</div>`}
     ${k==='check'?html`<div class="grid grid-cols-3 gap-2">${opt('pass','Pass',I.tick,'hsl(145 55% 34%)')}${opt('fail','Fail',I.cross,'hsl(0 72% 47%)')}${opt('na','N/A',I.dash,'hsl(220 9% 46%)')}</div>`
       :k==='number'?html`<input id=${'ps-'+it.key+'-value'} type="number" inputmode="decimal" step="any" class="field mono" style=${{height:44,fontSize:16}} value=${ans} onInput=${e=>set({answer:e.target.value})} aria-label=${it.text}/>`
       :html`<textarea id=${'ps-'+it.key+'-value'} class="field" rows="2" style=${{height:'auto',minHeight:56,padding:'8px 10px',fontSize:15}} value=${ans} placeholder="Optional" onInput=${e=>set({answer:e.target.value})} aria-label=${it.text}></textarea>`}
@@ -166,6 +167,7 @@ function PsForm({ctx,a,tpl,onDone,onBack}){
         <span id="ps-progress" class="mono text-[12px] text-muted whitespace-nowrap">${done} of ${need.length}</span></div>
     </div>
 
+    ${a.restr&&a.restr.length>0&&html`<div id="ps-restricted" class="rounded-lg px-3 py-2.5 text-[14px] font-medium" style=${{background:'hsl(0 80% 96%)',color:'hsl(0 72% 38%)',boxShadow:'inset 0 0 0 1.5px hsl(0 72% 47%)'}}>Do not use this machine: ${a.restr.map(r=>r.reason).join('; ')}. You can still do the check; tell your supervisor.</div>`}
     <section class="panel p-3 grid gap-3"><div class="label">Before you start</div>
       ${meters.map(k=>html`<label key=${k} class="grid gap-1"><span class="text-[14px] font-medium">${k==='hours'?'Engine hours':'Odometer km'}</span>
         <input id=${'ps-'+k} type="number" inputmode="decimal" min="0" step="any" class="field mono" style=${{height:44,fontSize:16}} value=${d[k]} onInput=${e=>upd({[k]:e.target.value})}/>
@@ -175,7 +177,7 @@ function PsForm({ctx,a,tpl,onDone,onBack}){
     </section>
 
     ${sectionsOf(items).map(g=>html`<section key=${g.s} class="grid gap-2"><h3 class="font-display text-[15px] font-semibold px-1 mt-1">${g.s}</h3>
-      ${g.items.map(it=>{n++;return html`<${Question} key=${it.key} it=${it} n=${n} a=${d.answers[it.key]||{}} set=${p=>setAns(it.key,p)} busy=${!!uploading[it.key]} urls=${urls} onPhoto=${f=>addPhoto(it.key,f)}/>`})}</section>`)}
+      ${g.items.map(it=>{n++;return html`<${Question} key=${it.key} it=${it} n=${n} known=${(a.defects||[]).find(x=>x.item_key===it.key)} a=${d.answers[it.key]||{}} set=${p=>setAns(it.key,p)} busy=${!!uploading[it.key]} urls=${urls} onPhoto=${f=>addPhoto(it.key,f)}/>`})}</section>`)}
 
     <section class="panel p-3 grid gap-3"><div class="label">Finish</div>
       <label class="grid gap-1"><span class="text-[14px] font-medium">Notes (optional)</span><textarea id="ps-notes" class="field" rows="2" style=${{height:'auto',minHeight:56,padding:'8px 10px',fontSize:15}} value=${d.notes} onInput=${e=>upd({notes:e.target.value})}></textarea></label>
@@ -191,7 +193,7 @@ function PsForm({ctx,a,tpl,onDone,onBack}){
 
 function PsDone({res,a,onHome,onView}){
   const r=RES[res.result]||RES.pass;
-  const msg=res.result==='pass'?'Prestart saved. You’re good to go.':res.result==='defects'?'Prestart saved with defects. Tell your supervisor before you start.':'A critical item failed. Don’t use this machine. Tell your supervisor now.';
+  const msg=res.result==='pass'?'Prestart saved. You’re good to go.':res.result==='defects'?'Prestart saved. The faults have gone to the workshop as defects. Tell your supervisor before you start.':'A critical item failed. Don’t use this machine: it is now restricted. Tell your supervisor now.';
   return html`<div class="grid gap-3 max-w-[560px] mx-auto w-full" id="ps-done">
     <div class="panel p-5 grid gap-2 text-center" style=${{boxShadow:`inset 0 0 0 2px ${r[1]}`}}>
       <div class="mx-auto w-14 h-14 rounded-full inline-flex items-center justify-center text-white" style=${{background:r[1]}}>${res.result==='pass'?I.tick:res.result==='defects'?Icon.alert:I.cross}</div>
@@ -289,6 +291,7 @@ function PrestartScreen({data,live,notify}){
           return html`<button key=${a.m.id} type="button" class="w-full text-left px-3 py-3 flex items-center gap-3 hover:bg-sunken disabled:opacity-60" style=${{borderColor:'var(--line)'}} disabled=${!tpl} onClick=${()=>setView({k:'form',a})}>
             <div class="min-w-0 flex-1"><div class="text-[15px] font-semibold">${a.m.name} <span class="font-normal text-muted text-[13.5px]">${a.m.sub||''}</span>${mineCrew&&html` <span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted">Your crew</span>`}</div>
               <div class="text-[12.5px] text-muted truncate">${tpl?`${machCatOf(a.m)||'No category'} · ${meterTxt(a)}`:`No prestart checklist for ${machCatOf(a.m)||'this machine'} yet`}</div></div>
+            ${a.restr&&a.restr.length?html`<span class="shrink-0 text-[10.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style=${{background:'hsl(0 72% 47%)',color:'#fff'}}>Do not use</span>`:''}
             ${t?html`<span class="text-right shrink-0"><span class="block">${resChip(t.result)}</span><span class="block text-[11.5px] text-muted mt-0.5">${fmtTime(t.submitted_at)} · ${t.operator_name.split(' ')[0]}</span></span>`:tpl&&html`<span class="text-muted shrink-0">${Icon.chevR}</span>`}</button>`})}
         ${!list.length&&html`<div class="px-3 py-6 text-center text-[13px] text-muted">No machines match.</div>`}
       </section>
@@ -469,5 +472,5 @@ function FilesSection({ctx,a}){
 }
 
 window.PrestartScreen=PrestartScreen;
-window.FFP={PrestartsTab,ChecklistsTab,ChecklistDialog,LoginsTab,PrestartView,AssetPrestarts,FilesSection,tplFor,RES};
+window.FFP={useSigned,PrestartsTab,ChecklistsTab,ChecklistDialog,LoginsTab,PrestartView,AssetPrestarts,FilesSection,tplFor,RES};
 })();
