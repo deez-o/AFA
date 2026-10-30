@@ -3683,7 +3683,7 @@ function App({boot,live}){
           style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.briefcase} Jobs</button>`)(panel&&tab==='jobs')}
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setProgram(true)} title="Daily program PDFs for each job on a day">${Icon.download} Daily program</button>`}
         <div class="flex items-center gap-2 min-w-0">
-          <h1 class=${'font-display font-semibold tracking-tight truncate '+(SCR.title==='FraserFlow'?'text-[27px] leading-none':'text-[20px]')}>${SCR.title==='FraserFlow'?html`Fraser<span style=${{color:'var(--accent)'}}>Flow</span>`:SCR.title}</h1>
+          <h1 class=${'font-display font-semibold tracking-tight truncate '+(SCR.title==='FraserFlow'?'text-[24px] leading-none':'text-[20px]')}>${SCR.title==='FraserFlow'?html`Fraser<span style=${{color:'var(--accent)'}}>Flow</span>`:SCR.title}</h1>
           ${!live.canEdit&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change anything">View only</span>`}
         </div>
         <div class="flex-1"></div>
