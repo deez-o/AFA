@@ -82,7 +82,7 @@ const REPORTS=[
     const n=s=>rows.filter(r=>r.x.state===s).length;const tracked=n('ok')+n('soon')+n('overdue');
     return {sections:[{heading:'Service status',summary:[['compliant',pct(n('ok')+n('soon'),tracked)],['overdue',n('overdue')],['due soon',n('soon')],['no service recorded',n('nobase')],['machines with no plan',as.filter(a=>!a.plans.length).length]],
       cols:[{h:'Machine',w:1.6},{h:'Category',w:1},{h:'Service',w:1.4},{h:'Status',w:.9},{h:'Last done',w:.9},{h:'Due',w:1.4},{h:'Remaining',w:1.4}],
-      rows:rows.map(({a,x})=>[`${a.m.name} · ${a.m.sub||''}`,machCatOf(a.m),x.plan.name,PLAN_ST[x.state],x.last?fmtD(x.last.done_on):'',x.parts.map(p=>p.dueTxt).join(' / '),x.parts.map(p=>p.leftTxt).join(' / ')]),empty:'No service plans apply.'}]}}},
+      rows:rows.map(({a,x})=>[`${a.m.name} · ${a.m.sub||''}`,machCatOf(a.m),svcName(x),PLAN_ST[x.state],x.last?fmtD(x.last.done_on):'',x.parts.map(p=>p.dueTxt).join(' / '),x.parts.map(p=>p.leftTxt).join(' / ')]),empty:'No service plans apply.'}]}}},
   {id:'prestarts',label:'Prestart compliance',max:90,make:(ctx,{from,to,cat})=>{const {db,M,data}=ctx;const end=to<iso(TODAY)?to:iso(TODAY);const days=from<=end?dayList(from,end):[];
     const as=M.assets.filter(a=>!a.retired&&(!cat||machCatOf(a.m).toLowerCase()===cat.toLowerCase()));
     const jobs=data.blocks.filter(b=>b.kind==='job'&&(b.plantIds||[]).length&&b.end>=from&&b.start<=end);
@@ -178,7 +178,7 @@ async function machinePdf(ctx,a){
       cols:[{h:'Detail',w:1},{h:'',w:3}],rows:[['Fleet no.',a.m.name],['Description',a.m.sub||''],['Category',machCatOf(a.m)],['Rego',a.m.rego||''],['Home crew',a.crew?a.crew.name:''],['Make / model',[p.make,p.model].filter(Boolean).join(' ')],['Year',p.year||''],['Serial',p.serial||''],
         ['Restriction',rs.filter(r=>r.active).map(r=>`${r.reason} (since ${fmtDT(r.created_at)})`).join('; ')||'None']]},
     {heading:'Service schedule',cols:[{h:'Service',w:1.4},{h:'Status',w:.9},{h:'Last done',w:1},{h:'Due',w:1.4},{h:'Remaining',w:1.4}],
-      rows:a.plans.map(x=>[x.plan.name,PLAN_ST[x.state],x.last?fmtD(x.last.done_on):'',x.parts.map(q=>q.dueTxt).join(' / '),x.parts.map(q=>q.leftTxt).join(' / ')]),empty:'No service plans apply.'},
+      rows:a.plans.map(x=>[svcName(x),PLAN_ST[x.state],x.last?fmtD(x.last.done_on):'',x.parts.map(q=>q.dueTxt).join(' / '),x.parts.map(q=>q.leftTxt).join(' / ')]),empty:'No service plans apply.'},
     {heading:'Service records',cols:[{h:'Date',w:.8},{h:'Service',w:1.3},{h:'Hours',w:.6,right:1},{h:'Km',w:.6,right:1},{h:'Mechanic',w:1},{h:'Work done',w:2.4},{h:'Parts',w:1.6}],
       rows:recs.map(r=>[fmtD(r.done_on),(r.baseline?'Before FraserFlow: ':'')+r.service_type,r.hours!=null?fmtN(+r.hours):'',r.km!=null?fmtN(+r.km):'',r.mechanic||'',r.work_done||'',(r.parts||[]).map(q=>`${q.qty&&q.qty!=='1'?q.qty+' × ':''}${q.part}`).join(', ')]),empty:'No services recorded.'},
     {heading:'Work orders',cols:[{h:'No.',w:.5},{h:'Raised',w:1},{h:'Type',w:1},{h:'Title',w:2.2},{h:'Status',w:1},{h:'Completed',w:1},{h:'Notes',w:2.2}],

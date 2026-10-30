@@ -47,6 +47,15 @@ function useMaint(sb){
 }
 
 /* ---------- the maintenance picture of the fleet, worked out from the records ---------- */
+/* a plan with several intervals (e.g. 250 / 500 / 750 / 1000 h): one plan, the next service in the cycle */
+const ivUnit=p=>p.every_hours?'hours':'km';
+const ivsOf=p=>Array.isArray(p&&p.intervals)?p.intervals.filter(v=>+v.every>0).sort((a,b)=>a.every-b.every):[];
+const ivLabel=(p,v)=>(v.label||'').trim()||`${fmtN(+v.every)} ${ivUnit(p)==='km'?'km':'h'} service`;
+function stageOf(p,last){const ivs=ivsOf(p);if(ivs.length<2||!last)return null;const v0=last[ivUnit(p)];if(v0==null)return null;
+  const base=+ivs[0].every,cycle=+ivs[ivs.length-1].every;const M=Math.round((+v0+base)/base)*base;const r=M%cycle||cycle;
+  const v=ivs.find(x=>+x.every===r)||[...ivs].reverse().find(x=>r%+x.every===0)||ivs[0];return {every:+v.every,at:M,label:ivLabel(p,v),notes:(v.notes||'').trim()}}
+const svcName=x=>x.stage?`${x.plan.name} · ${x.stage.label}`:x.plan.name;
+const ivTxt=p=>{const ivs=ivsOf(p);return ivs.length>1?ivs.map(v=>fmtN(+v.every)).join(' / ')+(ivUnit(p)==='km'?' km':' h'):null};
 function buildModel(data,db){
   const today=iso(TODAY);
   const prof=new Map(db.asset_profiles.map(p=>[p.asset_id,p]));
@@ -76,7 +85,7 @@ function buildModel(data,db){
     const state=over.length?'overdue':soon.length?'soon':'ok';
     /* the trigger that comes first: anything overdue, else the one closest to its warning point */
     const first=[...parts].filter(x=>x.left!=null).sort((a,b)=>(a.left/Math.max(a.warn,1))-(b.left/Math.max(b.warn,1)))[0]||parts[0];
-    return {state,parts,last,first}};
+    return {state,parts,last,first,stage:stageOf(p,last)}};
   const assets=machines.map(m=>{const p=prof.get(m.id)||null;const plans=plansFor(m).map(pl=>({plan:pl,...planStatus(m,pl)}));
     const wos=db.work_orders.filter(w=>w.asset_id===m.id);const open=wos.filter(w=>WO_OPEN(w.status));
     const downNow=data.blocks.some(b=>b.resourceId===m.id&&KINDS[b.kind]&&KINDS[b.kind].down&&b.start<=today&&b.end>=today);
@@ -134,8 +143,8 @@ const partsTxt=ps=>(ps||[]).map(p=>`${p.qty&&p.qty!=='1'?p.qty+' × ':''}${p.par
 
 /* ---------- dialogs ---------- */
 function ServiceDialog({ctx,a,plan,baseline,onClose}){
-  const {sb,notify,reload,staff}=ctx;
-  const [f,setF]=useState({done_on:iso(TODAY),hours:a.mt!=='km'&&a.cur.hours?String(a.cur.hours.value):'',km:a.mt!=='hours'&&a.cur.km?String(a.cur.km.value):'',mechanic:'',work_done:'',notes:'',parts:[],service_type:plan?plan.name:''});
+  const {sb,notify,reload,staff}=ctx;const px=plan&&!baseline&&a.plans.find(y=>y.plan.id===plan.id);const stg=px&&px.stage;
+  const [f,setF]=useState({done_on:iso(TODAY),hours:a.mt!=='km'&&a.cur.hours?String(a.cur.hours.value):'',km:a.mt!=='hours'&&a.cur.km?String(a.cur.km.value):'',mechanic:'',work_done:stg&&stg.notes||'',notes:'',parts:[],service_type:plan?(stg?svcName(px):plan.name):''});
   const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
   const save=async()=>{setErr('');if(!f.service_type.trim()){setErr('Say what service was done.');return}if(!f.done_on){setErr('Pick the date it was done.');return}
     setBusy(true);const {error}=await sb.from('service_records').insert({asset_id:a.m.id,plan_id:plan?plan.id:null,service_type:f.service_type.trim(),done_on:f.done_on,hours:n0(f.hours),km:n0(f.km),
@@ -315,16 +324,25 @@ function BreakdownDialog({ctx,a,onClose}){
 
 function PlanDialog({ctx,plan,onClose}){
   const {sb,notify,reload,data}=ctx;
-  const [f,setF]=useState(()=>plan?{...plan,scope:plan.asset_id?'asset':'category',every_hours:plan.every_hours??'',every_km:plan.every_km??'',every_days:plan.every_days??'',category:plan.category||'',asset_id:plan.asset_id||''}
-    :{scope:'category',category:'',asset_id:'',name:'',every_hours:'',every_km:'',every_days:'',warn_hours:50,warn_km:1000,warn_days:14,active:true});
+  const [f,setF]=useState(()=>plan?{...plan,scope:plan.asset_id?'asset':'category',every_hours:plan.every_hours??'',every_km:plan.every_km??'',every_days:plan.every_days??'',category:plan.category||'',asset_id:plan.asset_id||'',
+      multi:ivsOf(plan).length>1,unit:ivUnit(plan),ivs:ivsOf(plan).length>1?ivsOf(plan).map(v=>({every:String(v.every),label:v.label||'',notes:v.notes||''})):[]}
+    :{scope:'category',category:'',asset_id:'',name:'',every_hours:'',every_km:'',every_days:'',warn_hours:50,warn_km:1000,warn_days:14,active:true,multi:false,unit:'hours',ivs:[]});
+  const setIv=(i,p)=>setF(x=>({...x,ivs:x.ivs.map((v,k)=>k===i?{...v,...p}:v)}));
+  const startMulti=()=>setF(x=>({...x,multi:true,ivs:x.ivs.length?x.ivs:[250,500,750,1000].map(n=>({every:String(n),label:'',notes:''}))}));
   const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
   const save=async()=>{setErr('');if(!f.name.trim()){setErr('Name the service, e.g. 250 hr service.');return}
     if(f.scope==='category'&&!f.category.trim()){setErr('Pick the machine category.');return}if(f.scope==='asset'&&!f.asset_id){setErr('Pick the machine.');return}
-    if(f.every_hours===''&&f.every_km===''&&f.every_days===''){setErr('Set at least one interval: hours, km or days.');return}
+    let ivs=null;
+    if(f.multi){ivs=f.ivs.filter(v=>String(v.every).trim()!==''||v.label.trim()||v.notes.trim()).map(v=>({every:+v.every,label:v.label.trim(),notes:v.notes.trim()}));
+      if(ivs.some(v=>!(v.every>0))){setErr('Each interval needs its '+(f.unit==='km'?'km':'hours')+'.');return}
+      if(new Set(ivs.map(v=>v.every)).size!==ivs.length){setErr('Two intervals have the same '+(f.unit==='km'?'km':'hours')+'.');return}
+      if(ivs.length<2){setErr('Add at least two intervals, or switch to one interval.');return}ivs.sort((a,b)=>a.every-b.every)}
+    else if(f.every_hours===''&&f.every_km===''&&f.every_days===''){setErr('Set at least one interval: hours, km or days.');return}
     setBusy(true);const row={category:f.scope==='category'?f.category.trim():null,asset_id:f.scope==='asset'?f.asset_id:null,name:f.name.trim(),
-      every_hours:n0(f.every_hours),every_km:n0(f.every_km),every_days:f.every_days===''?null:Math.round(+f.every_days),warn_hours:+f.warn_hours||0,warn_km:+f.warn_km||0,warn_days:Math.round(+f.warn_days||0),active:!!f.active};
+      every_hours:ivs?(f.unit==='hours'?ivs[0].every:null):n0(f.every_hours),every_km:ivs?(f.unit==='km'?ivs[0].every:null):n0(f.every_km),every_days:f.every_days===''?null:Math.round(+f.every_days),warn_hours:+f.warn_hours||0,warn_km:+f.warn_km||0,warn_days:Math.round(+f.warn_days||0),active:!!f.active};
+    if(ivs||(plan&&plan.intervals))row.intervals=ivs;
     const {error}=plan?await sb.from('service_plans').update(row).eq('id',plan.id):await sb.from('service_plans').insert(row);
-    setBusy(false);if(error){setErr(errMsg(error));return}notify('Service plan saved');reload();onClose()};
+    setBusy(false);if(error){setErr(/intervals/.test(errMsg(error))?'Plans with several intervals aren’t set up yet: an administrator needs to run supabase/service_intervals.sql.':errMsg(error));return}notify('Service plan saved');reload();onClose()};
   const machines=data.resources.filter(r=>r.type==='machine').sort((a,b)=>a.name.localeCompare(b.name));
   return html`<${Modal} title=${plan?'Edit service plan':'New service plan'} sub="A service due by engine hours, kilometres or time: whichever comes first" onClose=${onClose}
     foot=${html`${err&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="pl2-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>Save plan</button>`}>
@@ -332,14 +350,27 @@ function PlanDialog({ctx,plan,onClose}){
       <${Fld} label="Applies to"><div class="seg w-max"><button type="button" aria-pressed=${f.scope==='category'} onClick=${()=>setF({...f,scope:'category'})}>A machine category</button><button type="button" aria-pressed=${f.scope==='asset'} onClick=${()=>setF({...f,scope:'asset'})}>One machine</button></div><//>
       ${f.scope==='category'?html`<${Fld} label="Category"><${Combo} id="sp-cat" className="field" style=${fs} label="Category" value=${f.category} onChange=${v=>setF({...f,category:v})} options=${machineCatsOf(data)}/><//>`
         :html`<${Fld} label="Machine"><select id="sp-asset" class="field" style=${fs} value=${f.asset_id} onChange=${e=>setF({...f,asset_id:e.target.value})}><option value="">Choose…</option>${machines.map(m=>html`<option key=${m.id} value=${m.id}>${m.name} · ${m.sub||''}</option>`)}</select><//>`}
-      <${Fld} label="Service name" span=${true}><input id="sp-name" class="field" style=${fs} placeholder="e.g. 250 hr service, Annual inspection" value=${f.name} onInput=${e=>setF({...f,name:e.target.value})}/><//>
+      <${Fld} label=${f.multi?'Plan name':'Service name'} span=${true}><input id="sp-name" class="field" style=${fs} placeholder=${f.multi?'e.g. Roller service plan':'e.g. 250 hr service, Annual inspection'} value=${f.name} onInput=${e=>setF({...f,name:e.target.value})}/><//>
+      <${Fld} label="Intervals" span=${true}><div class="seg w-max" id="sp-mode"><button type="button" aria-pressed=${!f.multi} onClick=${()=>setF({...f,multi:false})}>One interval</button><button id="sp-multi" type="button" aria-pressed=${!!f.multi} onClick=${startMulti}>Several (e.g. 250 / 500 / 750 / 1000 h)</button></div><//>
+      ${f.multi&&html`<div class="sm:col-span-2 grid gap-2" id="sp-ivs">
+        <div class="flex flex-wrap items-center gap-2 text-[12.5px]"><span class="text-muted">Counted in</span><div class="seg w-max"><button type="button" aria-pressed=${f.unit==='hours'} onClick=${()=>setF({...f,unit:'hours'})}>Engine hours</button><button type="button" aria-pressed=${f.unit==='km'} onClick=${()=>setF({...f,unit:'km'})}>Kilometres</button></div></div>
+        ${f.ivs.map((v,i)=>html`<div key=${i} class="rounded-lg border border-line p-2.5 grid gap-2 sp-iv">
+          <div class="grid grid-cols-[110px_1fr_auto] gap-2 items-end"><${Fld} label=${'Every … '+(f.unit==='km'?'km':'hours')}><input type="number" min="1" step="any" class="field mono sp-iv-every" style=${fs} value=${v.every} onInput=${e=>setIv(i,{every:e.target.value})}/><//>
+            <${Fld} label="Name"><input class="field sp-iv-label" style=${fs} placeholder=${v.every?`${fmtN(+v.every)} ${f.unit==='km'?'km':'h'} service`:'e.g. 500 h service'} value=${v.label} onInput=${e=>setIv(i,{label:e.target.value})}/><//>
+            <button type="button" class="w-8 h-8 inline-flex items-center justify-center rounded-md text-muted hover:text-ink" aria-label="Remove this interval" onClick=${()=>setF(x=>({...x,ivs:x.ivs.filter((y,k)=>k!==i)}))}>${Icon.x}</button></div>
+          <${Fld} label="Notes (what's done at this service)"><textarea class="field sp-iv-notes" rows="2" style=${{height:'auto',padding:'6px 10px',fontSize:13}} placeholder="e.g. Engine oil and filter, fuel filters, grease" value=${v.notes} onInput=${e=>setIv(i,{notes:e.target.value})}></textarea><//></div>`)}
+        <div><button id="sp-iv-add" type="button" class="btn" onClick=${()=>setF(x=>({...x,ivs:[...x.ivs,{every:'',label:'',notes:''}]}))}>${Icon.plus} Add interval</button></div>
+        <p class="text-[12px] text-muted">Due every ${(()=>{const xs=f.ivs.map(v=>+v.every).filter(x=>x>0);return xs.length?fmtN(Math.min(...xs)):'…'})()} ${f.unit==='km'?'km':'hours'} from the last service. Each one is the biggest interval that fits the cycle: with 250 / 500 / 750 / 1000, the services go 250, 500, 750, 1000, then 250 again at 1,250.</p></div>`}
       <div class="sm:col-span-2 grid grid-cols-3 gap-3">
+        ${f.multi?html`<${Fld} label=${f.unit==='km'?'Warn … km before':'Warn … hours before'}><input type="number" min="0" class="field mono" style=${fs} value=${f.unit==='km'?f.warn_km:f.warn_hours} onInput=${e=>setF({...f,[f.unit==='km'?'warn_km':'warn_hours']:e.target.value})}/><//>
+          <${Fld} label="Or every … days"><input id="sp-d" type="number" min="1" step="1" class="field mono" style=${fs} value=${f.every_days} onInput=${e=>setF({...f,every_days:e.target.value})}/><//>
+          <${Fld} label="Warn … days before"><input type="number" min="0" class="field mono" style=${fs} value=${f.warn_days} onInput=${e=>setF({...f,warn_days:e.target.value})}/><//>`:html`
         <${Fld} label="Every … hours"><input id="sp-h" type="number" min="1" step="any" class="field mono" style=${fs} value=${f.every_hours} onInput=${e=>setF({...f,every_hours:e.target.value})}/><//>
         <${Fld} label="Every … km"><input id="sp-km" type="number" min="1" step="any" class="field mono" style=${fs} value=${f.every_km} onInput=${e=>setF({...f,every_km:e.target.value})}/><//>
         <${Fld} label="Every … days"><input id="sp-d" type="number" min="1" step="1" class="field mono" style=${fs} value=${f.every_days} onInput=${e=>setF({...f,every_days:e.target.value})}/><//>
         <${Fld} label="Warn … hours before"><input type="number" min="0" class="field mono" style=${fs} value=${f.warn_hours} onInput=${e=>setF({...f,warn_hours:e.target.value})}/><//>
         <${Fld} label="Warn … km before"><input type="number" min="0" class="field mono" style=${fs} value=${f.warn_km} onInput=${e=>setF({...f,warn_km:e.target.value})}/><//>
-        <${Fld} label="Warn … days before"><input type="number" min="0" class="field mono" style=${fs} value=${f.warn_days} onInput=${e=>setF({...f,warn_days:e.target.value})}/><//>
+        <${Fld} label="Warn … days before"><input type="number" min="0" class="field mono" style=${fs} value=${f.warn_days} onInput=${e=>setF({...f,warn_days:e.target.value})}/><//>`}
       </div>
       <label class="inline-flex items-center gap-2 text-[13px] cursor-pointer"><input type="checkbox" class="w-4 h-4" checked=${!!f.active} onChange=${e=>setF({...f,active:e.target.checked})}/>Active</label>
     </div>
@@ -360,10 +391,10 @@ function MachinePhoto({ctx,a}){
     catch(e){setErr(/asset_photos|relation|schema cache/.test(errMsg(e))?'Machine photos aren’t set up yet: an administrator needs to run supabase/machine_photos.sql.':errMsg(e))}finally{setBusy(false)}};
   const del=async()=>{setErr('');setBusy(true);try{const {error}=await sb.from('asset_photos').delete().eq('asset_id',id);if(error)throw error;setPh(null)}catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
   const can=perms.work;
-  if(ph===undefined)return html`<div class="rounded-md bg-sunken animate-pulse" style=${{aspectRatio:'4/3'}} id="ap-photo-loading"></div>`;
+  if(ph===undefined)return html`<div class="rounded-md bg-sunken animate-pulse h-10" id="ap-photo-loading"></div>`;
   return html`<div class="grid gap-1.5" id="ap-photo">
     ${ph?html`<button type="button" class="block rounded-md overflow-hidden border border-line bg-sunken" style=${{aspectRatio:'4/3'}} onClick=${()=>setBig(true)} aria-label="View photo"><img src=${ph} alt=${a.m.name} class="w-full h-full object-cover" id="ap-photo-img"/></button>`
-      :can&&html`<label class="rounded-md border border-dashed border-line-strong flex flex-col items-center justify-center gap-1 text-[12.5px] text-muted cursor-pointer hover:bg-sunken" style=${{aspectRatio:'4/3'}}>${Icon.plus}<span>${busy?'Saving…':'Add a photo of the machine'}</span>
+      :can&&html`<label class="rounded-md border border-dashed border-line-strong flex items-center justify-center gap-1.5 h-10 text-[12.5px] text-muted cursor-pointer hover:bg-sunken">${Icon.plus}<span>${busy?'Saving…':'Add a photo of the machine'}</span>
         <input id="ap-photo-file" type="file" accept="image/*" class="sr-only" disabled=${busy} onChange=${e=>{add(e.target.files[0]);e.target.value=''}}/></label>`}
     ${ph&&can&&html`<div class="flex items-center gap-3 text-[12px]"><label class="text-muted hover:text-ink cursor-pointer">${busy?'Saving…':'Change photo'}<input id="ap-photo-file" type="file" accept="image/*" class="sr-only" disabled=${busy} onChange=${e=>{add(e.target.files[0]);e.target.value=''}}/></label>
       <button id="ap-photo-del" type="button" class="text-muted hover:text-ink" disabled=${busy} onClick=${del}>Remove</button></div>`}
@@ -411,7 +442,7 @@ function AssetPanel({ctx,a,onClose,open,behind}){
         </section>
         <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
           <span class="label">Next service</span>
-          ${a.next?html`<div class="font-display text-[16px] font-semibold">${a.next.plan.name}</div><div class="text-[12.5px]">${planChip(a.next.state)} <span class="text-muted">${a.next.first.dueTxt} · ${a.next.first.leftTxt}</span></div>`
+          ${a.next?html`<div class="font-display text-[16px] font-semibold">${svcName(a.next)}</div>${a.next.stage&&a.next.stage.notes&&html`<div class="text-[12px] text-muted whitespace-pre-line" id="ap-next-notes">${a.next.stage.notes}</div>`}<div class="text-[12.5px]">${planChip(a.next.state)} <span class="text-muted">${a.next.first.dueTxt} · ${a.next.first.leftTxt}</span></div>`
             :html`<div class="text-[12.5px] text-muted">${a.plans.length?'Record the last service to start tracking.':'No service plan for this category yet.'}</div>`}
           <div class="text-[11.5px] text-muted mt-1">Last service: ${a.last?`${a.last.service_type}, ${fmtTs(a.last.done_on)}`:'none recorded'}</div>
         </section>
@@ -422,12 +453,13 @@ function AssetPanel({ctx,a,onClose,open,behind}){
           :html`<div class="rounded-lg border border-line divide-y" style=${{borderColor:'var(--line)'}}>${plans.map(x=>{const hasWo=a.open.some(w=>w.plan_id===x.plan.id);
             return html`<div key=${x.plan.id} class="px-3 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1" style=${{borderColor:'var(--line)'}}>
               <div class="min-w-[180px] flex-1"><div class="text-[13.5px] font-medium">${x.plan.name} ${planChip(x.state)}</div>
-                <div class="text-[12px] text-muted">${[x.plan.every_hours&&`every ${fmtN(+x.plan.every_hours)} h`,x.plan.every_km&&`every ${fmtN(+x.plan.every_km)} km`,x.plan.every_days&&`every ${x.plan.every_days} days`].filter(Boolean).join(' or ')}${x.plan.asset_id?' · this machine only':''}</div></div>
+                ${x.stage&&html`<div class="text-[12.5px] ap-stage"><span class="text-muted">Next:</span> <span class="font-medium">${x.stage.label}</span>${x.stage.notes&&html`<div class="text-[12px] text-muted whitespace-pre-line">${x.stage.notes}</div>`}</div>`}
+                <div class="text-[12px] text-muted">${ivTxt(x.plan)?`${ivTxt(x.plan)} cycle${x.plan.every_days?` or every ${x.plan.every_days} days`:''}`:[x.plan.every_hours&&`every ${fmtN(+x.plan.every_hours)} h`,x.plan.every_km&&`every ${fmtN(+x.plan.every_km)} km`,x.plan.every_days&&`every ${x.plan.every_days} days`].filter(Boolean).join(' or ')}${x.plan.asset_id?' · this machine only':''}</div></div>
               <div class="text-[12.5px] min-w-[200px]">${x.state==='nobase'?html`<span class="text-muted">${x.last?'The last service has no matching hours or km':'When was it last done?'}</span>`
                 :x.parts.map(pt=>html`<div key=${pt.k}><span class="text-muted">Due</span> ${pt.dueTxt} <span class=${pt.left!=null&&pt.left<=0?'font-semibold':'text-muted'} style=${pt.left!=null&&pt.left<=0?{color:'hsl(0 72% 47%)'}:null}>· ${pt.leftTxt}</span></div>`)}</div>
               ${perms.work&&html`<div class="flex gap-2">
                 ${x.state==='nobase'&&html`<button type="button" class="btn" style=${{height:30}} onClick=${()=>open({k:'service',a,plan:x.plan,baseline:true})}>Set last service</button>`}
-                ${x.state!=='nobase'&&!hasWo&&html`<button type="button" class="btn" style=${{height:30}} onClick=${()=>open({k:'wo',init:{asset_id:a.m.id,wo_type:'service',plan_id:x.plan.id,title:x.plan.name,priority:x.state==='overdue'?'high':'medium'}})}>Create work order</button>`}
+                ${x.state!=='nobase'&&!hasWo&&html`<button type="button" class="btn" style=${{height:30}} onClick=${()=>open({k:'wo',init:{asset_id:a.m.id,wo_type:'service',plan_id:x.plan.id,title:svcName(x),...(x.stage&&x.stage.notes?{description:x.stage.notes}:{}),priority:x.state==='overdue'?'high':'medium'}})}>Create work order</button>`}
                 ${hasWo&&html`<span class="text-[12px] text-muted self-center">Work order open</span>`}
                 <button type="button" class="btn" style=${{height:30}} onClick=${()=>open({k:'service',a,plan:x.plan})}>Record service</button></div>`}
             </div>`})}</div>`}
@@ -481,8 +513,8 @@ function Dashboard({ctx,open}){
     ${attention.length>0&&html`<section class="panel p-3 grid gap-2" aria-label="Services needing attention"><div class="flex items-baseline gap-2"><h3 class="font-display text-[15px] font-semibold">Services needing attention</h3><span class="text-[12px] text-muted">${attention.length}</span></div>
       <div class="grid gap-1.5 md:grid-cols-2 xl:grid-cols-3">${attention.slice(0,12).map(({a,x})=>{const hasWo=a.open.some(w=>w.plan_id===x.plan.id);
         return html`<div key=${a.m.id+x.plan.id} class="rounded-lg border border-line px-3 py-2 flex items-center gap-2">
-          <button type="button" class="min-w-0 flex-1 text-left" onClick=${()=>open({k:'asset',id:a.m.id})}><div class="text-[13px] font-medium truncate">${a.m.name} · ${x.plan.name}</div><div class="text-[12px] text-muted truncate">${planChip(x.state)} ${x.first.dueTxt} · ${x.first.leftTxt}</div></button>
-          ${hasWo?html`<span class="text-[11.5px] text-muted">WO open</span>`:perms.work&&html`<button type="button" class="btn" style=${{height:28,fontSize:12}} onClick=${()=>open({k:'wo',init:{asset_id:a.m.id,wo_type:'service',plan_id:x.plan.id,title:x.plan.name,priority:x.state==='overdue'?'high':'medium'}})}>Work order</button>`}</div>`})}</div></section>`}
+          <button type="button" class="min-w-0 flex-1 text-left" onClick=${()=>open({k:'asset',id:a.m.id})}><div class="text-[13px] font-medium truncate">${a.m.name} · ${svcName(x)}</div><div class="text-[12px] text-muted truncate">${planChip(x.state)} ${x.first.dueTxt} · ${x.first.leftTxt}</div></button>
+          ${hasWo?html`<span class="text-[11.5px] text-muted">WO open</span>`:perms.work&&html`<button type="button" class="btn" style=${{height:28,fontSize:12}} onClick=${()=>open({k:'wo',init:{asset_id:a.m.id,wo_type:'service',plan_id:x.plan.id,title:svcName(x),...(x.stage&&x.stage.notes?{description:x.stage.notes}:{}),priority:x.state==='overdue'?'high':'medium'}})}>Work order</button>`}</div>`})}</div></section>`}
     <section class="panel flex flex-col min-h-0">
       <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
         <input id="fl-search" class="field" style=${{...fs,width:220}} placeholder="Search machine, rego, make" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search machines"/>
@@ -501,7 +533,7 @@ function Dashboard({ctx,open}){
             <td class="py-2 px-3 mono whitespace-nowrap">${a.m.rego||html`<span class="text-faint">–</span>`}</td>
             <td class="py-2 px-3 mono tnum whitespace-nowrap">${meterTxt(a)}</td>
             <td class="py-2 px-3 tnum whitespace-nowrap fl-use" title=${(['hours','km'].map(k=>a.use[k]&&`${k==='hours'?'Hours':'Km'}: ${fmtN(+a.use[k].from.value)} → ${fmtN(+a.use[k].to.value)} over ${Math.round(a.use[k].days)} days (${a.use[k].n} readings)`).filter(Boolean).join('\n'))||'Needs two readings at least 30 days apart'}>${(a.use.hours||a.use.km)?useTxt(a):html`<span class="text-faint">–</span>`}</td>
-            <td class="py-2 px-3">${a.next?html`<div class="whitespace-nowrap">${a.next.plan.name} ${planChip(a.next.state)}</div><div class="text-[11.5px] text-muted whitespace-nowrap">${a.next.first.dueTxt} · ${a.next.first.leftTxt}</div>`:html`<span class="text-faint">${a.plans.length?'Last service not set':'No plan'}</span>`}</td>
+            <td class="py-2 px-3">${a.next?html`<div class="whitespace-nowrap">${svcName(a.next)} ${planChip(a.next.state)}</div><div class="text-[11.5px] text-muted whitespace-nowrap">${a.next.first.dueTxt} · ${a.next.first.leftTxt}</div>`:html`<span class="text-faint">${a.plans.length?'Last service not set':'No plan'}</span>`}</td>
             <td class="py-2 px-3 whitespace-nowrap">${a.open.length?html`<span class="font-medium">${a.open.length} open</span>`:html`<span class="text-faint">–</span>`}${a.restr.length?html` <span class="text-[10.5px] font-bold uppercase tracking-wide px-1 rounded" style=${{background:'hsl(0 72% 47%)',color:'#fff'}} title="Restricted: must not be used">Restricted</span>`:a.defects.length?html` <span class="text-[11.5px] text-muted">· ${a.defects.length} defect${a.defects.length===1?'':'s'}</span>`:''}</td>
             ${ctx.db.p3&&html`<td class="py-2 px-3 whitespace-nowrap">${a.ps?html`<span class="inline-flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full" style=${{background:window.FFP?window.FFP.RES[a.ps.result][1]:'var(--muted)'}}></span>${localDay(a.ps.submitted_at)===M.today?new Date(a.ps.submitted_at).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'}):fmtShort(new Date(a.ps.submitted_at))}${a.ps.result!=='pass'?html` <span class="text-[11px] font-semibold" style=${{color:window.FFP?window.FFP.RES[a.ps.result][1]:''}}>${a.ps.result==='unsafe'?'do not operate':a.ps.failed+' failed'}</span>`:''}</span>`:html`<span class="text-faint">–</span>`}</td>`}</tr>`)}
           ${!list.length&&html`<tr><td colspan="9" class="px-3 py-6 text-center text-muted">No machines match.</td></tr>`}</tbody></table></div>
@@ -675,7 +707,7 @@ function Plans({ctx,open}){
       <tbody>${plans.map(p=>{const m=p.asset_id&&data.resources.find(r=>r.id===p.asset_id);return html`<tr key=${p.id} class="border-t border-line" style=${p.active?null:{opacity:.55}}>
           <td class="py-2 px-3 whitespace-nowrap">${p.asset_id?html`<span class="font-medium">${m?m.name:p.asset_id}</span> <span class="text-muted">(one machine)</span>`:html`<span class="font-medium">${p.category}</span>`}</td>
           <td class="py-2 px-3">${p.name}${!p.active?html` <span class="text-[11px] text-muted">(off)</span>`:''}</td>
-          <td class="py-2 px-3 whitespace-nowrap">${[p.every_hours&&`${fmtN(+p.every_hours)} h`,p.every_km&&`${fmtN(+p.every_km)} km`,p.every_days&&`${p.every_days} days`].filter(Boolean).join(' / ')}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${ivTxt(p)?[ivTxt(p),p.every_days&&`${p.every_days} days`].filter(Boolean).join(' or '):[p.every_hours&&`${fmtN(+p.every_hours)} h`,p.every_km&&`${fmtN(+p.every_km)} km`,p.every_days&&`${p.every_days} days`].filter(Boolean).join(' / ')}</td>
           <td class="py-2 px-3 whitespace-nowrap text-muted">${[p.every_hours&&`${fmtN(+p.warn_hours)} h`,p.every_km&&`${fmtN(+p.warn_km)} km`,p.every_days&&`${p.warn_days} days`].filter(Boolean).join(' / ')}</td>
           <td class="py-2 px-3 tnum">${covers(p)}</td>
           <td class="py-2 px-3 text-right whitespace-nowrap" colspan="2">${perms.mgr&&(del===p.id?html`<button type="button" class="text-[12px] font-semibold mr-2" style=${{color:'var(--bad)'}} onClick=${()=>remove(p)}>Remove</button><button type="button" class="text-[12px] text-muted" onClick=${()=>setDel(null)}>Keep</button>`
@@ -714,7 +746,7 @@ function FleetScreen({data,live,notify,setData,tab:tab0,onCounts,assetReq,onImpo
       :tabOk==='df'?html`<${D.DefectsTab} ctx=${ctx} open=${open}/>`:tabOk==='ps'?html`<${P.PrestartsTab} ctx=${ctx} open=${open}/>`:tabOk==='cl'?html`<${P.ChecklistsTab} ctx=${ctx} open=${open}/>`:tabOk==='rp'?html`<${window.FFR.ReportsTab} ctx=${ctx}/>`:html`<${Plans} ctx=${ctx} open=${open}/>`}
     ${a&&html`<${AssetPanel} ctx=${ctx} a=${a} open=${open} behind=${!!dlg} onClose=${()=>setAsset(null)}/>`}
     ${dlg&&dlg.k==='wo'&&html`<${WorkOrderDialog} ctx=${ctx} wo=${dlg.wo&&db.work_orders.find(w=>w.id===dlg.wo.id)||dlg.wo} init=${dlg.init} onClose=${()=>setDlg(null)}/>`}
-    ${dlg&&dlg.k==='service'&&html`<${ServiceDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} plan=${dlg.plan} baseline=${dlg.baseline} onClose=${()=>setDlg(null)}/>`}
+    ${dlg&&dlg.k==='service'&&html`<${ServiceDialog} key=${(dlg.baseline?'b:':'r:')+dlg.a.m.id+(dlg.plan?dlg.plan.id:'')} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} plan=${dlg.plan} baseline=${dlg.baseline} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='reading'&&html`<${ReadingDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='profile'&&html`<${ProfileDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='machine'&&html`<${MachineDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
