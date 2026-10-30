@@ -2754,7 +2754,7 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,ma
       ${account&&html`<div class="px-4 py-3 border-b border-line">
         <div class="text-[12px] text-muted">Signed in as</div>
         <div class="text-[13.5px] font-semibold truncate">${account.email}</div>
-        <div class="text-[11.5px] text-muted mt-0.5">${({admin:'Administrator',superuser:'Superuser (full access)',planner:'Planner (can edit)',supervisor:'Supervisor (maintenance)',mechanic:'Mechanic (maintenance)',operator:'Operator'})[account.role]||'View only'}</div>
+        ${(account.role==='admin'||account.role==='superuser')&&html`<div class="text-[11.5px] text-muted mt-0.5 acct-role">${({admin:'Administrator',superuser:'Superuser (full access)'})[account.role]}</div>`}   ${'' /* roles are only shown to administrators and superusers */}
       </div>`}
       <div class="p-2">
         ${sectionLabel('Appearance')}
