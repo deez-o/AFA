@@ -1222,6 +1222,15 @@ function AsphaltShifts({f,set,data}){
   const empties=tot.dates.filter(k=>!hasQty(sd[k])&&!locked(k));
   const copyFirst=()=>{const src=linesOf(sd[first]);const next={...sd};empties.forEach(k=>{next[k]={...shiftBase(sd[k]),lines:src.map(l=>({...l}))}});set({shiftData:next})};
   const copyPrev=i=>{const p=tot.dates[i-1];if(p&&sd[p])put(tot.dates[i],linesOf(sd[p]).map(l=>({...l})))};
+  /* split: put the whole job's quantities in Shift 1, then share tonnes and area evenly over every shift (any rounding goes on the last one) */
+  const [splitAsk,setSplitAsk]=useState(false);
+  const s0=tot.dates[0];const splitTo=tot.dates.filter(k=>!locked(k));
+  const canSplit=!!s0&&!locked(s0)&&hasQty(sd[s0])&&splitTo.length>1;
+  const othersFilled=splitTo.filter(k=>k!==s0&&hasQty(sd[k])).length;
+  const splitFirst=()=>{const src=linesOf(sd[s0]).filter(lineHas);const n=splitTo.length;
+    const part=(v,dp,idx)=>{if(!filledNum(v)||!num(v))return v;const t=num(v),m=10**dp,each=Math.round(t/n*m)/m;return idx===n-1?Math.round((t-each*(n-1))*m)/m:each};
+    const next={...sd};splitTo.forEach((k,idx)=>{next[k]={...shiftBase(sd[k]),lines:src.map(l=>({...l,tonnes:part(l.tonnes,1,idx),area:part(l.area,0,idx)}))}});
+    set({shiftData:next});setSplitAsk(false)};
   const depthHint=l=>{const t=num(l.tonnes),a=num(l.area);return t&&a?Math.round(t/DEFAULT_DENSITY/a*1000):null};
   /* adding a shift moves the booking's end date to the next working day (Saturday / Sunday only when ticked) */
   const nextShift=()=>{if(!f.end||f.end<f.start)return null;let d=addDays(parse(f.end),1);for(let g=0;g<7&&!worksOn(f,d);g++)d=addDays(d,1);return d};
@@ -1271,9 +1280,15 @@ function AsphaltShifts({f,set,data}){
     ${tot.dates.length===0
       ?html`<div class="text-[12.5px] text-muted">${f.end<f.start?'Fix the dates above to see the shifts.':'This booking only covers weekend days. Tick Saturday or Sunday to enter quantities.'}</div>`
       :html`<div>
-        ${first&&empties.length>0&&html`<div class="flex justify-end mb-1.5">
-          <button type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${copyFirst}>Copy Shift ${tot.dates.indexOf(first)+1} to ${empties.length} empty shift${empties.length===1?'':'s'}</button></div>`}
-        <div class="border border-line rounded-lg overflow-hidden">
+        ${((first&&empties.length>0)||canSplit)&&html`<div class="flex flex-wrap justify-end items-center gap-x-4 gap-y-1 mb-1.5 text-[12px]">
+          ${canSplit&&(splitAsk
+            ?html`<span class="inline-flex flex-wrap items-center gap-2"><span>Replace the quantities in the ${othersFilled} other filled-in shift${othersFilled===1?'':'s'} with an even split?</span>
+                <button id="ed-split-yes" type="button" class="btn btn-primary" style=${{height:26,fontSize:12}} onClick=${splitFirst}>Split</button>
+                <button type="button" class="btn btn-ghost" style=${{height:26,fontSize:12}} onClick=${()=>setSplitAsk(false)}>Cancel</button></span>`
+            :html`<button id="ed-split" type="button" class="font-medium underline underline-offset-2 text-muted hover:text-ink" title="Enter the whole job's quantities in Shift 1, then share the tonnes and area evenly over every shift"
+                onClick=${()=>othersFilled?setSplitAsk(true):splitFirst()}>Split Shift 1 evenly across ${splitTo.length} shifts</button>`)}
+          ${first&&empties.length>0&&!splitAsk&&html`<button type="button" class="font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${copyFirst}>Copy Shift ${tot.dates.indexOf(first)+1} to ${empties.length} empty shift${empties.length===1?'':'s'}</button>`}</div>`}
+        <div id="ed-qty" tabindex="-1" class="border border-line rounded-lg overflow-hidden">
           <div class="max-h-[340px] overflow-y-auto">
             <div class="hidden sm:grid grid-cols-[118px_1fr] gap-2 px-2.5 py-1.5 bg-sunken border-b border-line sticky top-0 z-[1]">
               <span class="label">Shift</span>
@@ -1476,8 +1491,8 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
           <label class="grid gap-1"><span class="label">Notes</span>
             <textarea id="ed-notes" class="field" style=${{height:'auto',minHeight:60,padding:'8px 10px',resize:'vertical'}} rows="2" placeholder="Anything the crew or plant should know" value=${f.notes||''} onInput=${e=>set({notes:e.target.value})}></textarea></label>
           <div class="grid gap-1"><span class="label">Shift</span>
-            <div class="seg w-max">
-              <button type="button" aria-pressed=${(f.shift||'day')==='day'} onClick=${()=>set({shift:'day'})}>Day works</button>
+            <div id="ed-shift" class="seg w-max rounded-lg">
+              <button type="button" aria-pressed=${(f.shift||(f.id?'day':''))==='day'} onClick=${()=>set({shift:'day'})}>Day works</button>
               <button type="button" aria-pressed=${f.shift==='night'} onClick=${()=>set({shift:'night'})}>Night works</button>
             </div></div>
           <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -1532,6 +1547,21 @@ function Editor({initial,data,onSave,onDelete,onClose}){
     :f.kind==='job'&&(f.jobId==='__new'||!data.jobs.length)&&!(f._newJobName||'').trim()?'Give the new job a name.'
     :f.kind==='job'&&f.jobId==='__new'&&data.jobs.some(j=>j.name.trim().toLowerCase()===(f._newJobName||'').trim().toLowerCase())?'There is already a job with that name. Pick it from the list.':'';
   const set=p=>setF(x=>({...x,...p}));
+  /* new crew job bookings: these must be filled in before the booking can be added */
+  const [tried,setTried]=useState(false);
+  const missing=(()=>{if(!isNew||f.kind!=='job')return [];const m=[];const crewR=data.resources.find(r=>r.id===f.resourceId);
+    const cust=(f._customer??(f.jobId==='__new'?'':(data.jobs.find(j=>j.id===(f.jobId||data.jobs[0]?.id))?.customer||''))).trim();
+    if(!crewR||crewR.type!=='crew')m.push({id:'ed-res',label:'Crew',tab:'details'});
+    if(!cust)m.push({id:'ed-customer',label:'Customer',tab:'details'});
+    if(!(f.quoteNo||'').trim())m.push({id:'ed-quote',label:'Quote number',tab:'details'});
+    if(!(f.address||'').trim())m.push({id:'ed-address',label:'Site address',tab:'details'});
+    if(f.shift!=='day'&&f.shift!=='night')m.push({id:'ed-shift',label:'Shift (day or night)',tab:'details'});
+    if(!f.start)m.push({id:'ed-start',label:'Start date',tab:'details'});
+    if(!f.end)m.push({id:'ed-end',label:'End date',tab:'details'});
+    const sealJ=isSealCrew(crewR);const k0=f.start&&f.end?qtyTotals(f).dates[0]:null;
+    const ok0=k0&&linesOf((f.shiftData||{})[k0]).some(l=>(l.type||'').trim()&&(sealJ?num(l.area):num(l.tonnes)||num(l.area)));
+    if(!ok0)m.push({id:'ed-qty',label:`Shift 1 ${sealJ?'seal':'asphalt'} quantities (${sealJ?'seal type and area':'asphalt type and tonnes'})`,tab:'quantities'});
+    return m})();
   useEffect(()=>{const h=e=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
   const days=f.start&&f.end&&!err?diffDays(parse(f.start),parse(f.end))+1:0;
   const changeRes=id=>{const t=data.resources.find(r=>r.id===id)?.type;set({resourceId:id,kind:KINDS[f.kind].for===t?f.kind:TYPES[t].def})};
@@ -1539,6 +1569,7 @@ function Editor({initial,data,onSave,onDelete,onClose}){
   const [tab,setTab]=useState(tabs[0].id);
   const active=tabs.find(t=>t.id===tab)||tabs[0];
   const submit=e=>{e.preventDefault();if(err)return;
+    if(missing.length){setTried(true);const m0=missing[0];setTab(m0.tab);setTimeout(()=>{const el=document.getElementById(m0.id);if(el){el.scrollIntoView({block:'center'});if(el.focus)el.focus()}},60);return}
     const out={...f,id:f.id||uid()};
     if(out.kind!=='job'){delete out.jobId;delete out.shift;delete out.address;delete out.plantIds}
     else{out.jobId=out.jobId||data.jobs[0]?.id||'__new';out.shift=out.shift||'day';out.plantIds=out.plantIds||[];out.address=(out.address||'').trim();out.quoteNo=(out.quoteNo||'').trim();if(!out.quoteNo)delete out.quoteNo;
@@ -1581,9 +1612,12 @@ function Editor({initial,data,onSave,onDelete,onClose}){
           ${tabs.map(t=>html`<button type="button" key=${t.id} role="tab" id=${'tab-'+t.id} aria-selected=${active.id===t.id} aria-controls=${'panel-'+t.id}
             class="py-2 text-[13.5px] font-medium whitespace-nowrap border-b-2 transition-colors"
             style=${active.id===t.id?{borderColor:'var(--accent)',color:'var(--ink)'}:{borderColor:'transparent',color:'var(--muted)'}}
-            onClick=${()=>setTab(t.id)}>${typeof t.label==='function'?t.label(f,data):t.label}${t.badge&&t.badge(f,data)&&html`<span class="ml-1.5 mono text-[11px] px-1.5 py-0.5 rounded bg-sunken text-muted">${t.badge(f,data)}</span>`}</button>`)}
+            onClick=${()=>setTab(t.id)}>${typeof t.label==='function'?t.label(f,data):t.label}${tried&&missing.some(m=>m.tab===t.id)&&html`<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full align-middle" style=${{background:'var(--bad)'}} aria-label="needs filling in"></span>`}${t.badge&&t.badge(f,data)&&html`<span class="ml-1.5 mono text-[11px] px-1.5 py-0.5 rounded bg-sunken text-muted">${t.badge(f,data)}</span>`}</button>`)}
         </div>
       </div>
+      ${isNew&&f.kind==='job'&&html`<style>${['ed-res','ed-customer','ed-quote','ed-address','ed-start','ed-end'].map(i=>`label:has(#${i}) > .label::after`).join(',')}{content:' *';color:var(--bad)}
+        .label:has(+ #ed-shift)::after{content:' *';color:var(--bad)}
+        ${tried?missing.map(m=>`#${m.id}`).join(',')+'{border-color:var(--bad)!important;box-shadow:0 0 0 1px var(--bad)!important}':''}</style>`}
       <div class="flex-1 min-h-0 overflow-y-auto px-5 py-5" role="tabpanel" id=${'panel-'+active.id} aria-labelledby=${'tab-'+active.id}>
         ${active.render({f,set,data,rtype,err,changeRes})}
       </div>
@@ -1593,7 +1627,7 @@ function Editor({initial,data,onSave,onDelete,onClose}){
                <button type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>onDelete(f.id)}>Delete</button>
                <button type="button" class="btn btn-ghost" onClick=${()=>setConfirmDel(false)}>Keep</button>`
           :html`<button type="button" class="btn btn-ghost text-muted" onClick=${()=>setConfirmDel(true)}>Delete</button>`)}
-        <div class="flex-1"></div>
+        <div class="flex-1 min-w-0">${tried&&missing.length>0&&html`<div id="ed-missing" role="alert" class="text-[12.5px] font-medium" style=${{color:'var(--bad)'}}>Still needed: ${missing.map(m=>m.label).join(', ')}</div>`}</div>
         <button type="button" class="btn" onClick=${onClose}>Cancel</button>
         <button type="submit" class="btn btn-primary" disabled=${!!err}>${isNew?'Add booking':'Save'}</button>
       </div>
@@ -3410,7 +3444,7 @@ function App({boot,live}){
   const onCreate=({resourceId,start,end})=>{
     const t=data.resources.find(r=>r.id===resourceId)?.type||'crew';
     const fj=data.jobs.find(j=>!j.completed);
-    setEditing({resourceId,start,end,kind:TYPES[t].def,jobId:fj?.id||'__new',shift:'day',title:'',address:fj?.address||'',plantIds:[]});
+    setEditing({resourceId,start,end,kind:TYPES[t].def,jobId:fj?.id||'__new',title:'',address:fj?.address||'',plantIds:[]});   /* shift is picked in the booking (required) */
   };
   const onSave=(b,newMixes=[],jobPatch=null,newJob=null)=>{setData(d=>{const exists=d.blocks.some(x=>x.id===b.id);
     if(newJob)d={...d,jobs:[...d.jobs,newJob]};
