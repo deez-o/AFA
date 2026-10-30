@@ -17,7 +17,7 @@
 alter table public.profiles drop constraint if exists profiles_role_check;
 update public.profiles set role = 'prestart' where role = 'operator';   -- the role once called "operator" is now "prestart"
 alter table public.profiles add constraint profiles_role_check
-  check (role in ('admin','superuser','planner','supervisor','mechanic','prestart','viewer'));
+  check (role in ('admin','superuser','planner','supervisor','mechanic','prestart','lab','viewer'));
 
 create or replace function public.maint_can_work()
 returns boolean language sql stable security definer set search_path = public as $$

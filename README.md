@@ -93,6 +93,7 @@ Fleet's sections sit in a bar below the header: **Dashboard · Machines · Calen
 - `supabase/maintenance.sql`: the maintenance tables, roles and database rules
 - `supabase/prestarts.sql`: prestart checklists and prestarts, the `maintenance` file store, and the link from each login to its Staff record
 - `supabase/defects.sql`: defects, restrictions, and how work orders carry defects through repair
+- `lab.js` and `supabase/lab.sql`: the Lab screen, lab reports and their file store
 - `qa.js`, `qaforms.js` and `supabase/qa.sql`: Site QA packs (the JSA, toolbox meeting and the other QA forms) (JSA and toolbox meetings), their signatures and PDFs
 - `supabase/planner_link.sql`: stops restricted machines being added to bookings or plans; `machine_alerts` for the planner's warnings; `maintenance_feed` for the notifications bell
 - `tests/maintenance_test.sql`, `tests/prestarts_test.sql`, `tests/defects_test.sql`, `tests/planner_link_test.sql`: check the database rules; they leave no data behind
@@ -138,6 +139,9 @@ Run `supabase/qa.sql` once in Supabase → SQL Editor (then `tests/qa_test.sql` 
 - In the office: a booking's **QA** tab lists each shift's packs with their status, opens them and makes the PDFs.
 - Works without reception: changes and signatures wait on the phone and are sent when it's back.
 - Operators (the Prestart role) see QA next to Prestarts: a short read-only overview of the JSA (who's who, the controls in place, site hazards, checklists, the toolbox meeting) and the sign-off. They can't change or delete anything.
+
+### Lab (in progress)
+Lab in the left menu (administrators only until it's released in Settings): every shift already worked, by job, with what was actually **laid** from the submitted QA pack (tonnes from the laying record, m² from the site diagram layers) next to what was planned, the QA status of each shift, **QA PDF** per shift or **Download QA** for the whole job, and **lab reports** uploaded per job or per shift (PDF, pictures, Excel, CSV or Word, up to 25 MB). A **Lab** login role sees only this screen and can upload reports; planners and administrators can upload too. Run `supabase/lab.sql` once.
 
 ### Prestarts
 - **Checklists** (Fleet › Checklists, admin and superuser): one per machine category, plus an optional one for *all other machines*. Start from the standard list and change it. Saving a change makes a new version; prestarts already done keep the questions they answered. Mark questions **critical**: a fail means *Do not operate*.

@@ -12,7 +12,7 @@
 // A temporary password: the person chooses their own the first time they sign in.
 
 const LOGIN_DOMAIN = 'fraserflow.local';
-const ROLES = ['admin', 'superuser', 'planner', 'supervisor', 'mechanic', 'prestart', 'viewer'];
+const ROLES = ['admin', 'superuser', 'planner', 'supervisor', 'mechanic', 'prestart', 'lab', 'viewer'];
 
 function send(res, status, body) {
   res.statusCode = status;

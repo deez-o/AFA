@@ -10,14 +10,14 @@
 create table if not exists public.profiles (
   id         uuid primary key references auth.users(id) on delete cascade,
   email      text,
-  role       text not null default 'viewer' check (role in ('admin','superuser','planner','supervisor','mechanic','prestart','viewer')),
+  role       text not null default 'viewer' check (role in ('admin','superuser','planner','supervisor','mechanic','prestart','lab','viewer')),
   created_at timestamptz not null default now()
 );
 
 -- the full list of roles (for databases set up before superuser, supervisor, mechanic and operator existed)
 alter table public.profiles drop constraint if exists profiles_role_check;
 update public.profiles set role = 'prestart' where role = 'operator';   -- the role once called "operator" is now "prestart"
-alter table public.profiles add constraint profiles_role_check check (role in ('admin','superuser','planner','supervisor','mechanic','prestart','viewer'));
+alter table public.profiles add constraint profiles_role_check check (role in ('admin','superuser','planner','supervisor','mechanic','prestart','lab','viewer'));
 
 -- every new sign-in account gets a profile automatically
 create or replace function public.handle_new_user()
