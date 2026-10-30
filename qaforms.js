@@ -165,27 +165,97 @@ const DIAGRAM={id:'diagram',label:'Field site diagram',short:'Site diagram',
     if(!pics.length){o.box(o.M,y,W,170);y+=172}}};
 
 /* ---------- asphalt laying record ---------- */
-const layRow=()=>({docket:'',rego:'',time:hhmm(),temp:'',tonnes:'',ch_start:'',ch_finish:'',dip_l:'',dip_c:'',dip_r:'',comments:''});
+/* reading a delivery docket with the phone camera (tesseract.js, in the browser; it keeps working without reception once loaded) */
+const OCR_JS='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+const OCR_LANG='https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int';
+let ocrWorker=null;
+function loadOcr(){if(ocrWorker)return ocrWorker;
+  ocrWorker=(async()=>{if(!window.Tesseract)await new Promise((res,rej)=>{const s=document.createElement('script');s.src=OCR_JS;s.onload=res;s.onerror=()=>rej(new Error('The docket reader didn’t load. Check the connection and try again.'));document.head.appendChild(s)});
+    let w;try{w=await window.Tesseract.createWorker('eng',1,{langPath:OCR_LANG})}catch(e){w=await window.Tesseract.createWorker('eng')}
+    try{await w.setParameters({tessedit_pageseg_mode:'6'})}catch(e){}return w})().catch(e=>{ocrWorker=null;throw e});
+  return ocrWorker}
+/* the photo, cleaned up for reading: a sensible size, grey, contrast stretched */
+function prepDocket(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{
+    const target=Math.max(900,Math.min(1500,im.width*3));const sc=target/im.width;const c=document.createElement('canvas');c.width=Math.round(im.width*sc);c.height=Math.round(im.height*sc);
+    const g=c.getContext('2d');g.imageSmoothingQuality='high';g.drawImage(im,0,0,c.width,c.height);
+    try{const d=g.getImageData(0,0,c.width,c.height),px=d.data;let lo=255,hi=0;const gr=new Uint8ClampedArray(px.length/4);
+      for(let k=0;k<gr.length;k++){const v=Math.round(.3*px[k*4]+.59*px[k*4+1]+.11*px[k*4+2]);gr[k]=v;if(v<lo)lo=v;if(v>hi)hi=v}
+      const span=Math.max(1,hi-lo);for(let k=0;k<gr.length;k++){const v=Math.round((gr[k]-lo)*255/span);px[k*4]=px[k*4+1]=px[k*4+2]=v}g.putImageData(d,0,0)}catch(e){}
+    res(c)};im.onerror=()=>rej(new Error('That photo couldn’t be opened.'));im.src=r.result};r.onerror=rej;r.readAsDataURL(file)})}
+/* the fields we need from an Alex Fraser delivery docket's text */
+function parseDocket(t){
+  const out={};const fix=v=>v.replace(/[Oo]/g,'0').replace(/[Il|]/g,'1').replace(/[Ss](?=\d)/g,'5');
+  const dn=t.match(/Deliv\w*\s*\w{0,3}[:.,]?\s*([0-9OIl|]{6,12})/i);if(dn)out.docket=fix(dn[1]);
+  const rg=t.match(/R[e3]g[o0c]\s*[:.,]?\s*([A-Z0-9]{3,8})/i);
+  if(rg){let v=rg[1].toUpperCase();const m=v.match(/^([A-Z]{2,3})([A-Z0-9]{2,4})$/);if(m)v=m[1]+m[2].replace(/O/g,'0').replace(/[IL]/g,'1');out.rego=v}
+  const nw=t.match(/Net\s*W\w*[:.,]?\s*([0-9]{1,3}[.,][0-9]{1,3})/i);if(nw)out.tonnes=nw[1].replace(',','.');
+  const pr=t.match(/Product\s*[:.,]?[^\n\-–]*[\-–]\s*([A-Z0-9][A-Z0-9/]{3,})/i)||t.match(/Product\s*[:.,]?\s*([A-Z]{2}\d[A-Z0-9/]{2,})/i);if(pr)out.product=pr[1].replace(/^4C/,'AC');
+  const ld=t.match(/Load\s*No\s*[:.,]?\s*(\d{1,5})/i);if(ld)out.load=String(+ld[1]);
+  return out}
+window.__parseDocket=parseDocket;
+const fmt2=n=>(Math.round(n*100)/100).toLocaleString('en-AU',{maximumFractionDigits:2});
+const layRow=()=>({docket:'',rego:'',time:hhmm(),temp:'',tonnes:'',ch_start:'',ch_finish:'',comments:''});
+const rowDone=r=>!blank(r.docket)&&n0(r.tonnes)>0&&!blank(r.temp);
+function LayingEditor({f}){
+  const d=f.pack.forms.laying;const set=p=>f.set('laying',x=>({...x,...p}));const rows=d.rows||[];
+  const setRow=(i,p)=>f.set('laying',x=>({...x,rows:x.rows.map((r,k)=>k===i?{...r,...p}:r)}));
+  const [open,setOpen]=useState(()=>{const k=rows.findIndex(r=>!rowDone(r));return k});   /* the load being filled in */
+  const [busy,setBusy]=useState('');const [err,setErr]=useState('');const fileRef=useRef(null);
+  const blocker=rows.findIndex(r=>!rowDone(r));   /* a load still missing its docket, tonnes or temperature */
+  const addRow=r=>{f.set('laying',x=>({...x,rows:[...(x.rows||[]),r]}));setOpen(rows.length)};
+  const scan=async file=>{if(!file)return;setErr('');setBusy('Reading the docket…');const time=hhmm();
+    try{const [w,c]=await Promise.all([loadOcr(),prepDocket(file)]);const {data}=await w.recognize(c);const got=parseDocket(data.text||'');
+      addRow({...layRow(),time,docket:got.docket||'',rego:got.rego||'',tonnes:got.tonnes||'',comments:'',product:got.product||'',docket_load:got.load||'',scanned:true});
+      if(!got.docket||!got.tonnes)setErr('Some of the docket couldn’t be read. Check it and fill in what’s missing.')}
+    catch(e){addRow({...layRow(),time});setErr((e&&e.message)||'The docket couldn’t be read. Type the details in.')}
+    finally{setBusy('')}};
+  const close=i=>{const r=rows[i];if(blank(r.temp)){setErr('Enter the temperature for this load.');return}if(blank(r.docket)||!(n0(r.tonnes)>0)){setErr('Each load needs its docket number and tonnes.');return}setErr('');setOpen(-1)};
+  let run=0;const tot=rows.reduce((a,r)=>a+n0(r.tonnes),0);
+  const canAdd=f.canEdit&&blocker<0&&!busy;
+  return html`<${FormCard} f=${f} id="laying" title="Asphalt laying record (paving)" sub=${`${rows.length} load${rows.length===1?'':'s'} · ${fmt2((tot))} t`} sigForms=${[]}>
+    <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <${Fld} label="Date placed"><${In} type="date" v=${d.date_placed} on=${v=>set({date_placed:v})}/><//><${Fld} label="Prepared by"><${In} v=${d.prepared_by} on=${v=>set({prepared_by:v})}/><//>
+      <${Fld} label="Calibrated temperature device"><${In} id="qa-lay-device" v=${d.device} on=${v=>set({device:v})}/><//><${Fld} label="Serial number"><${In} id="qa-lay-serial" v=${d.serial} on=${v=>set({serial:v})}/><//></fieldset>
+    <div class="grid gap-2" id="qa-lay-rows">
+      ${rows.map((r,i)=>{run+=n0(r.tonnes);const isOpen=i===open&&f.canEdit;
+        return isOpen?html`<div key=${i} class=${rowStyle+' qa-row-laying qa-lay-open'} style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
+            <div class="flex items-center gap-2 text-[12.5px]"><span class="font-semibold whitespace-nowrap">Load ${i+1}</span><span class="text-muted">${r.scanned?'from the docket · ':''}progressive total ${fmt2((run))} t</span></div>
+            ${(()=>{const k=rows.findIndex((x,j)=>j!==i&&!blank(r.docket)&&x.docket===r.docket);return k>=0&&html`<div id="qa-lay-dup" class="text-[12.5px] font-medium rounded-md px-2 py-1" style=${{background:'hsl(38 90% var(--blk-l))'}}>Docket ${r.docket} is already on load ${k+1}. Scanned twice?</div>`})()}
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              <${Fld} label="Docket number"><${In} id="qa-lay-docket" v=${r.docket} on=${v=>setRow(i,{docket:v})}/><//><${Fld} label="Truck rego"><${In} id="qa-lay-rego" v=${r.rego} on=${v=>setRow(i,{rego:v.toUpperCase()})}/><//>
+              <${Fld} label="Time in"><${In} type="time" v=${r.time} on=${v=>setRow(i,{time:v})}/><//>
+              <${Fld} label="Temperature °C *"><input id="qa-lay-temp" type="number" inputmode="decimal" class="field" style=${{...fs,boxShadow:blank(r.temp)?'inset 0 0 0 1.5px hsl(38 90% 48%)':''}} autoFocus=${!!r.scanned} value=${r.temp} onInput=${e=>setRow(i,{temp:e.target.value})}/><//>
+              <${Fld} label="Tonnes"><${In} id="qa-lay-tonnes" v=${r.tonnes} on=${v=>setRow(i,{tonnes:v})}/><//></div>
+            <div class="grid grid-cols-2 gap-2"><${Fld} label="Chainage start"><${In} id="qa-lay-chs" v=${r.ch_start} on=${v=>setRow(i,{ch_start:v})}/><//><${Fld} label="Chainage finish"><${In} id="qa-lay-chf" v=${r.ch_finish} on=${v=>setRow(i,{ch_finish:v})}/><//></div>
+            <${Fld} label="Run location / comments"><${In} v=${r.comments} on=${v=>setRow(i,{comments:v})} ph="e.g. Run 1, overlay / patch"/><//>
+            <div class="flex flex-wrap gap-2"><button id="qa-lay-done" type="button" class="btn btn-primary" onClick=${()=>close(i)}>${Icon.plus} Add load</button>
+              <button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>{f.set('laying',x=>({...x,rows:x.rows.filter((y,k)=>k!==i)}));setOpen(-1);setErr('')}}>Remove this load</button></div></div>`
+          :html`<div key=${i} class="rounded-lg border border-line px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12.5px] qa-row-laying qa-lay-line">
+            <span class="font-semibold">Load ${i+1}</span>
+            <span class="mono">${r.docket||html`<span class="text-faint">no docket</span>`}</span>
+            <span class="mono">${r.rego||'–'}</span><span>${r.time||''}</span>
+            <span style=${blank(r.temp)?{color:'var(--bad)',fontWeight:600}:null}>${blank(r.temp)?'no temperature':r.temp+' °C'}</span>
+            <span class="font-semibold tnum">${r.tonnes||'–'} t</span><span class="text-muted tnum">total ${fmt2((run))} t</span>
+            ${(r.ch_start||r.ch_finish)&&html`<span class="text-muted">Ch ${r.ch_start||'?'}–${r.ch_finish||'?'}</span>`}
+            ${r.comments&&html`<span class="text-muted truncate max-w-[220px]">${r.comments}</span>`}
+            <span class="flex-1"></span>${f.canEdit&&html`<button type="button" class="btn qa-lay-edit" style=${{height:28,fontSize:12}} disabled=${open>=0&&open!==i} onClick=${()=>{setOpen(i);setErr('')}}>${Icon.pencil} Edit</button>`}</div>`})}
+    </div>
+    ${err&&html`<div id="qa-lay-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+    ${f.canEdit&&html`<div class="flex flex-wrap items-center gap-2">
+      <label class=${'btn btn-primary '+(canAdd&&open<0?'cursor-pointer':'opacity-50 pointer-events-none')} style=${{height:42}} id="qa-lay-scan">${busy||html`${Icon.plus} Scan docket`}
+        <input ref=${fileRef} id="qa-lay-file" type="file" accept="image/*" capture="environment" class="sr-only" disabled=${!(canAdd&&open<0)} onChange=${e=>{const fl=e.target.files&&e.target.files[0];e.target.value='';scan(fl)}}/></label>
+      <button id="qa-lay-add" type="button" class="btn" style=${{height:42}} disabled=${!(canAdd&&open<0)} onClick=${()=>addRow(layRow())}>Add without scanning</button>
+      ${blocker>=0&&open<0&&html`<span class="text-[12px]" style=${{color:'hsl(30 90% 38%)'}}>Finish load ${blocker+1} (${blank(rows[blocker].temp)?'temperature':'docket and tonnes'}) before adding another.</span>`}</div>`}
+    <div class="text-[13.5px] font-semibold" id="qa-lay-total">Total: ${fmt2((tot))} t</div><//>`;
+}
 const LAYING={id:'laying',label:'Asphalt laying record',short:'Laying record',
   make:(data,e,p,ctx)=>({date_placed:e.k,rows:[],device:'',serial:((p.jsa||{}).quality||{}).serial||'',prepared_by:ctx.myName||''}),
-  Editor:({f})=>{const d=f.pack.forms.laying;const set=p=>f.set('laying',x=>({...x,...p}));let run=0;const tot=(d.rows||[]).reduce((a,r)=>a+n0(r.tonnes),0);
-    return html`<${FormCard} f=${f} id="laying" title="Asphalt laying record (paving)" sub=${`${(d.rows||[]).length} load${(d.rows||[]).length===1?'':'s'} · ${fmtN(t1(tot))} t`} sigForms=${[]}>
-      <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <${Fld} label="Date placed"><${In} type="date" v=${d.date_placed} on=${v=>set({date_placed:v})}/><//><${Fld} label="Prepared by"><${In} v=${d.prepared_by} on=${v=>set({prepared_by:v})}/><//>
-        <${Fld} label="Calibrated temperature device"><${In} id="qa-lay-device" v=${d.device} on=${v=>set({device:v})}/><//><${Fld} label="Serial number"><${In} v=${d.serial} on=${v=>set({serial:v})}/><//></fieldset>
-      <${Rows} f=${f} id="laying" items=${d.rows||[]} make=${layRow} addLabel="Add a truck load" addId="qa-lay-add" render=${(r,i,s)=>{run+=n0(r.tonnes);return html`
-        <div class="flex items-center gap-2 text-[12.5px]"><span class="font-semibold">Load ${i+1}</span><span class="text-muted">Progressive total ${fmtN(t1(run))} t</span></div>
-        <div class="grid grid-cols-3 sm:grid-cols-5 gap-2"><${Fld} label="Docket number"><${In} v=${r.docket} on=${v=>s({docket:v})}/><//><${Fld} label="Truck rego"><${In} v=${r.rego} on=${v=>s({rego:v.toUpperCase()})}/><//>
-          <${Fld} label="Time in"><${In} type="time" v=${r.time} on=${v=>s({time:v})}/><//><${Fld} label="Temperature °C"><${In} v=${r.temp} on=${v=>s({temp:v})}/><//><${Fld} label="Tonnes"><${In} v=${r.tonnes} on=${v=>s({tonnes:v})}/><//></div>
-        <div class="grid grid-cols-3 sm:grid-cols-5 gap-2"><${Fld} label="Chainage start"><${In} v=${r.ch_start} on=${v=>s({ch_start:v})}/><//><${Fld} label="Chainage finish"><${In} v=${r.ch_finish} on=${v=>s({ch_finish:v})}/><//>
-          <${Fld} label="Loose dip left"><${In} v=${r.dip_l} on=${v=>s({dip_l:v})}/><//><${Fld} label="Centre"><${In} v=${r.dip_c} on=${v=>s({dip_c:v})}/><//><${Fld} label="Right"><${In} v=${r.dip_r} on=${v=>s({dip_r:v})}/><//></div>
-        <${Fld} label="Run location / comments"><${In} v=${r.comments} on=${v=>s({comments:v})} ph="e.g. Run 1, overlay / patch"/><//>`}}/>
-      <div class="text-[13.5px] font-semibold" id="qa-lay-total">Total: ${fmtN(t1(tot))} t</div><//>`},
+  Editor:LayingEditor,
   pdf:o=>{const d=o.p.forms.laying;const doc=o.doc;o.newPage('l');o.page('ASPHALT LAYING RECORD (PAVING)');let y=24;
     y=kvGrid(o,y,[['Customer',o.lot.client],['Job location',o.lot.location],['Job number',o.lot.job_no],['Date placed',dateTxt(d.date_placed)]],4);let run=0;
-    y=table(o,y+2,[['Docket number',1.1],['Truck rego',1],['Time in',.7],['Temperature',.9],['Tonnes',.7],['Progressive total',1],['Chainage start',.9],['Chainage finish',.9],['Dip left',.6],['Dip centre',.6],['Dip right',.6],['Run location / comments',2.2]],
-      (d.rows||[]).map(r=>{run+=n0(r.tonnes);return [r.docket,r.rego,r.time,r.temp,r.tonnes,fmtN(t1(run)),r.ch_start,r.ch_finish,r.dip_l,r.dip_c,r.dip_r,r.comments]}),'l');
-    y=kvGrid(o,y+3,[['Calibrated temperature device used',d.device],['Serial number',d.serial],['Prepared by',d.prepared_by],['Total tonnes',fmtN(t1(run))]],4)}};
+    y=table(o,y+2,[['Docket number',1.2],['Truck rego',1],['Time in',.7],['Temperature',.9],['Tonnes',.8],['Progressive total',1],['Chainage start',.9],['Chainage finish',.9],['Run location / comments',2.6]],
+      (d.rows||[]).map(r=>{run+=n0(r.tonnes);return [r.docket,r.rego,r.time,r.temp,r.tonnes,fmt2((run)),r.ch_start,r.ch_finish,r.comments]}),'l');
+    y=kvGrid(o,y+3,[['Calibrated temperature device used',d.device],['Serial number',d.serial],['Prepared by',d.prepared_by],['Total tonnes',fmt2((run))]],4)}};
 
 /* ---------- operations site environmental checklist ---------- */
 const ENV_ITEMS=[['residents','Residents notified'],['kerb','Kerb and channel clean'],['gully','Gully pits clean'],['profiling','Profiling required'],['swept','Pave section swept and clean'],['linemarking','Temporary line marking / stick ’n’ stomps'],['prime','Prime / bitumen on kerb, crossovers'],
@@ -267,7 +337,7 @@ DIAGRAM.check=d=>[...(!d.sketch&&!(d.photos||[]).length?['The diagram (draw it, 
 ENV.check=(d,o)=>{const it=d.items||{};const pre=ENV_ITEMS.filter(([k])=>!(it[k]||{}).pre).length,post=ENV_ITEMS.filter(([k])=>!(it[k]||{}).post).length;
   return [...(pre?[`${pre} item${pre===1?'':'s'} not answered before surfacing`]:[]),...(post?[`${post} item${post===1?'':'s'} not answered after surfacing`]:[]),...(blank(d.before)?['Condition of the site before paving']:[]),...(blank(d.after)?['Condition of the site after the job']:[]),...(signedOn(o,'env')?[]:['Signature of whoever prepared it'])]};
 COSTS.check=d=>[...(blank(d.supervisor)?['Supervisor name']:[]),...(blank(d.start_paving)?['Start paving time']:[]),...(blank(d.finish_paving)?['Finish paving time']:[]),...(!d.none&&!(d.rows||[]).some(r=>!blank(r.contractor))?['The external contractors (or tick “No external contractors”)']:[])];
-LAYING.check=d=>[...(!(d.rows||[]).some(r=>!blank(r.docket)&&n0(r.tonnes)>0)?['At least one load with its docket number and tonnes']:[]),...(blank(d.device)?['Calibrated temperature device']:[]),...(blank(d.serial)?['Its serial number']:[]),...(blank(d.prepared_by)?['Prepared by']:[])];
+LAYING.check=d=>[...(!(d.rows||[]).length?['At least one truck load']:[]),...((d.rows||[]).some(r=>!rowDone(r))?['Every load needs its docket number, tonnes and temperature']:[]),...(blank(d.device)?['Calibrated temperature device']:[]),...(blank(d.serial)?['Its serial number']:[]),...(blank(d.prepared_by)?['Prepared by']:[])];
 [AQR,HOLD,DIAGRAM,ENV,COSTS].forEach(f=>f.required=true);LAYING.required=false;
 const FORMS=[AQR,HOLD,DIAGRAM,LAYING,ENV,COSTS];
 const SIGN_TITLES={aqr_afa:'Agree the quantities (AFA)',aqr_client:'Agree the quantities (client)',hold_afa:'Hold point (AFA quality rep)',hold_client:'Release the hold point (client)',env:'Sign the environmental checklist'};
