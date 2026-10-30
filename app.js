@@ -2403,11 +2403,16 @@ const NAV_ICON={
   machines:svg(html`<path d="M2 11.5V8.5l2-3h4l1.5 3H14v3" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="4.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/><circle cx="11.5" cy="12" r="1.6" stroke="currentColor" stroke-width="1.4"/>`,20),
 };
 function NavRail({screen,go,isAdmin}){
+  const btn=([k,s])=>{const on=screen===k;
+    return html`<button key=${k} class=${'flex flex-col items-center gap-1 rounded-lg py-2.5 text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
+      style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
+      ${NAV_ICON[k]}<span>${s.label}</span></button>`};
+  const all=Object.entries(SCREENS).filter(([,s])=>!s.admin||isAdmin);
+  /* admin-only screens (Ideas) sit at the bottom of the bar */
   return html`<nav class="panel shrink-0 w-[68px] h-full flex flex-col gap-1 p-1.5" aria-label="Screens">
-    ${Object.entries(SCREENS).filter(([,s])=>!s.admin||isAdmin).map(([k,s])=>{const on=screen===k;
-      return html`<button key=${k} class=${'flex flex-col items-center gap-1 rounded-lg py-2.5 text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
-        style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
-        ${NAV_ICON[k]}<span>${s.label}</span></button>`})}
+    ${all.filter(([,s])=>!s.admin).map(btn)}
+    <div class="flex-1"></div>
+    ${all.filter(([,s])=>s.admin).map(btn)}
   </nav>`;
 }
 /* ---------- settings menu: dark mode, notifications and (live) account ---------- */
