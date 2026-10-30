@@ -7,6 +7,7 @@
 // POST /api/users  (Authorization: Bearer <the signed-in person's access token>)
 //   { action: 'create', login: 'jsmith' | 'name@company.com', password: '<temporary>', role: 'prestart', staff_id: '...' }
 //   { action: 'reset', id: '<login id>', password: '<temporary>' }
+//   { action: 'delete', id: '<login id>' }   (their profile goes with it; prestarts they signed keep their name)
 // A temporary password: the person chooses their own the first time they sign in.
 
 const LOGIN_DOMAIN = 'fraserflow.local';
@@ -47,7 +48,7 @@ async function handler(req, res, env = process.env, http = fetch) {
   let b;
   try { b = await readBody(req); } catch (e) { return send(res, 400, { error: 'Bad request' }); }
   const password = String(b.password || '');
-  if (password.length < 8) return send(res, 400, { error: 'The temporary password needs at least 8 characters.' });
+  if (b.action !== 'delete' && password.length < 8) return send(res, 400, { error: 'The temporary password needs at least 8 characters.' });
 
   if (b.action === 'create') {
     const login = String(b.login || '').trim();
@@ -86,6 +87,18 @@ async function handler(req, res, env = process.env, http = fetch) {
     const r = await http(`${url}/auth/v1/admin/users/${id}`, { method: 'PUT', headers: admin, body: JSON.stringify({ password, user_metadata: { password_set: false } }) });
     if (!r.ok) { const j = await r.json().catch(() => ({})); return send(res, 400, { error: String(j.msg || j.message || 'Supabase didn’t reset the password.') }); }
     return send(res, 200, { id });
+  }
+
+  if (b.action === 'delete') {
+    const id = String(b.id || '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return send(res, 400, { error: 'Bad request' });
+    if (id === me.id) return send(res, 400, { error: 'You can’t delete your own login.' });
+    const tr = await http(`${url}/rest/v1/profiles?id=eq.${id}&select=role`, { headers: admin });
+    const target = tr.ok ? (await tr.json())[0] : null;
+    if (target && target.role === 'admin' && myRole !== 'admin') return send(res, 403, { error: 'Only the administrator can delete an admin’s login.' });
+    const r = await http(`${url}/auth/v1/admin/users/${id}`, { method: 'DELETE', headers: admin });
+    if (!r.ok && r.status !== 404) { const j = await r.json().catch(() => ({})); return send(res, 400, { error: String(j.msg || j.message || 'Supabase didn’t delete the login.') }); }
+    return send(res, 200, { id, deleted: true });
   }
 
   return send(res, 400, { error: 'Unknown action' });

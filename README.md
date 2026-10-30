@@ -137,6 +137,8 @@ The **Staff** screen has two views (switch at the top):
 ### Creating logins inside FraserFlow
 Staff › **People**: *Create login* on a person's row, or **New login** under *Logins without a staff member* (administrators and superusers): username (or email), the temporary password `temppass`, role and Staff record. **Reset password…** on a row gives someone a new temporary password. Either way they choose their own the next time they sign in. Only the administrator can create admins or reset an admin's password; nobody resets their own here.
 
+**Deleting someone**: the bin at the end of their row (or *Delete* in their details) asks you to confirm first. Their leave bookings go with them. If they have a login, administrators and superusers can tick *Also delete their login* (on by default) so they can't sign in any more; untick it to keep the login, unlinked. Logins without a staff member have their own *Delete*, also confirmed. Prestarts they've already signed keep their name. Nobody deletes their own login, and only the administrator can delete an admin's.
+
 This needs one setting, because creating logins uses Supabase's admin key, which must stay on the server:
 1. Supabase → **Project Settings → API Keys** (or *API*) → copy the **service_role** secret key. Never paste it anywhere else, or into a chat.
 2. Vercel → Project → **Settings → Environment Variables** → add `SUPABASE_SERVICE_ROLE_KEY` with that value (Production).

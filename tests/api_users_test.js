@@ -3,7 +3,7 @@ const { handler } = require('../api/users.js');
 const ENV = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'service' };
 const USERS = { 'tok-admin': { id: '00000000-0000-0000-0000-0000000000a1', role: 'admin' }, 'tok-super': { id: '00000000-0000-0000-0000-0000000000a6', role: 'superuser' },
   'tok-planner': { id: '00000000-0000-0000-0000-0000000000a2', role: 'planner' } };
-let made = [], patched = [], resets = [], existing = new Set(['taken@fraserflow.local']);
+let made = [], patched = [], resets = [], deleted = [], existing = new Set(['taken@fraserflow.local']);
 const ROLE_OF = { '00000000-0000-0000-0000-0000000000a1': 'admin', '00000000-0000-0000-0000-0000000000a7': 'prestart' };
 const json = (status, body) => ({ ok: status < 300, status, json: async () => body });
 async function http(url, o = {}) {
@@ -19,6 +19,7 @@ async function http(url, o = {}) {
     const b = JSON.parse(o.body); if (existing.has(b.email)) return json(422, { msg: 'A user with this email address has already been registered' });
     made.push(b); return json(200, { id: '00000000-0000-0000-0000-0000000000c1', email: b.email });
   }
+  if (url.includes('/auth/v1/admin/users/') && o.method === 'DELETE') { deleted.push(url); return json(200, {}); }
   if (url.includes('/auth/v1/admin/users/') && o.method === 'PUT') { resets.push({ url, body: JSON.parse(o.body) }); return json(200, {}); }
   throw new Error('unexpected call ' + url);
 }
@@ -47,5 +48,9 @@ const ok = (c, l) => { console.log((c ? 'PASS' : 'FAIL') + ': ' + l); if (!c) fa
   r = await call('tok-admin', { action: 'reset', id: '00000000-0000-0000-0000-0000000000a1', password: 'temporary2' }); ok(r.statusCode === 400 && resets.length === 0, 'nobody resets their own password here');
   r = await call('tok-super', { action: 'reset', id: '00000000-0000-0000-0000-0000000000a7', password: 'temporary2' });
   ok(r.statusCode === 200 && resets[0].body.password === 'temporary2' && resets[0].body.user_metadata.password_set === false, 'a superuser resets an operator: they choose a new password at next sign-in');
+  r = await call('tok-planner', { action: 'delete', id: '00000000-0000-0000-0000-0000000000a7' }); ok(r.statusCode === 403 && deleted.length === 0, 'a planner can’t delete a login');
+  r = await call('tok-admin', { action: 'delete', id: '00000000-0000-0000-0000-0000000000a1' }); ok(r.statusCode === 400 && deleted.length === 0, 'nobody deletes their own login');
+  r = await call('tok-super', { action: 'delete', id: '00000000-0000-0000-0000-0000000000a1' }); ok(r.statusCode === 403 && deleted.length === 0, 'a superuser can’t delete the admin’s login');
+  r = await call('tok-super', { action: 'delete', id: '00000000-0000-0000-0000-0000000000a7' }); ok(r.statusCode === 200 && /a7$/.test(deleted[0]), 'a superuser deletes a prestart login (no password needed)');
   console.log(fails ? `${fails} FAILED` : 'ALL LOGIN FUNCTION TESTS PASSED'); process.exit(fails ? 1 : 0);
 })();

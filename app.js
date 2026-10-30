@@ -157,6 +157,7 @@ const Icon={
   chevD:svg(html`<path d="M3.5 6l4.5 4.5L12.5 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>`,14),
   plus:svg(html`<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`,14),
   x:svg(html`<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>`,14),
+  trash:svg(html`<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v4M9 7v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`,14),
   list:svg(html`<path d="M2.5 4h11M2.5 8h11M2.5 12h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`),
   eye:svg(html`<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/>`,15),
   pencil:svg(html`<path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.1.6.6-3.1 7.6-7.6z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>`,14),
@@ -4769,10 +4770,11 @@ function NewLoginDialog({sb,role,people,linked,person,onDone,onClose}){
 }
 
 /* add or edit a staff member */
-function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit,admin,myRole,onMade}){
+function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit,admin,myRole,me,onMade,startDel}){
   const isNew=!person;const crews=data.resources.filter(r=>r.type==='crew');
   const [f,setF]=useState(()=>person?{name:person.name,sub:person.sub||'',crewId:person.crewId||'',hue:person.hue}:{name:'',sub:'',crewId:'',hue:HUES[data.resources.length%HUES.length]});
-  const [err,setErr]=useState('');const [del,setDel]=useState(false);
+  const [err,setErr]=useState('');const [del,setDel]=useState(!!startDel);
+  const canDelLogin=!!(admin&&prof&&prof.id!==me&&!(roleKey(prof.role)==='admin'&&myRole!=='admin'));const [delLogin,setDelLogin]=useState(true);
   const withLogin=isNew&&admin;const [lg,setLg]=useState({on:true,login:'',edited:false,role:'prestart'});const [busy,setBusy]=useState(false);
   const loginName=lg.edited?lg.login:suggestLogin(f.name);
   const leave=person?data.blocks.filter(b=>b.resourceId===person.id).length:0;
@@ -4785,12 +4787,18 @@ function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit,admin,
     if(isNew)setData(d=>({...d,resources:[...d.resources,{id,type:'person',name:f.name.trim(),sub:f.sub.trim()||'Crew member',crewId:f.crewId||null,hue:f.hue,visible:true}]}));
     else setData(d=>({...d,resources:d.resources.map(r=>r.id===person.id?{...r,name:f.name.trim(),sub:f.sub.trim(),crewId:f.crewId||null,hue:f.hue}:r)}));
     notify&&notify(isNew?`${f.name.trim()} added`:'Saved');onClose()};
-  const remove=async()=>{setData(d=>({...d,resources:d.resources.filter(r=>r.id!==person.id),blocks:d.blocks.filter(b=>b.resourceId!==person.id)}));
-    if(prof&&sb)try{await sb.from('profiles').update({staff_id:null}).eq('id',prof.id)}catch(e){}   /* their login stays, unlinked */
-    notify&&notify(`${person.name} removed`);onClose()};
+  const remove=async()=>{const goLogin=canDelLogin&&delLogin;
+    if(goLogin){setBusy(true);setErr('');try{await usersApi(sb,{action:'delete',id:prof.id})}catch(e){setBusy(false);setErr(e.message||String(e));return}setBusy(false)}   /* the login first: if that fails, nothing is removed */
+    setData(d=>({...d,resources:d.resources.filter(r=>r.id!==person.id),blocks:d.blocks.filter(b=>b.resourceId!==person.id)}));
+    if(prof&&sb&&!goLogin)try{await sb.from('profiles').update({staff_id:null}).eq('id',prof.id)}catch(e){}   /* their login stays, unlinked */
+    notify&&notify(`${person.name} deleted${goLogin?' with their login':''}`);onMade&&goLogin&&onMade(null);onClose()};
   return html`<${SDialog} title=${isNew?'Add a staff member':person.name} onClose=${onClose}
-    foot=${del?html`<span class="text-[12.5px] flex-1" style=${{color:'var(--bad)'}}>Remove ${person.name}${leave?` and their ${leave} leave booking${leave===1?'':'s'}`:''}?${prof?' Their login stays, unlinked.':''}</span><button type="button" class="btn" onClick=${()=>setDel(false)}>Keep</button><button id="pd-remove-go" type="button" class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${remove}>Remove</button>`
-      :html`${!isNew&&canEdit&&html`<button id="pd-remove" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>Remove</button>`}${err&&html`<span class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span>
+    foot=${del?html`<div class="flex-1 min-w-0 grid gap-1" id="pd-del-confirm"><span class="text-[12.5px] font-medium" style=${{color:'var(--bad)'}}>Delete ${person.name}${leave?` and their ${leave} leave booking${leave===1?'':'s'}`:''}? This can’t be undone.</span>
+        ${canDelLogin?html`<label class="inline-flex items-center gap-2 text-[12.5px] cursor-pointer"><input id="pd-del-login" type="checkbox" class="w-4 h-4" checked=${delLogin} onChange=${e=>setDelLogin(e.target.checked)}/>Also delete their login <span class="mono">${showLogin(prof.email)}</span></label>`
+          :prof?html`<span class="text-[12px] text-muted">Their login stays, unlinked.</span>`:null}
+        ${err&&html`<span class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}</div>
+      <button type="button" class="btn" onClick=${()=>{if(startDel)onClose();else{setDel(false);setErr('')}}}>Cancel</button><button id="pd-remove-go" type="button" class="btn" disabled=${busy} style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${remove}>${busy?'Deleting…':'Yes, delete'}</button>`
+      :html`${!isNew&&canEdit&&html`<button id="pd-remove" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>{setDel(true);setErr('')}}>${Icon.trash} Delete</button>`}${err&&html`<span class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span>
         <button type="button" class="btn" onClick=${onClose}>${canEdit?'Cancel':'Close'}</button>${canEdit&&html`<button id="pd-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Adding…':isNew?(withLogin&&lg.on?'Add with login':'Add staff member'):'Save'}</button>`}`}>
     <fieldset disabled=${!canEdit} class="m-0 p-0 border-0 min-w-0 grid sm:grid-cols-2 gap-3">
       <${SFld} label="Name"><input id="pd-name" class="field" placeholder="Full name" value=${f.name} onInput=${e=>setF({...f,name:e.target.value})}/><//>
@@ -4810,7 +4818,11 @@ function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit,admin,
 function StaffPeople({data,setData,live,notify,onAddLeave}){
   const admin=!!live&&(live.role==='admin'||live.role==='superuser');const canEdit=live?live.canEdit:true;const sb=live&&live.sb;const me=live&&live.user.id;const myRole=live&&live.role;
   const [profs,setProfs]=useState(null);const [perr,setPerr]=useState('');const [dlg,setDlg]=useState(null);const [made,setMade]=useState(null);
-  const [reset,setReset]=useState(null);const [busy,setBusy]=useState(false);const [q,setQ]=useState('');const [crew,setCrew]=useState('');
+  const [reset,setReset]=useState(null);const [busy,setBusy]=useState(false);const [q,setQ]=useState('');const [crew,setCrew]=useState('');const [delL,setDelL]=useState(null);
+  const doDelLogin=async p=>{setBusy(true);setPerr('');try{await usersApi(sb,{action:'delete',id:p.id});notify(`Login ${showLogin(p.email)} deleted`);setDelL(null);setMade(null);load()}catch(e){setPerr(e.message)}finally{setBusy(false)}};
+  const delLoginCtl=p=>p.id===me||(roleKey(p.role)==='admin'&&myRole!=='admin')?null:delL===p.id
+    ?html`<span class="inline-flex items-center gap-1.5 lg-del-confirm"><span class="text-[12px] font-medium" style=${{color:'var(--bad)'}}>Delete ${showLogin(p.email)}? They can’t sign in any more.</span><button type="button" class="btn" style=${{height:30}} onClick=${()=>setDelL(null)}>Cancel</button><button type="button" class="btn lg-del-yes" style=${{height:30,background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} disabled=${busy} onClick=${()=>doDelLogin(p)}>${busy?'Deleting…':'Yes, delete'}</button></span>`
+    :html`<button type="button" class="text-[12px] hover:underline lg-del" style=${{color:'var(--bad)',marginLeft:14}} onClick=${()=>{setDelL(p.id);setReset(null)}}>Delete</button>`;
   const load=async()=>{if(!admin)return;const {data:r,error}=await sb.from('profiles').select('*');if(error){setPerr(error.message);return}setProfs(r||[]);setPerr('')};
   useEffect(()=>{load()},[]);
   const saveProf=async(p,patch)=>{setPerr('');const {error}=await sb.from('profiles').update(patch).eq('id',p.id);if(error)setPerr(error.message);else notify('Login updated');load()};
@@ -4847,7 +4859,7 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
         <button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>setMade(null)}>Done</button></div>`}
       ${perr&&html`<div id="lg-err" class="px-3 py-2 text-[12.5px]" style=${{color:'var(--bad)'}}>${perr}</div>`}
       <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="sp-table">
-        <thead><tr class="text-left">${['Name','Crew','Leave',...(admin?['Login','Role','']:[])].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+        <thead><tr class="text-left">${['Name','Crew','Leave',...(admin?['Login','Role','']:[]),...(canEdit?['']:[])].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
         <tbody>${list.map(p=>{const lv=leaveOf(p);const pr=profOf.get(p.id);
           return html`<tr key=${p.id} class="border-t border-line" data-person=${p.name}>
             <td class="py-2 px-3"><button type="button" class="flex items-center gap-2.5 text-left sp-open" onClick=${()=>setDlg({k:'person',p})}><${Badge} r=${p} size=${28}/><span class="min-w-0"><span class="block font-medium text-[13px] hover:underline">${p.name}</span><span class="block text-[11.5px] text-muted">${p.sub||''}</span></span></button></td>
@@ -4855,8 +4867,9 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
             <td class="py-2 px-3 whitespace-nowrap">${lv?html`<span class="text-[12px]" style=${lv.now?{color:'hsl(28 80% 40%)',fontWeight:600}:{color:'var(--muted)'}}>${lv.now?'Away: ':'Next: '}${lv.t}</span>`:html`<span class="text-faint">–</span>`}</td>
             ${admin&&(profs==null?html`<td colspan="3" class="py-2 px-3 text-muted">…</td>`:pr?html`<td class="py-2 px-3 mono whitespace-nowrap sp-login">${showLogin(pr.email)}${pr.id===me?html` <span class="text-muted font-sans">(you)</span>`:''}</td><td class="py-2 px-3">${roleSel(pr)}</td><td class="py-2 px-3 text-right whitespace-nowrap">${resetCtl(pr)}</td>`
               :html`<td class="py-2 px-3 text-faint">No login</td><td></td><td class="py-2 px-3 text-right"><button type="button" class="btn sp-newlogin" style=${{height:30}} onClick=${()=>{setMade(null);setDlg({k:'login',p})}}>${Icon.plus} Create login</button></td>`)}
+            ${canEdit&&html`<td class="py-2 pl-1 pr-3 text-right w-0"><button type="button" class="sp-del w-8 h-8 inline-flex items-center justify-center rounded-md hover:opacity-70" style=${{color:'var(--bad)'}} title=${'Delete '+p.name} aria-label=${'Delete '+p.name} onClick=${()=>setDlg({k:'person',p,del:true})}>${Icon.trash}</button></td>`}
 </tr>`})}
-          ${!list.length&&html`<tr><td colspan="6" class="px-3 py-6 text-center text-muted">${people.length?'No staff match.':'No staff yet.'+(canEdit?' Add your first staff member.':'')}</td></tr>`}</tbody></table></div>
+          ${!list.length&&html`<tr><td colspan="7" class="px-3 py-6 text-center text-muted">${people.length?'No staff match.':'No staff yet.'+(canEdit?' Add your first staff member.':'')}</td></tr>`}</tbody></table></div>
     </section>
     ${admin&&profs&&html`<section class="panel flex flex-col min-h-0" id="sp-loose">
       <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line"><h3 class="font-display text-[15px] font-semibold">Logins without a staff member</h3><span class="text-[12px] text-muted">e.g. office staff. Link a login to someone on staff so their prestarts carry their name.</span><span class="flex-1"></span>
@@ -4867,10 +4880,10 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
           <td class="py-2 px-3 mono whitespace-nowrap">${showLogin(p.email)}${p.id===me?html` <span class="text-muted font-sans">(you)</span>`:''}</td>
           <td class="py-2 px-3">${roleSel(p)}</td>
           <td class="py-2 px-3"><select class="field w-auto lg-staff" style=${{height:30,fontSize:12.5,minWidth:190}} value="" onChange=${e=>e.target.value&&saveProf(p,{staff_id:e.target.value})} aria-label=${'Link '+showLogin(p.email)+' to a staff member'}><option value="">Link to…</option>${people.filter(x=>!linked.has(x.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(x=>html`<option key=${x.id} value=${x.id}>${x.name}</option>`)}</select></td>
-          <td class="py-2 px-3 text-right whitespace-nowrap">${resetCtl(p)}</td></tr>`)}
+          <td class="py-2 px-3 text-right whitespace-nowrap">${delL===p.id?null:resetCtl(p)}${reset&&reset.id===p.id?null:delLoginCtl(p)}</td></tr>`)}
           ${!loose.length&&html`<tr><td colspan="4" class="px-3 py-4 text-center text-muted">Every login belongs to someone on staff.</td></tr>`}</tbody></table></div>
     </section>`}
-    ${dlg&&dlg.k==='person'&&html`<${PersonDialog} data=${data} setData=${setData} person=${dlg.p} prof=${dlg.p&&profOf.get(dlg.p.id)} sb=${sb} canEdit=${canEdit} admin=${admin} myRole=${myRole} onMade=${m=>{setMade(m);load()}} notify=${notify} onClose=${()=>setDlg(null)}/>`}
+    ${dlg&&dlg.k==='person'&&html`<${PersonDialog} key=${(dlg.p?dlg.p.id:'new')+(dlg.del?':del':'')} data=${data} setData=${setData} person=${dlg.p} prof=${dlg.p&&profOf.get(dlg.p.id)} sb=${sb} canEdit=${canEdit} admin=${admin} myRole=${myRole} me=${me} startDel=${dlg.del} onMade=${m=>{setMade(m);load()}} notify=${notify} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='login'&&html`<${NewLoginDialog} sb=${sb} role=${myRole} people=${people.slice().sort((a,b)=>a.name.localeCompare(b.name))} linked=${linked} person=${dlg.p} onClose=${()=>setDlg(null)} onDone=${m=>{setDlg(null);setMade(m);load()}}/>`}
   </div>`;
 }
