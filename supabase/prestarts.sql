@@ -2,7 +2,7 @@
 -- Run once in Supabase → SQL Editor → New query → paste → Run, after schema.sql and maintenance.sql.
 -- Safe to run again. It only adds tables, rules and a file store; roster data in `items` is not changed.
 --
--- Prestart checklists are kept per machine category. Changing a checklist saves a new version, so an old
+-- Prestart checklists are kept per machine category (or for one machine). Changing a checklist saves a new version, so an old
 -- prestart always shows the exact questions that operator answered. A submitted prestart is permanent:
 -- nobody can change or delete it, administrators included.
 
@@ -66,8 +66,11 @@ create table if not exists public.prestart_templates (
   created_by     uuid default auth.uid(),
   unique (family, version)
 );
--- one checklist in use per category (and one for "all other machines")
-create unique index if not exists prestart_templates_one_active on public.prestart_templates (lower(btrim(coalesce(category, '')))) where active;
+-- a checklist can also be for one machine only (asset_id); that machine uses it instead of its category's
+alter table public.prestart_templates add column if not exists asset_id text;
+-- one checklist in use per category (and one for "all other machines"), and one per machine
+drop index if exists public.prestart_templates_one_active;
+create unique index if not exists prestart_templates_one_active2 on public.prestart_templates (coalesce(asset_id, ''), lower(btrim(coalesce(category, '')))) where active;
 
 create or replace function public.prestart_template_rules()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -76,7 +79,7 @@ begin
   if tg_op = 'UPDATE' then
     -- a saved version never changes: only taking it out of use (or back into use) is allowed
     if new.family <> old.family or new.version <> old.version or new.name <> old.name
-       or new.category is distinct from old.category or new.items <> old.items
+       or new.category is distinct from old.category or new.asset_id is distinct from old.asset_id or new.items <> old.items
        or new.created_at <> old.created_at or new.created_by is distinct from old.created_by then
       raise exception 'A saved checklist can''t be changed. Save a new version instead.' using errcode = '42501';
     end if;
@@ -91,6 +94,13 @@ begin
   -- a new checklist, or a new version of one
   new.created_by = auth.uid(); new.created_at = now(); new.active = true; new.superseded_at = null;
   new.category = nullif(btrim(new.category), '');
+  new.asset_id = nullif(btrim(new.asset_id), '');
+  if new.asset_id is not null then
+    new.category = null;
+    if not exists (select 1 from public.items where kind = 'resource' and id = new.asset_id and data->>'type' = 'machine') then
+      raise exception 'No machine with id % on the roster', new.asset_id using errcode = '23503';
+    end if;
+  end if;
   new.name = btrim(new.name);
   if new.name = '' then raise exception 'Name the checklist' using errcode = '22023'; end if;
   if jsonb_typeof(new.items) <> 'array' or jsonb_array_length(new.items) = 0 then
@@ -103,7 +113,10 @@ begin
     if coalesce(it->>'kind', 'check') not in ('check','number','text') then raise exception 'Unknown question type %', it->>'kind' using errcode = '22023'; end if;
     keys := keys || k;
   end loop;
-  if exists (select 1 from public.prestart_templates where active and family is distinct from new.family
+  if new.asset_id is not null and exists (select 1 from public.prestart_templates where active and family is distinct from new.family and asset_id = new.asset_id) then
+    raise exception 'That machine already has its own checklist. Edit that one instead.' using errcode = '23505';
+  end if;
+  if new.asset_id is null and exists (select 1 from public.prestart_templates where active and family is distinct from new.family and asset_id is null
              and lower(coalesce(category, '')) = lower(coalesce(new.category, ''))) then
     raise exception '%', case when new.category is null then 'There is already a checklist for all other machines. Edit that one instead.'
                               else 'There is already a checklist for ' || new.category || '. Edit that one instead.' end using errcode = '23505';
@@ -186,9 +199,9 @@ $$;
 create or replace function public.prestart_template_for(asset text)
 returns uuid language sql stable security definer set search_path = public as $$
   select t.id from public.prestart_templates t
-   where t.active and (lower(btrim(coalesce(t.category, ''))) = lower(btrim(coalesce(
-           (select i.data->>'category' from public.items i where i.kind = 'resource' and i.id = asset), ''))) or t.category is null)
-   order by (t.category is null) limit 1
+   where t.active and (t.asset_id = asset or (t.asset_id is null and (lower(btrim(coalesce(t.category, ''))) = lower(btrim(coalesce(
+           (select i.data->>'category' from public.items i where i.kind = 'resource' and i.id = asset), ''))) or t.category is null)))
+   order by (t.asset_id is null), (t.category is null) limit 1
 $$;
 
 -- submit a prestart: checked and saved in one go, together with its meter readings

@@ -27,7 +27,7 @@ const newId=()=>{try{if(crypto.randomUUID)return crypto.randomUUID()}catch(e){}
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&3|8)).toString(16)})};
 const kindOf=it=>it.kind||'check';
 const tplFor=(tpls,m)=>{const c=machCatOf(m).toLowerCase();const act=tpls.filter(t=>t.active);
-  return act.find(t=>t.category&&t.category.trim().toLowerCase()===c)||act.find(t=>!t.category)||null};
+  return act.find(t=>t.asset_id&&t.asset_id===m.id)||act.find(t=>!t.asset_id&&t.category&&t.category.trim().toLowerCase()===c)||act.find(t=>!t.asset_id&&!t.category)||null};
 const sectionsOf=items=>{const out=[];items.forEach((it,i)=>{const s=(it.section||'').trim()||'Checks';let g=out.find(x=>x.s===s);if(!g){g={s,items:[]};out.push(g)}g.items.push({...it,i})});return out};
 const isFault=e=>!!(e&&e.code);   /* an answer from the database (a rule), not a dropped connection */
 
@@ -397,30 +397,42 @@ const NotSetUp=({db})=>html`<div class="panel p-6 grid gap-2 max-w-[640px]"><div
 /* ---------- Fleet › Checklists: the builder ---------- */
 function ChecklistDialog({ctx,tpl,onClose}){
   const {sb,notify,reload,data,db}=ctx;
-  const [f,setF]=useState(()=>({name:tpl?tpl.name:'',category:tpl?tpl.category||'':'',items:tpl?tpl.items.map(x=>({...x})):[]}));
+  const [f,setF]=useState(()=>({name:tpl?tpl.name:'',category:tpl?tpl.category||'':'',scope:tpl&&tpl.asset_id?'asset':'category',asset_id:tpl&&tpl.asset_id||'',items:tpl?tpl.items.map(x=>({...x})):[]}));
+  /* start a new checklist from one already made (the newest version of each) */
+  const fams=(()=>{const m=new Map();db.prestart_templates.forEach(t=>{const o=m.get(t.family);if(!o||t.version>o.version)m.set(t.family,t)});return [...m.values()].sort((a,b)=>a.name.localeCompare(b.name))})();
+  const machName=id=>{const r=data.resources.find(x=>x.id===id);return r?`${r.name}${r.sub?' · '+r.sub:''}`:id};
+  const copyFrom=id=>{const t=fams.find(x=>x.family===id);if(!t)return;setF(x=>({...x,name:x.name||`${t.name} (copy)`,items:t.items.map(it=>({...it}))}))};
   const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
   const setItem=(i,p)=>setF(x=>({...x,items:x.items.map((it,k)=>k===i?{...it,...p}:it)}));
   const move=(i,dir)=>setF(x=>{const a=[...x.items];const j=i+dir;if(j<0||j>=a.length)return x;[a[i],a[j]]=[a[j],a[i]];return {...x,items:a}});
   const add=()=>setF(x=>({...x,items:[...x.items,{key:'q-'+Math.random().toString(36).slice(2,8),section:(x.items[x.items.length-1]||{}).section||'',text:'',kind:'check',critical:false}]}));
   const sections=[...new Set([...f.items.map(i=>(i.section||'').trim()),...STANDARD.map(s=>s.section)].filter(Boolean))];
-  const taken=db.prestart_templates.filter(t=>t.active&&(!tpl||t.family!==tpl.family)).map(t=>(t.category||'').toLowerCase());
+  const taken=db.prestart_templates.filter(t=>t.active&&!t.asset_id&&(!tpl||t.family!==tpl.family)).map(t=>(t.category||'').toLowerCase());
+  const takenM=db.prestart_templates.filter(t=>t.active&&t.asset_id&&(!tpl||t.family!==tpl.family)).map(t=>t.asset_id);
+  const machines=data.resources.filter(r=>r.type==='machine'&&!takenM.includes(r.id)).sort((a,b)=>a.name.localeCompare(b.name));
   const cats=machineCatsOf(data).filter(c=>!taken.includes(c.toLowerCase())||(tpl&&(tpl.category||'').toLowerCase()===c.toLowerCase()));
   const save=async()=>{setErr('');const items=f.items.map(i=>({key:i.key,section:(i.section||'').trim(),text:(i.text||'').trim(),kind:i.kind||'check',critical:kindOf(i)==='check'&&!!i.critical})).filter(i=>i.text);
     if(!f.name.trim()){setErr('Name the checklist, e.g. Roller prestart.');return}if(!items.length){setErr('Add at least one question.');return}
-    if(tpl&&JSON.stringify(items)===JSON.stringify(tpl.items)&&f.name.trim()===tpl.name&&(f.category||null)===(tpl.category||null)){onClose();return}
-    setBusy(true);const row={name:f.name.trim(),category:f.category.trim()||null,items};if(tpl)row.family=tpl.family;
+    if(f.scope==='asset'&&!f.asset_id){setErr('Pick the machine.');return}
+    const cat=f.scope==='asset'?null:(f.category.trim()||null),aid=f.scope==='asset'?f.asset_id:null;
+    if(tpl&&JSON.stringify(items)===JSON.stringify(tpl.items)&&f.name.trim()===tpl.name&&cat===(tpl.category||null)&&aid===(tpl.asset_id||null)){onClose();return}
+    setBusy(true);const row={name:f.name.trim(),category:cat,items};if(aid)row.asset_id=aid;if(tpl)row.family=tpl.family;
     const {error}=await sb.from('prestart_templates').insert(row);setBusy(false);
-    if(error){setErr(errMsg(error));return}notify(tpl?`Checklist saved as version ${tpl.version+1}`:'Checklist saved');reload();onClose()};
+    if(error){setErr(/asset_id/.test(errMsg(error))?'Checklists for one machine aren’t set up yet: an administrator needs to run supabase/prestarts.sql again.':errMsg(error));return}notify(tpl?`Checklist saved as version ${tpl.version+1}`:'Checklist saved');reload();onClose()};
   return html`<${Modal} wide=${true} title=${tpl?`Edit checklist · ${tpl.name}`:'New prestart checklist'} sub=${tpl?`Saving makes version ${tpl.version+1}. Prestarts already done keep the questions they answered.`:'The questions operators answer before starting a machine'} onClose=${onClose}
     foot=${html`${err&&html`<span id="cl-err" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="text-[12px] text-muted mr-auto">${f.items.filter(i=>(i.text||'').trim()).length} questions · ${f.items.filter(i=>i.critical&&kindOf(i)==='check').length} critical</span>
       <button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="cl-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Saving…':'Save checklist'}</button>`}>
     <div class="grid gap-4">
       <div class="grid sm:grid-cols-2 gap-3">
         <${Fld} label="Checklist name"><input id="cl-name" class="field" style=${fs} placeholder="e.g. Roller prestart" value=${f.name} onInput=${e=>setF({...f,name:e.target.value})}/><//>
-        <${Fld} label="Used for"><select id="cl-cat" class="field" style=${fs} value=${f.category} onChange=${e=>setF({...f,category:e.target.value})}>
-          ${(!taken.includes('')||(tpl&&!tpl.category))&&html`<option value="">All other machines (no checklist of their own)</option>`}
-          ${cats.map(c=>html`<option key=${c} value=${c}>${c}</option>`)}</select><//>
+        <div class="grid gap-1 min-w-0"><span class="label">Used for</span><div class="grid gap-2"><div class="seg w-max" id="cl-scope"><button type="button" aria-pressed=${f.scope==='category'} onClick=${()=>setF({...f,scope:'category'})}>A machine category</button><button id="cl-scope-asset" type="button" aria-pressed=${f.scope==='asset'} onClick=${()=>setF({...f,scope:'asset'})}>One machine</button></div>
+          ${f.scope==='asset'?html`<select id="cl-asset" class="field" style=${fs} value=${f.asset_id} onChange=${e=>setF({...f,asset_id:e.target.value})}><option value="">Choose the machine…</option>${machines.map(m=>html`<option key=${m.id} value=${m.id}>${m.name}${m.sub?' · '+m.sub:''}</option>`)}</select>`
+          :html`<select id="cl-cat" class="field" style=${fs} value=${f.category} onChange=${e=>setF({...f,category:e.target.value})}>
+          ${(!taken.includes('')||(tpl&&!tpl.category&&!tpl.asset_id))&&html`<option value="">All other machines (no checklist of their own)</option>`}
+          ${cats.map(c=>html`<option key=${c} value=${c}>${c}</option>`)}</select>`}</div></div>
+        ${!tpl&&fams.length>0&&html`<${Fld} label="Copy from" span=${true}><select id="cl-copy" class="field" style=${fs} value="" onChange=${e=>{copyFrom(e.target.value);e.target.value=''}}><option value="">Start from a checklist already made…</option>${fams.map(t=>html`<option key=${t.family} value=${t.family}>${t.name} (${t.asset_id?machName(t.asset_id):t.category||'all other machines'}${t.active?'':', not in use'})</option>`)}</select><//>`}
       </div>
+      ${f.scope==='asset'&&html`<p class="text-[12.5px] text-muted -mt-2">This machine uses this checklist instead of the one for its category.</p>`}
       <p class="text-[12.5px] text-muted -mt-2">A <span class="font-semibold" style=${{color:'hsl(0 72% 47%)'}}>critical</span> question that fails means the machine must not be used. Pass / Fail questions need a comment when they fail, and can have photos.</p>
       ${!f.items.length&&html`<div class="rounded-lg border border-dashed border-line p-4 grid gap-2 justify-items-start"><div class="text-[13px]">Start from the standard list (walk-around, fluids, safety, after start-up) and change it to suit, or add your own questions.</div>
         <div class="flex gap-2"><button id="cl-standard" type="button" class="btn btn-primary" onClick=${()=>setF({...f,items:STANDARD.map(x=>({...x}))})}>Use the standard list</button><button type="button" class="btn" onClick=${add}>${Icon.plus} Add a question</button></div></div>`}
@@ -443,19 +455,19 @@ function ChecklistsTab({ctx,open}){
   const {db,perms,M,sb,notify,reload}=ctx;
   if(!db.p3)return html`<${NotSetUp} db=${db}/>`;
   const fam=new Map();db.prestart_templates.forEach(t=>{const o=fam.get(t.family);if(!o||t.version>o.version)fam.set(t.family,t)});
-  const list=[...fam.values()].sort((a,b)=>(b.active-a.active)||((a.category||'~').localeCompare(b.category||'~')));
+  const list=[...fam.values()].sort((a,b)=>(b.active-a.active)||(!!a.asset_id-!!b.asset_id)||((a.category||'~').localeCompare(b.category||'~')));
   const covers=t=>M.assets.filter(a=>!a.retired&&tplFor(db.prestart_templates,a.m)===t).length;
   const uncovered=M.assets.filter(a=>!a.retired&&!tplFor(db.prestart_templates,a.m));
   const used=id=>db.prestarts.filter(p=>db.prestart_templates.some(t=>t.id===p.template_id&&t.family===id)).length;
   const setActive=async(t,v)=>{const {error}=await sb.from('prestart_templates').update({active:v}).eq('id',t.id);if(error){notify(errMsg(error));return}notify(v?'Checklist back in use':'Checklist taken out of use');reload()};
   return html`<section class="panel flex flex-col min-h-0">
-    <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line"><div class="text-[12.5px] text-muted">Each machine uses the checklist for its category. A checklist for “all other machines” covers the rest.</div>
+    <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line"><div class="text-[12.5px] text-muted">Each machine uses its own checklist if it has one, otherwise the one for its category. A checklist for “all other machines” covers the rest.</div>
       <span class="flex-1"></span>${perms.mgr&&html`<button id="cl-new" type="button" class="btn btn-primary" onClick=${()=>open({k:'checklist'})}>${Icon.plus} New checklist</button>`}</div>
     ${uncovered.length>0&&html`<div class="px-3 py-2 text-[12.5px] border-b border-line" style=${{color:'hsl(30 90% 36%)'}}>${uncovered.length} machine${uncovered.length===1?' has':'s have'} no prestart checklist: ${[...new Set(uncovered.map(a=>machCatOf(a.m)||'no category'))].join(', ')}</div>`}
     <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="cl-table">
       <thead><tr class="text-left">${['Used for','Checklist','Questions','Version','Machines','Prestarts (90 days)',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
       <tbody>${list.map(t=>html`<tr key=${t.family} class="border-t border-line" style=${t.active?null:{opacity:.55}}>
-          <td class="py-2 px-3 whitespace-nowrap font-medium">${t.category||'All other machines'}</td>
+          <td class="py-2 px-3 whitespace-nowrap font-medium">${t.asset_id?html`${(ctx.data.resources.find(r=>r.id===t.asset_id)||{}).name||t.asset_id} <span class="text-muted font-normal">(one machine)</span>`:t.category||'All other machines'}</td>
           <td class="py-2 px-3">${t.name}${!t.active?html` <span class="text-[11px] text-muted">(not in use)</span>`:''}</td>
           <td class="py-2 px-3 whitespace-nowrap">${t.items.length} <span class="text-muted">· ${t.items.filter(i=>i.critical).length} critical</span></td>
           <td class="py-2 px-3 whitespace-nowrap">v${t.version} <span class="text-muted">· ${fmtTs(t.created_at)}</span></td>

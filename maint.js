@@ -755,7 +755,7 @@ function FleetScreen({data,live,notify,setData,tab:tab0,onCounts,assetReq,onImpo
     ${D&&dlg&&dlg.k==='defect'&&html`<${D.DefectDialog} ctx=${ctx} d=${(db.defects||[]).find(x=>x.id===dlg.d.id)||dlg.d} open=${open} onClose=${()=>setDlg(null)}/>`}
     ${D&&dlg&&dlg.k==='newdefect'&&html`<${D.NewDefectDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
     ${P&&dlg&&dlg.k==='ps'&&html`<${P.PrestartView} ctx=${ctx} ps=${dlg.ps} onClose=${()=>setDlg(null)}/>`}
-    ${P&&dlg&&dlg.k==='checklist'&&html`<${P.ChecklistDialog} ctx=${ctx} tpl=${dlg.tpl} onClose=${()=>setDlg(null)}/>`}
+    ${P&&dlg&&dlg.k==='checklist'&&html`<${P.ChecklistDialog} key=${dlg.n||(dlg.n=Date.now())} ctx=${ctx} tpl=${dlg.tpl} onClose=${()=>setDlg(null)}/>`}
   </div>`;
 }
 window.FleetScreen=FleetScreen;
