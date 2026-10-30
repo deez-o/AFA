@@ -58,15 +58,18 @@ Personal to each person's browser: hidden rows, section order, view length, dark
 
 ## Fleet & Maintenance
 
-Servicing, meter readings, work orders and breakdowns for the machines on the roster (the **Fleet** screen).
+Servicing, meter readings, work orders and breakdowns for the machines on the roster (the **Fleet** screen), and digital prestart checks done on a phone (the **Prestarts** screen).
 
-- `maint.js`: the Fleet screens, loaded only when someone opens Fleet
+- `maint.js`: the Fleet screens, loaded only when someone opens Fleet or Prestarts
+- `prestart.js`: the Prestarts screen, the checklist builder, prestart history, logins, and machine manuals
 - `supabase/maintenance.sql`: the maintenance tables, roles and database rules
-- `tests/maintenance_test.sql`: checks the database rules; leaves no data behind
+- `supabase/prestarts.sql`: prestart checklists and prestarts, the `maintenance` file store, and the link from each login to its Staff record
+- `tests/maintenance_test.sql`, `tests/prestarts_test.sql`: check the database rules; they leave no data behind
 
 ### Set up (once)
 1. Supabase → **SQL Editor** → **New query**. Paste all of `supabase/maintenance.sql` and click **Run**. It is safe to run again and doesn't change roster data.
-2. To check it: paste `tests/maintenance_test.sql` into a new query and **Run**. The messages list each check as PASS and finish with `ALL MAINTENANCE TESTS PASSED`. It rolls itself back.
+2. Do the same with `supabase/prestarts.sql` (after `maintenance.sql`). It also creates the private file store (Storage bucket `maintenance`) for prestart photos, signatures and manuals.
+3. To check them: paste `tests/maintenance_test.sql` into a new query and **Run**, then `tests/prestarts_test.sql`. The messages list each check as PASS and finish with `ALL MAINTENANCE TESTS PASSED` / `ALL PRESTART TESTS PASSED`. They roll themselves back.
 
 ### Roles
 | Role | Schedule | Maintenance |
@@ -76,13 +79,20 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 | `planner` | Edit | View |
 | `supervisor` | View | Record work, verify & close work orders |
 | `mechanic` | View | Record services, readings and work order progress |
-| `operator` | View | Prestarts (coming next) |
+| `operator` | Prestarts only (once Prestarts is released; until then, View) | Prestarts |
 | `viewer` | View | None |
 
 **Ideas** is for the `admin` only, never superusers.
 
-**Features in progress:** Fleet & Maintenance starts out visible to the `admin` only (marked *Preview* in the left menu). Release each one from the settings menu (top right) under *Features in progress*.
+### Prestarts
+- **Checklists** (Fleet › Checklists, admin and superuser): one per machine category, plus an optional one for *all other machines*. Start from the standard list and change it. Saving a change makes a new version; prestarts already done keep the questions they answered. Mark questions **critical**: a fail means *Do not operate*.
+- **Operators** fill in the prestart on their phone: meters, each question (Pass / Fail / N/A; a fail needs a comment and can have photos), signature and declaration. Answers are saved on the phone as they go, so a dropped connection or a closed browser loses nothing. Submitting twice never makes two prestarts.
+- A submitted prestart can't be changed or deleted by anyone. Hours or km lower than the last reading don't stop the prestart: it is saved with a note and the reading isn't recorded.
+- **Logins** (Fleet › Logins, admin and superuser): set each person's role and link each login to its Staff record, so prestarts carry the operator's name. Nobody can change their own role, and only the `admin` can give or remove the admin role. New logins are still added in Supabase → Authentication → Users.
+- Defects raised automatically from failed items, and restrictions that block a machine, come in the next phase.
 
-After pulling this version, run `supabase/schema.sql` and then `supabase/maintenance.sql` again in the SQL Editor: both are safe to re-run and add the new roles.
+**Features in progress:** Fleet & Maintenance and Prestarts start out visible to the `admin` only (marked *Preview* in the left menu). Release each one from the settings menu (top right) under *Features in progress*.
+
+After pulling this version, run `supabase/schema.sql`, then `supabase/maintenance.sql`, then `supabase/prestarts.sql` in the SQL Editor: all are safe to re-run.
 
 Set a role the same way as before, e.g. `update public.profiles set role = 'mechanic' where email = 'name@yourcompany.com.au';`

@@ -1,5 +1,5 @@
 /* =====================================================================
-   FraserFlow: Fleet & Maintenance (Phase 2: core maintenance)
+   FraserFlow: Fleet & Maintenance (Phase 2: core maintenance; Phase 3 prestarts are in prestart.js)
    Loaded only when the Fleet screen opens. Uses the app's own helpers
    (html, hooks, Icon, Combo, date helpers) and the Supabase tables made by
    supabase/maintenance.sql. The roster's machines are the asset list; every
@@ -7,6 +7,7 @@
    ===================================================================== */
 (function(){
 const MT=['asset_profiles','meter_readings','service_plans','service_records','work_orders'];
+const P3=['prestart_templates','maintenance_files'];   /* Phase 3 (supabase/prestarts.sql): optional until that script is run */
 const WO_STATUS={open:'Open',scheduled:'Scheduled',in_progress:'In progress',awaiting_parts:'Awaiting parts',completed:'Completed',closed:'Verified & closed',cancelled:'Cancelled'};
 const WO_OPEN=s=>!['completed','closed','cancelled'].includes(s);
 const WO_TYPE={service:'Scheduled service',defect:'Defect repair',breakdown:'Breakdown',request:'Maintenance request'};
@@ -25,11 +26,17 @@ const errMsg=e=>(e&&(e.message||e.error_description))||String(e);
 
 /* load every maintenance table (paged past Supabase's 1,000-row limit) and keep it live */
 async function fetchAll(sb,t){const out=[];for(let from=0;;from+=1000){const {data,error}=await sb.from(t).select('*').range(from,from+999);if(error)throw error;out.push(...(data||[]));if(!data||data.length<1000)break}return out}
+/* prestarts from the last 90 days, newest first */
+async function fetchPrestarts(sb){const since=new Date(Date.now()-90*864e5).toISOString();const out=[];
+  for(let from=0;;from+=1000){const {data,error}=await sb.from('prestarts').select('*').gte('submitted_at',since).order('submitted_at',{ascending:false}).range(from,from+999);if(error)throw error;out.push(...(data||[]));if(!data||data.length<1000)break}return out}
 function useMaint(sb){
   const [db,setDb]=useState(null);const [err,setErr]=useState('');
-  const load=async()=>{try{const r=await Promise.all(MT.map(t=>fetchAll(sb,t)));const o={};MT.forEach((t,i)=>o[t]=r[i]);setDb(o);setErr('')}catch(e){setErr(errMsg(e))}};
+  const load=async()=>{try{const r=await Promise.all(MT.map(t=>fetchAll(sb,t)));const o={};MT.forEach((t,i)=>o[t]=r[i]);
+      try{const r3=await Promise.all([...P3.map(t=>fetchAll(sb,t)),fetchPrestarts(sb)]);P3.forEach((t,i)=>o[t]=r3[i]);o.prestarts=r3[P3.length];o.p3=true}
+      catch(e){P3.forEach(t=>o[t]=[]);o.prestarts=[];o.p3=false;o.p3err=errMsg(e)}
+      setDb(o);setErr('')}catch(e){setErr(errMsg(e))}};
   useEffect(()=>{load();let t=null;let ch=null;
-    try{ch=sb.channel('maint-'+uid());MT.forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,350)}));ch.subscribe()}catch(e){}
+    try{ch=sb.channel('maint-'+uid());[...MT,...P3,'prestarts'].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,350)}));ch.subscribe()}catch(e){}
     return()=>{clearTimeout(t);try{if(ch)sb.removeChannel(ch)}catch(e){}}},[]);
   return {db,err,reload:load};
 }
@@ -43,6 +50,7 @@ function buildModel(data,db){
     .forEach(r=>{const m=meters.get(r.asset_id)||{};m[r.kind]={value:+r.value,at:r.read_at};meters.set(r.asset_id,m)});
   const recs=[...db.service_records].sort((a,b)=>a.done_on<b.done_on?1:a.done_on>b.done_on?-1:(a.created_at<b.created_at?1:-1));
   const machines=data.resources.filter(r=>r.type==='machine');
+  const lastPs=new Map();(db.prestarts||[]).forEach(p=>{if(!lastPs.has(p.asset_id))lastPs.set(p.asset_id,p)});   /* newest first */
   const meterType=m=>{const p=prof.get(m.id);if(p&&p.meter_type)return p.meter_type;return /truck/i.test([machCatOf(m),m.name,m.sub].join(' '))?'both':'hours'};
   const plansFor=m=>db.service_plans.filter(p=>p.active&&(p.asset_id===m.id||(p.category&&p.category.trim().toLowerCase()===machCatOf(m).toLowerCase())));
   const planStatus=(m,p)=>{const mt=meterType(m);const last=recs.find(r=>r.asset_id===m.id&&r.plan_id===p.id);
@@ -69,7 +77,7 @@ function buildModel(data,db){
     const status=out?'out':serv?'service':due?'due':'ok';
     const next=plans.filter(x=>x.first).sort((a,b)=>({overdue:0,soon:1,ok:2}[a.state]-{overdue:0,soon:1,ok:2}[b.state])||((a.first.left/Math.max(a.first.warn,1))-(b.first.left/Math.max(b.first.warn,1))))[0]||null;
     const crew=m.crewId?data.resources.find(r=>r.id===m.crewId):null;
-    return {m,p,mt:meterType(m),cur:meters.get(m.id)||{},plans,wos,open,status,next,crew,retired:!!(p&&p.retired),
+    return {m,p,mt:meterType(m),cur:meters.get(m.id)||{},plans,wos,open,status,next,crew,retired:!!(p&&p.retired),ps:lastPs.get(m.id)||null,
       overdue:plans.filter(x=>x.state==='overdue').length,soon:plans.filter(x=>x.state==='soon').length,last:recs.find(r=>r.asset_id===m.id)||null}});
   return {assets,byId:new Map(assets.map(a=>[a.m.id,a])),recs,meters,today}
 }
@@ -317,9 +325,10 @@ function AssetPanel({ctx,a,onClose,open,behind}){
       ...(w.completed_at?[{ts:w.completed_at,ic:'done',t:`${woNo(w)} completed`,d:[w.completion_notes,(w.parts||[]).length&&'Parts: '+partsTxt(w.parts)].filter(Boolean).join(' · '),wo:w}]:[]),
       ...(w.verified_at?[{ts:w.verified_at,ic:'ok',t:`${woNo(w)} verified and closed`,d:'',wo:w}]:[])]),
     ...reads.map(r=>({ts:r.read_at,ic:'meter',t:`${r.kind==='hours'?'Hours':'Km'} reading ${fmtN(+r.value)}${r.source==='correction'?' (correction)':r.source==='replacement'?' (new meter)':''}`,d:r.note||''})),
+    ...(ctx.db.prestarts||[]).filter(p=>p.asset_id===a.m.id&&p.result!=='pass').map(p=>({ts:p.submitted_at,ic:p.result==='unsafe'?'unsafe':'ps',t:`Prestart by ${p.operator_name}: ${p.result==='unsafe'?'do not operate':'defects reported'}`,d:`${p.failed} item${p.failed===1?'':'s'} failed`,ps:p})),
     ...down.map(b=>({ts:b.start+'T00:00:00',ic:'down',t:`${KINDS[b.kind].label}${b.title?': '+b.title:''}`,d:`On the schedule ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`}))
   ].map(h=>({...h,at:localDay(h.ts),t0:new Date(h.ts).getTime()})).sort((x,y)=>y.t0-x.t0);   /* newest first, by when it actually happened */
-  const IC={svc:'hsl(145 55% 36%)',wo:'var(--accent)',done:'hsl(212 75% 48%)',ok:'hsl(145 55% 36%)',meter:'var(--faint)',down:'hsl(252 60% 55%)'};
+  const IC={svc:'hsl(145 55% 36%)',wo:'var(--accent)',done:'hsl(212 75% 48%)',ok:'hsl(145 55% 36%)',meter:'var(--faint)',down:'hsl(252 60% 55%)',ps:'hsl(30 90% 46%)',unsafe:'hsl(0 72% 47%)'};
   const p=a.p||{};
   return html`<${Modal} wide=${true} noEsc=${behind} title=${html`<span class="inline-flex items-center gap-2 flex-wrap">${a.m.name} <span class="text-muted font-normal text-[15px]">${a.m.sub||''}</span> ${stChip(a.status)}</span>`}
     sub=${[machCatOf(a.m)||'No category',a.m.rego&&'Rego '+a.m.rego,a.crew&&a.crew.name,a.retired&&'Retired'].filter(Boolean).join(' · ')} onClose=${onClose}
@@ -366,14 +375,16 @@ function AssetPanel({ctx,a,onClose,open,behind}){
           <span class="mono text-[12px] text-muted">${woNo(w)}</span><span class="text-[13px] font-medium flex-1 min-w-0 truncate">${w.title}</span>${woChip(w.status)}<span class="text-[12px]" style=${{color:PRI_COL[w.priority]}}>${PRI[w.priority]}</span>
           ${w.start_date&&html`<span class="text-[12px] text-muted mono">${fmtShort(parse(w.start_date))}</span>`}</button>`)}</div></section>`}
 
+      ${window.FFP&&html`<${window.FFP.AssetPrestarts} ctx=${ctx} a=${a} open=${open}/>`}
+
       <section class="grid gap-2"><h3 class="font-display text-[15px] font-semibold">Maintenance history</h3>
         ${!hist.length?html`<div class="text-[12.5px] text-muted">Nothing recorded yet.</div>`:html`<ol class="grid gap-0 relative">${hist.map((h,i)=>html`<li key=${i} class="grid grid-cols-[86px_14px_1fr] gap-2 text-[12.5px] py-1.5">
             <span class="mono text-muted">${fmtShort(parse(h.at))} ${parse(h.at).getFullYear()!==TODAY.getFullYear()?parse(h.at).getFullYear():''}</span>
             <span class="mt-1 w-2.5 h-2.5 rounded-full" style=${{background:IC[h.ic]}}></span>
-            <span class="min-w-0">${h.wo?html`<button type="button" class="font-medium text-left hover:underline" onClick=${()=>open({k:'wo',wo:h.wo})}>${h.t}</button>`:html`<span class="font-medium">${h.t}</span>`}${h.d&&html`<span class="block text-muted whitespace-pre-line">${h.d}</span>`}</span></li>`)}</ol>`}
+            <span class="min-w-0">${h.ps?html`<button type="button" class="font-medium text-left hover:underline" onClick=${()=>open({k:'ps',ps:h.ps})}>${h.t}</button>`:h.wo?html`<button type="button" class="font-medium text-left hover:underline" onClick=${()=>open({k:'wo',wo:h.wo})}>${h.t}</button>`:html`<span class="font-medium">${h.t}</span>`}${h.d&&html`<span class="block text-muted whitespace-pre-line">${h.d}</span>`}</span></li>`)}</ol>`}
       </section>
 
-      <section class="rounded-lg border border-dashed border-line p-3"><div class="label">Manuals and documents</div><div class="text-[12.5px] text-muted mt-1">Coming with file storage in the next phase (prestarts), together with photos.</div></section>
+      ${window.FFP&&ctx.db.p3?html`<${window.FFP.FilesSection} ctx=${ctx} a=${a}/>`:html`<section class="rounded-lg border border-dashed border-line p-3"><div class="label">Manuals and documents</div><div class="text-[12.5px] text-muted mt-1">Arrives once supabase/prestarts.sql has been run.</div></section>`}
     </div><//>`;
 }
 
@@ -386,7 +397,11 @@ function Dashboard({ctx,open}){
   const cnt=s=>act.filter(a=>a.status===s).length;
   const cards=[['Active machines',act.length,'',''],['Available for work',cnt('ok')+cnt('due'),'Operational or due soon','hsl(145 55% 36%)'],['Being serviced',cnt('service'),'In progress or down today','hsl(212 75% 48%)'],['Out of service',cnt('out'),'Unsafe breakdowns','hsl(0 72% 47%)'],
     ['Services due soon',act.reduce((s,a)=>s+a.soon,0),'Within the warning window','hsl(30 90% 46%)'],['Overdue services',act.reduce((s,a)=>s+a.overdue,0),'',act.some(a=>a.overdue)?'hsl(0 72% 47%)':''],
-    ['Open work orders',openWos.length,`${openWos.filter(w=>w.priority==='urgent'||w.priority==='high').length} high or urgent`,''],['Prestart defects','–','Arrives with prestarts',''],['Critical defects','–','Arrives with defects','']];
+    ['Open work orders',openWos.length,`${openWos.filter(w=>w.priority==='urgent'||w.priority==='high').length} high or urgent`,''],
+    ...(ctx.db.p3?(()=>{const wk=iso(addDays(TODAY,-6));const ps=ctx.db.prestarts;const td=ps.filter(p=>localDay(p.submitted_at)===M.today);const bad=ps.filter(p=>p.result!=='pass'&&localDay(p.submitted_at)>=wk);
+      return [['Prestarts today',td.length,`${new Set(td.map(p=>p.asset_id)).size} of ${act.length} machines checked`,''],['Prestart defects',bad.length,'Prestarts with faults, last 7 days',bad.length?'hsl(30 90% 46%)':'']]})()
+      :[['Prestart defects','–','Prestarts aren’t set up yet','']]),
+    ['Critical defects','–','Arrives with defects','']];
   const ql=q.trim().toLowerCase();
   const rank={out:0,service:1,due:2,ok:3};
   const list=act.filter(a=>(!cat||machCatOf(a.m).toLowerCase()===cat.toLowerCase())&&(!crew||(crew==='~'?!a.m.crewId:a.m.crewId===crew))&&(!st||a.status===st)&&(!ql||[a.m.name,a.m.sub,a.m.rego,a.p&&a.p.make,a.p&&a.p.model].join(' ').toLowerCase().includes(ql)))
@@ -394,7 +409,7 @@ function Dashboard({ctx,open}){
   const attention=act.flatMap(a=>a.plans.filter(x=>x.state==='overdue'||x.state==='soon').map(x=>({a,x}))).sort((u,v)=>(u.x.state==='overdue'?0:1)-(v.x.state==='overdue'?0:1));
   const crews=data.resources.filter(r=>r.type==='crew');
   return html`<div class="grid gap-3">
-    <div class="grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-9">${cards.map(([k,v,s,c])=>html`<div key=${k} class="panel px-3 py-2.5 min-w-0"><div class="label leading-tight">${k}</div><div class="font-display text-[22px] font-semibold tnum" style=${c?{color:c}:null}>${v}</div>${s&&html`<div class="text-[11px] text-muted truncate" title=${s}>${s}</div>`}</div>`)}</div>
+    <div class="grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-10">${cards.map(([k,v,s,c])=>html`<div key=${k} class="panel px-3 py-2.5 min-w-0"><div class="label leading-tight">${k}</div><div class="font-display text-[22px] font-semibold tnum" style=${c?{color:c}:null}>${v}</div>${s&&html`<div class="text-[11px] text-muted truncate" title=${s}>${s}</div>`}</div>`)}</div>
     ${attention.length>0&&html`<section class="panel p-3 grid gap-2" aria-label="Services needing attention"><div class="flex items-baseline gap-2"><h3 class="font-display text-[15px] font-semibold">Services needing attention</h3><span class="text-[12px] text-muted">${attention.length}</span></div>
       <div class="grid gap-1.5 md:grid-cols-2 xl:grid-cols-3">${attention.slice(0,12).map(({a,x})=>{const hasWo=a.open.some(w=>w.plan_id===x.plan.id);
         return html`<div key=${a.m.id+x.plan.id} class="rounded-lg border border-line px-3 py-2 flex items-center gap-2">
@@ -410,7 +425,7 @@ function Dashboard({ctx,open}){
         <span class="hidden lg:inline-flex items-center gap-3 text-[11.5px] text-muted">${Object.entries(ST).map(([k,v])=>html`<span key=${k} class="inline-flex items-center gap-1">${stDot(k,8)} ${v[0]}</span>`)}</span>
       </div>
       <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="fl-table">
-        <thead><tr class="text-left">${['','Machine','Category','Rego','Crew','Meters','Next service','Work orders'].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+        <thead><tr class="text-left">${['','Machine','Category','Rego','Crew','Meters','Next service','Work orders',...(ctx.db.p3?['Last prestart']:[])].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
         <tbody>${list.map(a=>html`<tr key=${a.m.id} class="border-t border-line cursor-pointer hover:bg-sunken" tabindex="0" onClick=${()=>open({k:'asset',id:a.m.id})} onKeyDown=${e=>{if(e.key==='Enter')open({k:'asset',id:a.m.id})}}>
             <td class="py-2 pl-3 pr-1">${stDot(a.status)}</td>
             <td class="py-2 px-3"><div class="font-medium">${a.m.name}</div><div class="text-[11.5px] text-muted truncate max-w-[240px]">${a.m.sub||''}${a.p&&(a.p.make||a.p.model)?' · '+[a.p.make,a.p.model].filter(Boolean).join(' '):''}</div></td>
@@ -419,8 +434,9 @@ function Dashboard({ctx,open}){
             <td class="py-2 px-3 whitespace-nowrap">${a.crew?a.crew.name:html`<span class="text-faint">–</span>`}</td>
             <td class="py-2 px-3 mono tnum whitespace-nowrap">${meterTxt(a)}</td>
             <td class="py-2 px-3">${a.next?html`<div class="whitespace-nowrap">${a.next.plan.name} ${planChip(a.next.state)}</div><div class="text-[11.5px] text-muted whitespace-nowrap">${a.next.first.dueTxt} · ${a.next.first.leftTxt}</div>`:html`<span class="text-faint">${a.plans.length?'Last service not set':'No plan'}</span>`}</td>
-            <td class="py-2 px-3 whitespace-nowrap">${a.open.length?html`<span class="font-medium">${a.open.length} open</span>`:html`<span class="text-faint">–</span>`}</td></tr>`)}
-          ${!list.length&&html`<tr><td colspan="8" class="px-3 py-6 text-center text-muted">No machines match.</td></tr>`}</tbody></table></div>
+            <td class="py-2 px-3 whitespace-nowrap">${a.open.length?html`<span class="font-medium">${a.open.length} open</span>`:html`<span class="text-faint">–</span>`}</td>
+            ${ctx.db.p3&&html`<td class="py-2 px-3 whitespace-nowrap">${a.ps?html`<span class="inline-flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full" style=${{background:window.FFP?window.FFP.RES[a.ps.result][1]:'var(--muted)'}}></span>${localDay(a.ps.submitted_at)===M.today?new Date(a.ps.submitted_at).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'}):fmtShort(new Date(a.ps.submitted_at))}${a.ps.result!=='pass'?html` <span class="text-[11px] font-semibold" style=${{color:window.FFP?window.FFP.RES[a.ps.result][1]:''}}>${a.ps.result==='unsafe'?'do not operate':a.ps.failed+' failed'}</span>`:''}</span>`:html`<span class="text-faint">–</span>`}</td>`}</tr>`)}
+          ${!list.length&&html`<tr><td colspan="9" class="px-3 py-6 text-center text-muted">No machines match.</td></tr>`}</tbody></table></div>
     </section>
   </div>`;
 }
@@ -520,17 +536,20 @@ function FleetScreen({data,live,notify}){
     <div><button type="button" class="btn" onClick=${reload}>Try again</button></div></div>`;
   if(!M)return html`<div class="panel p-6 text-[13px] text-muted">Loading maintenance…</div>`;
   const staff=[...new Set(data.resources.filter(r=>r.type==='person').map(r=>r.name))].sort();
-  const ctx={sb,db,data,M,perms,notify,reload,staff,plans:db.service_plans};
+  const ctx={sb,db,data,M,perms,notify,reload,staff,plans:db.service_plans,me:live.user&&live.user.id,role};
   const open=o=>{if(o.k==='asset'){setAsset(o.id);return}setDlg(o)};
   const a=asset&&M.byId.get(asset);
-  const TABS=[['dash','Dashboard'],['wo','Work orders'],['cal','Calendar'],['plans','Service plans']];
+  const P=window.FFP;
+  const TABS=[['dash','Dashboard'],['wo','Work orders'],['cal','Calendar'],['plans','Service plans'],...(P?[['ps','Prestarts'],['cl','Checklists']]:[]),...(P&&perms.mgr?[['lg','Logins']]:[])];
+  const tabOk=TABS.some(x=>x[0]===tab)?tab:'dash';
   return html`<div class="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto pr-1">
     <div class="flex flex-wrap items-center gap-2">
-      <div class="seg" role="tablist" aria-label="Fleet sections">${TABS.map(([k,l])=>html`<button key=${k} id=${'fl-tab-'+k} type="button" role="tab" aria-selected=${tab===k} aria-pressed=${tab===k} onClick=${()=>pickTab(k)}>${l}${k==='wo'?html` <span class="mono text-[11px] text-faint">${db.work_orders.filter(w=>WO_OPEN(w.status)).length}</span>`:''}</button>`)}</div>
+      <div class="seg" role="tablist" aria-label="Fleet sections">${TABS.map(([k,l])=>html`<button key=${k} id=${'fl-tab-'+k} type="button" role="tab" aria-selected=${tabOk===k} aria-pressed=${tabOk===k} onClick=${()=>pickTab(k)}>${l}${k==='wo'?html` <span class="mono text-[11px] text-faint">${db.work_orders.filter(w=>WO_OPEN(w.status)).length}</span>`:''}</button>`)}</div>
       <span class="flex-1"></span>${err&&html`<span class="text-[12px]" style=${{color:'var(--bad)'}}>${err}</span>`}
       ${!perms.work&&html`<span class="text-[12px] text-muted">View only: mechanics, supervisors and administrators record maintenance</span>`}
     </div>
-    ${tab==='dash'?html`<${Dashboard} ctx=${ctx} open=${open}/>`:tab==='wo'?html`<${WorkOrders} ctx=${ctx} open=${open}/>`:tab==='cal'?html`<${Calendar} ctx=${ctx} open=${open}/>`:html`<${Plans} ctx=${ctx} open=${open}/>`}
+    ${tabOk==='dash'?html`<${Dashboard} ctx=${ctx} open=${open}/>`:tabOk==='wo'?html`<${WorkOrders} ctx=${ctx} open=${open}/>`:tabOk==='cal'?html`<${Calendar} ctx=${ctx} open=${open}/>`
+      :tabOk==='ps'?html`<${P.PrestartsTab} ctx=${ctx} open=${open}/>`:tabOk==='cl'?html`<${P.ChecklistsTab} ctx=${ctx} open=${open}/>`:tabOk==='lg'?html`<${P.LoginsTab} ctx=${ctx}/>`:html`<${Plans} ctx=${ctx} open=${open}/>`}
     ${a&&html`<${AssetPanel} ctx=${ctx} a=${a} open=${open} behind=${!!dlg} onClose=${()=>setAsset(null)}/>`}
     ${dlg&&dlg.k==='wo'&&html`<${WorkOrderDialog} ctx=${ctx} wo=${dlg.wo&&db.work_orders.find(w=>w.id===dlg.wo.id)||dlg.wo} init=${dlg.init} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='service'&&html`<${ServiceDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} plan=${dlg.plan} baseline=${dlg.baseline} onClose=${()=>setDlg(null)}/>`}
@@ -538,8 +557,11 @@ function FleetScreen({data,live,notify}){
     ${dlg&&dlg.k==='profile'&&html`<${ProfileDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='breakdown'&&html`<${BreakdownDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='plan'&&html`<${PlanDialog} ctx=${ctx} plan=${dlg.plan} onClose=${()=>setDlg(null)}/>`}
+    ${P&&dlg&&dlg.k==='ps'&&html`<${P.PrestartView} ctx=${ctx} ps=${dlg.ps} onClose=${()=>setDlg(null)}/>`}
+    ${P&&dlg&&dlg.k==='checklist'&&html`<${P.ChecklistDialog} ctx=${ctx} tpl=${dlg.tpl} onClose=${()=>setDlg(null)}/>`}
   </div>`;
 }
 window.FleetScreen=FleetScreen;
+window.FFM={Modal,Fld,fs,n0,errMsg,fmtTs,fmtD,localDay,useMaint,buildModel,meterTxt,stChip};   /* shared with prestart.js */
 window.__maintModel=buildModel;
 })();

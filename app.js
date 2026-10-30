@@ -2589,22 +2589,36 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
   </div>`;
 }
 
-/* ---------- Fleet & Maintenance: its own file, loaded the first time the screen opens ---------- */
+/* ---------- Fleet & Maintenance and Prestarts: their own files (maint.js, then prestart.js), loaded the first time either screen opens ---------- */
+let maintLoading=null;
+function loadMaint(){
+  if(window.FleetScreen&&window.PrestartScreen)return Promise.resolve();
+  if(maintLoading)return maintLoading;
+  const v=((document.querySelector('script[src*="/app.js"]')||{}).src||'').split('?v=')[1]||Date.now();
+  const one=f=>new Promise((res,rej)=>{const s=document.createElement('script');s.src='/'+f+'?v='+v;s.onload=res;s.onerror=rej;document.body.appendChild(s)});
+  maintLoading=(window.FleetScreen?Promise.resolve():one('maint.js')).then(()=>window.PrestartScreen?null:one('prestart.js')).catch(e=>{maintLoading=null;throw e});
+  return maintLoading;
+}
 function LazyFleet(props){
-  const [ok,setOk]=useState(!!window.FleetScreen);const [err,setErr]=useState('');
-  useEffect(()=>{if(window.FleetScreen)return;const s=document.createElement('script');
-    const v=((document.querySelector('script[src*="/app.js"]')||{}).src||'').split('?v=')[1]||Date.now();
-    s.src='/maint.js?v='+v;s.onload=()=>setOk(!!window.FleetScreen);s.onerror=()=>setErr('Couldn’t load Fleet & Maintenance. Check the connection and reload.');document.body.appendChild(s)},[]);
+  const comp=props.comp||'FleetScreen';
+  const [ok,setOk]=useState(!!(window.FleetScreen&&window.PrestartScreen));const [err,setErr]=useState('');
+  useEffect(()=>{if(ok)return;loadMaint().then(()=>setOk(true),()=>setErr('Couldn’t load '+(comp==='PrestartScreen'?'Prestarts':'Fleet & Maintenance')+'. Check the connection and reload.'))},[]);
   if(err)return html`<div class="panel p-6 text-[13px]" style=${{color:'var(--bad)'}}>${err}</div>`;
-  if(!ok)return html`<div class="panel p-6 text-[13px] text-muted">Loading Fleet & Maintenance…</div>`;
-  return html`<${window.FleetScreen} ...${props}/>`;
+  if(!ok||!window[comp])return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;
+  const C=window[comp];return html`<${C} ...${props}/>`;
 }
 /* ---------- screens: the left menu ---------- */
 /* features still being worked on: only the admin sees them until they are released to everyone with access (Settings menu) */
-const PREVIEW_DEFAULT=['fleet'];
-const previewOf=d=>d&&Array.isArray(d.previewOnly)?d.previewOnly:PREVIEW_DEFAULT;
-const screenOK=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=role==='admin'||role==='superuser';
+const PREVIEW_DEFAULT=['fleet','prestarts'];
+const previewKeys=()=>Object.keys(SCREENS).filter(k=>SCREENS[k].preview);
+/* a feature added after the admin last changed these switches starts out in progress too */
+const previewOf=d=>{if(!d||!Array.isArray(d.previewOnly))return PREVIEW_DEFAULT;const known=Array.isArray(d.previewKnown)?d.previewKnown:['fleet'];
+  return [...d.previewOnly,...previewKeys().filter(k=>!known.includes(k)&&!d.previewOnly.includes(k))]};
+const screenOK0=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=role==='admin'||role==='superuser';
   return (!s.admin||admin)&&(!s.roles||s.roles.includes(role))&&(!s.preview||role==='admin'||!previewOf(d).includes(k))};
+/* operators only see Prestarts, once it is released to them */
+const screenOK=(k,role,d)=>screenOK0(k,role,d)&&!(role==='operator'&&k!=='prestarts'&&screenOK0('prestarts',role,d));
+const homeScreen=(role,d)=>role==='operator'&&screenOK('prestarts',role,d)?'prestarts':'schedule';
 const SCREENS={
   schedule:{label:'Schedule',title:'Schedule',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   jobs:{label:'Jobs',title:'Jobs',only:[],legend:[],head:''},
@@ -2612,9 +2626,11 @@ const SCREENS={
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
   fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',roles:['admin','superuser','planner','supervisor','mechanic'],preview:true},   /* maintenance: not for operators or viewers */
+  prestarts:{label:'Prestarts',title:'Prestarts',only:[],legend:[],head:'',roles:['admin','superuser','planner','supervisor','mechanic','operator'],preview:true},   /* the phone checklist; the only screen operators see */
   ideas:{label:'Ideas',title:'Ideas',only:[],legend:[],head:'',roles:['admin'],bottom:true},   /* the administrator only, never superusers; always at the bottom of the menu */   /* administrators only (button hidden for everyone else) */
 };
 const NAV_ICON={
+  prestarts:svg(html`<rect x="3" y="2.5" width="10" height="12" rx="1.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6 2.5V1.8h4v.7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M5.6 8.6l1.7 1.6 3.2-3.4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,20),
   fleet:svg(html`<path d="M10.5 2a3.5 3.5 0 00-3.2 4.9L2.5 11.7a1.3 1.3 0 001.8 1.8l4.8-4.8A3.5 3.5 0 0014 5.5l-2 2-1.8-.3-.3-1.8 2-2c-.4-.3-.9-.4-1.4-.4z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/>`,20),
   jobs:svg(html`<rect x="2" y="4.5" width="12" height="9" rx="1.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M5.8 4.5V3.2c0-.4.3-.7.7-.7h3c.4 0 .7.3.7.7v1.3M2 8.5h12" stroke="currentColor" stroke-width="1.5" fill="none"/>`,20),
   ideas:svg(html`<path d="M8 1.8a4.4 4.4 0 00-2.6 7.9c.5.4.8 1 .8 1.6v.4h3.6v-.4c0-.6.3-1.2.8-1.6A4.4 4.4 0 008 1.8z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M6.4 13.6h3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,20),
@@ -2629,6 +2645,7 @@ function NavRail({screen,go,isAdmin,role,data,badge={}}){
       style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
       <span class="relative inline-flex">${NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${s.label}</span>${role==='admin'&&s.preview&&previewOf(data).includes(k)&&html`<span class="-mt-0.5 text-[8.5px] font-bold uppercase tracking-wide px-1 rounded leading-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}} title="Only you can see this while it is in progress">Preview</span>`}</button>`};
   const all=Object.entries(SCREENS).filter(([k])=>screenOK(k,role,data));
+  if(all.length<2)return null;   /* one screen (operators: Prestarts): no menu needed */
   /* bottom of the bar: features still in progress (admin only, until released), then Ideas */
   const low=([k,s])=>s.bottom||(s.preview&&previewOf(data).includes(k));
   const order=([k,s])=>s.bottom?1:0;
@@ -4643,12 +4660,12 @@ function App({boot,live}){
     return()=>{clearInterval(t);document.removeEventListener('visibilitychange',chk);window.removeEventListener('focus',chk)}},[]);
   /* which screen of the left menu is open (remembered in this browser) */
   const isAdmin=live.role==='admin'||live.role==='superuser';   /* superusers have the admin's powers */
-  const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return screenOK(v,live.role,boot)?v:'schedule'}catch(e){return 'schedule'}});
-  const boardScreen=screen!=='planning'&&screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet';   /* the date controls and + Booking belong to the board screens */
+  const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return screenOK(v,live.role,boot)?v:homeScreen(live.role,boot)}catch(e){return homeScreen(live.role,boot)}});
+  const boardScreen=screen!=='planning'&&screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet'&&screen!=='prestarts';   /* the date controls and + Booking belong to the board screens */
   const goScreen=k=>{setScreen(k);try{localStorage.setItem(KEY+':screen',k)}catch(e){}
     const t=SCREENS[k].tab;if(t)setTab(t);else if(tab==='person'||tab==='machine')setTab('crew')};
   useEffect(()=>{const t=SCREENS[screen].tab;if(t&&tab!==t)setTab(t);else if(!t&&(tab==='person'||tab==='machine'))setTab('crew')},[screen,tab]);
-  useEffect(()=>{if(!screenOK(screen,live.role,data))goScreen('schedule')},[screen,data.previewOnly]);
+  useEffect(()=>{if(!screenOK(screen,live.role,data))goScreen(homeScreen(live.role,data))},[screen,data.previewOnly,data.previewKnown]);
   const SCR=SCREENS[screen];
   useEffect(()=>{document.title='FraserFlow - '+SCR.title},[screen]);
   const [renameId,setRenameId]=useState(null);
@@ -4752,7 +4769,7 @@ function App({boot,live}){
 
   return html`<div class="shell h-full flex gap-4">
     <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} data=${data} badge=${{ideas:(data.suggestions||[]).length}}/>
-    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onMaint=${screenOK('fleet',live.role,data)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
+    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet'&&screen!=='prestarts'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onMaint=${screenOK('fleet',live.role,data)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
         <${Sidebar} screen=${screen} notify=${setToast} onMaint=${screenOK('fleet',live.role,data)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
@@ -4770,7 +4787,7 @@ function App({boot,live}){
           ...(data.resources.some(r=>r.type==='crew'&&r.subbie)?[{id:'exp-subworks',label:'Subbie works',desc:'Upcoming works for a subcontractor crew',run:()=>setSubWorksOpen(true)}]:[])]}/>`}
         <div class="flex items-center gap-2 min-w-0">
           <h1 class="font-display font-semibold tracking-tight truncate text-[22px] leading-none">Fraser<span style=${{color:'var(--accent)'}}>Flow</span><span class="text-faint font-normal"> - </span>${SCR.title}</h1>
-          ${!live.canEdit&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change anything">View only</span>`}
+          ${!live.canEdit&&screen!=='prestarts'&&screen!=='fleet'&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change the schedule">View only</span>`}
         </div>
         <div class="flex-1"></div>
         ${boardScreen&&html`<div class="seg" role="group" aria-label="View length">
@@ -4788,10 +4805,10 @@ function App({boot,live}){
         <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
         ${boardScreen&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
-        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l}))}:null}/>
+        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
       </header>
 
-      ${screen==='fleet'?html`<${LazyFleet} data=${data} live=${live} notify=${setToast}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
+      ${screen==='fleet'||screen==='prestarts'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
       <section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
         <${Stat} k="Crews on jobs today" v=${`${crewsOnJob.length}/${vis('crew').length}`} sub=${`${util}% of crew-days booked`}/>
         <${Stat} k="Machines down today" v=${downToday.length} sub=${downToday.length?downToday.map(m=>m.name).join(', '):'all available'} tone=${downToday.length?'var(--bad)':null}/>
@@ -4842,7 +4859,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion'],['ideas','idea'],['plans','plan'],['planImgs','plan_img']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault','ideasPub','previewOnly','planQuick','planSteps'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault','ideasPub','previewOnly','previewKnown','planQuick','planSteps'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
