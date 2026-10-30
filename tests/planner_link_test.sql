@@ -85,6 +85,12 @@ select pg_temp.ok((pg_temp.alert('t-mach-2')).service = 'soon' and (pg_temp.aler
 insert into public.meter_readings (asset_id, kind, value) values ('t-mach-2','hours',1260);
 select pg_temp.ok((pg_temp.alert('t-mach-2')).service = 'overdue', 'machine alerts: past 1,250 h it shows overdue');
 
+-- 2b. The notifications feed -----------------------------------------------------------------
+select pg_temp.ok(exists (select 1 from public.maintenance_feed where type = 'mcritical' and asset_id = 't-mach-1' and text like 'Critical defect D-%Brakes fail'),
+  'the bell feed has the critical defect');
+insert into public.work_orders (asset_id, wo_type, title, safe_to_operate) values ('t-mach-2','breakdown','Hose burst',false);
+select pg_temp.ok(exists (select 1 from public.maintenance_feed where type = 'mbreak' and asset_id = 't-mach-2' and sub = 'Not safe to operate'), 'the bell feed has the breakdown');
+
 -- 3. Back in service: it can be booked again ----------------------------------------------------
 update public.defects set status = 'dismissed', resolution = 'Test' where asset_id = 't-mach-1';
 update public.restrictions set active = false where asset_id = 't-mach-1';
@@ -94,6 +100,7 @@ set local role authenticated;
 update public.items set data = jsonb_set(data, '{plantIds}', '["t-mach-1"]') where kind = 'block' and id = 't-old';
 select pg_temp.ok((select data->'plantIds' ? 't-mach-1' from public.items where kind = 'block' and id = 't-old') and not (pg_temp.alert('t-mach-1')).restricted,
   'once returned to service, the machine can be booked again');
+select pg_temp.ok(exists (select 1 from public.maintenance_feed where type = 'mreturn' and asset_id = 't-mach-1'), 'the bell feed has the return to service');
 reset role;
 
 select 'ALL PLANNER LINK TESTS PASSED' as result;

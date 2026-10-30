@@ -69,6 +69,32 @@ const readDrafts=u=>{try{const all=JSON.parse(localStorage.getItem(DK(u))||'{}')
   Object.values(all).forEach(d=>{if(d&&d.asset_id&&Date.now()-(d.saved_at||0)<18*3600e3)o[d.asset_id]=d});return o}catch(e){return {}}};   /* a draft older than 18 hours is yesterday's: dropped */
 const writeDraft=(u,d)=>{try{const all=readDrafts(u);if(d.del)delete all[d.asset_id];else all[d.asset_id]=d;localStorage.setItem(DK(u),JSON.stringify(all))}catch(e){}};
 
+/* ---------- no reception: photos, signatures and finished prestarts wait on this phone, then send themselves ---------- */
+const LOCAL=new Map();   /* path → picture kept on this phone, for showing it */
+const OBK=u=>'ps-outbox:'+u;
+async function keepBlob(path,blob){await ffStore.set('blob:'+path,blob);try{LOCAL.set(path,URL.createObjectURL(blob))}catch(e){}}
+async function loadLocal(paths){let n=0;for(const p of paths){if(LOCAL.has(p))continue;const b=await ffStore.get('blob:'+p);if(b){LOCAL.set(p,URL.createObjectURL(b));n++}}return n}
+async function upload(sb,path,blob,type){const r=await sb.storage.from(BUCKET).upload(path,blob,{contentType:type,upsert:false});
+  if(r&&r.error&&!/exist|duplicate/i.test(errMsg(r.error)))throw r.error}   /* already there from an earlier try: fine */
+/* upload now if there's reception, otherwise keep it on the phone */
+async function uploadOrKeep(sb,path,blob,type){try{await upload(sb,path,blob,type)}catch(e){if(!isNetErr(e))throw e;await keepBlob(path,blob);return false}return true}
+const filesOf=pl=>[pl.signature,...Object.values(pl.answers||{}).flatMap(a=>a.photos||[])].filter(Boolean);
+async function sendPrestart(sb,pl){
+  for(const p of filesOf(pl)){const b=await ffStore.get('blob:'+p);if(!b)continue;await upload(sb,p,b,b.type||(p.endsWith('.png')?'image/png':'image/jpeg'));await ffStore.del('blob:'+p)}
+  const {data,error}=await sb.rpc('submit_prestart',{p:pl});if(error)throw error;return data}
+const readOutbox=async u=>(await ffStore.get(OBK(u)))||[];
+async function addToOutbox(u,item){const l=await readOutbox(u);await ffStore.set(OBK(u),[...l.filter(x=>x.client_id!==item.client_id),item])}
+async function removeFromOutbox(u,ids,errs){const l=await readOutbox(u);await ffStore.set(OBK(u),l.filter(x=>!ids.includes(x.client_id)).map(x=>errs&&errs[x.client_id]?{...x,error:errs[x.client_id]}:x))}
+let flushing=null;
+/* send what's waiting, oldest first; the database never makes two of the same prestart (client_id) */
+function flushOutbox(sb,u){if(flushing)return flushing;flushing=(async()=>{const sent=[],errs={};
+  try{for(const it of await readOutbox(u)){if(it.error)continue;
+      try{await sendPrestart(sb,it.payload);sent.push(it.client_id)}catch(e){if(isNetErr(e))break;errs[it.client_id]=errMsg(e)}}
+    if(sent.length||Object.keys(errs).length)await removeFromOutbox(u,sent,errs)}
+  finally{flushing=null;window.dispatchEvent(new CustomEvent('ff-outbox',{detail:{sent:sent.length}}))}
+  return sent.length})();return flushing}
+const localResult=(tpl,ans)=>{let f=0,c=0;(tpl.items||[]).forEach(it=>{if(kindOf(it)==='check'&&(ans[it.key]||{}).answer==='fail'){f++;if(it.critical)c++}});return {result:c?'unsafe':f?'defects':'pass',failed:f}};
+
 /* the job this machine's crew is on today, to fill in the location */
 const jobToday=(data,m)=>{const today=iso(TODAY);const b=data.blocks.find(x=>x.kind==='job'&&x.start<=today&&x.end>=today&&((x.plantIds||[]).includes(m.id)||(m.crewId&&x.resourceId===m.crewId)));
   if(!b)return '';const j=data.jobs.find(x=>x.id===b.jobId);return j?[j.customer,j.name].filter(Boolean).join(' · '):''};
@@ -128,12 +154,14 @@ function PsForm({ctx,a,tpl,onDone,onBack}){
   const answered=it=>{const v=((d.answers[it.key]||{}).answer||'').trim();return kindOf(it)==='check'?['pass','fail','na'].includes(v):v!==''};
   const done=need.filter(answered).length;
   const meters=[a.mt!=='km'&&'hours',a.mt!=='hours'&&'km'].filter(Boolean);
-  const photos=Object.values(d.answers).flatMap(x=>x.photos||[]);const urls=useSigned(sb,photos);
+  const photos=Object.values(d.answers).flatMap(x=>x.photos||[]);const signed=useSigned(sb,photos);
+  const [,bump]=useState(0);useEffect(()=>{loadLocal(photos).then(n=>{if(n)bump(x=>x+1)})},[photos.join('|')]);
+  const urls={...signed};photos.forEach(p=>{if(!urls[p]&&LOCAL.has(p))urls[p]=LOCAL.get(p)});
   const addPhoto=async(key,file)=>{setUploading(u=>({...u,[key]:true}));setErr('');
     try{const blob=await shrink(file);const path=`prestarts/${me}/${d.client_id}/${key}-${Date.now()}.jpg`;
-      const {error}=await sb.storage.from(BUCKET).upload(path,blob,{contentType:'image/jpeg',upsert:false});if(error)throw error;
+      await uploadOrKeep(sb,path,blob,'image/jpeg');   /* no reception: kept on this phone and sent with the prestart */
       setAns(key,{photos:[...((d.answers[key]||{}).photos||[]),path]})}
-    catch(e){setErr('The photo didn’t upload: '+errMsg(e))}finally{setUploading(u=>({...u,[key]:false}))}};
+    catch(e){setErr('The photo didn’t save: '+errMsg(e))}finally{setUploading(u=>({...u,[key]:false}))}};
   const warn=k=>{const v=d[k];const cur=a.cur[k];if(v===''||!cur)return '';const unit=k==='hours'?'h':'km';
     if(+v<cur.value)return `Lower than the last reading (${fmtN(cur.value)} ${unit}). Check the ${k==='hours'?'hour meter':'odometer'}.`;
     const jump=+v-cur.value;if(jump>(k==='hours'?300:5000))return `That’s ${fmtN(jump)} ${unit} more than the last reading (${fmtN(cur.value)} ${unit}). Check it.`;return ''};
@@ -149,12 +177,14 @@ function PsForm({ctx,a,tpl,onDone,onBack}){
   const submit=async()=>{const p=firstProblem();if(p){setErr(p.msg);if(p.id){const el=document.getElementById(p.id);if(el){el.scrollIntoView({block:'center',behavior:'smooth'});try{el.focus({preventScroll:true})}catch(e){}}}return}
     setBusy(true);setErr('');
     try{if(sig.current.dirty||!sig.current.path){const blob=await pad.current.blob();const path=`prestarts/${me}/${d.client_id}/signature-${Date.now()}.png`;
-        const {error}=await sb.storage.from(BUCKET).upload(path,blob,{contentType:'image/png',upsert:false});if(error)throw error;sig.current={path,dirty:false}}
+        await uploadOrKeep(sb,path,blob,'image/png');sig.current={path,dirty:false}}
       const ans={};items.forEach(it=>{const x=d.answers[it.key]||{};ans[it.key]={answer:(x.answer||'').trim(),comment:x.answer==='fail'?(x.comment||'').trim():'',photos:x.answer==='fail'?(x.photos||[]):[]}});
-      const {data:r,error}=await sb.rpc('submit_prestart',{p:{client_id:d.client_id,asset_id:a.m.id,template_id:tpl.id,started_at:d.started_at,hours:d.hours,km:d.km,location:d.location,notes:d.notes,signature:sig.current.path,answers:ans}});
-      if(error)throw error;
+      const pl={client_id:d.client_id,asset_id:a.m.id,template_id:tpl.id,started_at:d.started_at,hours:d.hours,km:d.km,location:d.location,notes:d.notes,signature:sig.current.path,answers:ans};
+      let r;try{r=await sendPrestart(sb,pl)}
+      catch(e){if(!isNetErr(e))throw e;   /* no reception: it waits on this phone and sends itself later */
+        const lr=localResult(tpl,ans);await addToOutbox(me,{client_id:pl.client_id,asset_id:a.m.id,payload:pl,at:Date.now(),...lr});r={...lr,queued:true}}
       writeDraft(me,{asset_id:a.m.id,del:true});onDone(r)}
-    catch(e){setErr(errMsg(e)+(isFault(e)?'':'. Your answers are kept on this phone: try again when you have reception.'))}
+    catch(e){setErr(errMsg(e)+(isFault(e)?'':'. Your answers are kept on this phone: try again in a moment.'))}
     finally{setBusy(false)}};
   let n=0;
   return html`<div class="grid gap-3 pb-6" id="ps-form">
@@ -193,15 +223,17 @@ function PsForm({ctx,a,tpl,onDone,onBack}){
 
 function PsDone({res,a,onHome,onView}){
   const r=RES[res.result]||RES.pass;
-  const msg=res.result==='pass'?'Prestart saved. You’re good to go.':res.result==='defects'?'Prestart saved. The faults have gone to the workshop as defects. Tell your supervisor before you start.':'A critical item failed. Don’t use this machine: it is now restricted. Tell your supervisor now.';
+  const msg=res.queued?(res.result==='pass'?'You’re good to go.':res.result==='defects'?'Tell your supervisor about the faults before you start.':'A critical item failed. Don’t use this machine. Tell your supervisor now.')
+    :res.result==='pass'?'Prestart saved. You’re good to go.':res.result==='defects'?'Prestart saved. The faults have gone to the workshop as defects. Tell your supervisor before you start.':'A critical item failed. Don’t use this machine: it is now restricted. Tell your supervisor now.';
   return html`<div class="grid gap-3 max-w-[560px] mx-auto w-full" id="ps-done">
     <div class="panel p-5 grid gap-2 text-center" style=${{boxShadow:`inset 0 0 0 2px ${r[1]}`}}>
       <div class="mx-auto w-14 h-14 rounded-full inline-flex items-center justify-center text-white" style=${{background:r[1]}}>${res.result==='pass'?I.tick:res.result==='defects'?Icon.alert:I.cross}</div>
       <div id="ps-result" class="font-display text-[24px] font-semibold" style=${{color:r[1]}}>${r[0]}</div>
       <div class="text-[15px]">${a.m.name} · ${a.m.sub||''}</div><div class="text-[14px] text-muted">${msg}</div>
       ${res.meter_note&&html`<div class="text-[13px] font-medium mt-1" style=${{color:'hsl(30 90% 38%)'}}>${res.meter_note}. The workshop will check the meter.</div>`}
+      ${res.queued&&html`<div id="ps-queued" class="text-[13.5px] font-medium rounded-lg px-3 py-2 mt-1" style=${{background:'hsl(38 90% var(--blk-l))'}}>No reception: saved on this phone. It sends automatically when you have reception. Keep the app open or open it again later.</div>`}
     </div>
-    <div class="grid grid-cols-2 gap-2"><button type="button" class="btn justify-center" style=${{height:46}} onClick=${onView}>View prestart</button><button id="ps-home" type="button" class="btn btn-primary justify-center" style=${{height:46}} onClick=${onHome}>Back to machines</button></div>
+    <div class=${'grid gap-2 '+(res.queued?'grid-cols-1':'grid-cols-2')}>${!res.queued&&html`<button type="button" class="btn justify-center" style=${{height:46}} onClick=${onView}>View prestart</button>`}<button id="ps-home" type="button" class="btn btn-primary justify-center" style=${{height:46}} onClick=${onHome}>Back to machines</button></div>
   </div>`;
 }
 
@@ -249,7 +281,15 @@ function PrestartScreen({data,live,notify}){
   const sb=live.sb;const me=live.user.id;
   const {db,err,reload}=useMaint(sb);
   const [prof,setProf]=useState(null);
-  useEffect(()=>{sb.from('profiles').select('*').eq('id',me).maybeSingle().then(({data:p})=>setProf(p||{})).catch(()=>setProf({}))},[]);
+  useEffect(()=>{const cached=()=>{try{return JSON.parse(localStorage.getItem('ff:prof:'+me)||'null')}catch(e){return null}};
+    sb.from('profiles').select('*').eq('id',me).maybeSingle().then(({data:p,error})=>{if(error)throw error;setProf(p||{});try{localStorage.setItem('ff:prof:'+me,JSON.stringify(p||{}))}catch(e){}}).catch(()=>setProf(cached()||{}))},[]);
+  /* prestarts waiting on this phone: sent when there's reception (now, when it comes back, and every 30 seconds) */
+  const [queue,setQueue]=useState([]);
+  useEffect(()=>{let off=false;const refresh=()=>readOutbox(me).then(l=>{if(!off)setQueue(l)});
+    const go=()=>flushOutbox(sb,me);
+    const done=e=>{refresh();if(e.detail&&e.detail.sent){notify(`${e.detail.sent} prestart${e.detail.sent===1?'':'s'} sent`);reload()}};
+    refresh();go();window.addEventListener('online',go);window.addEventListener('ff-outbox',done);const iv=setInterval(()=>{if(navigator.onLine)go()},30000);
+    return()=>{off=true;window.removeEventListener('online',go);window.removeEventListener('ff-outbox',done);clearInterval(iv)}},[]);
   const [view,setView]=useState({k:'home'});const [q,setQ]=useState('');const [show,setShow]=useState(null);
   const inst=window.ffUseInstall?window.ffUseInstall():null;const [hideInst,setHideInst]=useState(()=>{try{return localStorage.getItem(KEY+':ps-noinstall')==='1'}catch(e){return false}});
   const M=useMemo(()=>db?buildModel(data,db):null,[db,data.resources,data.blocks]);
@@ -262,7 +302,7 @@ function PrestartScreen({data,live,notify}){
   const tpls=db.prestart_templates;
   let body;
   if(view.k==='form'){const a=M.byId.get(view.a.m.id)||view.a;const tpl=tplFor(tpls,a.m);
-    body=tpl?html`<${PsForm} key=${a.m.id} ctx=${ctx} a=${a} tpl=${tpl} onBack=${()=>setView({k:'home'})} onDone=${r=>{reload();setView({k:'done',a,res:r})}}/>`
+    body=tpl?html`<${PsForm} key=${a.m.id} ctx=${ctx} a=${a} tpl=${tpl} onBack=${()=>setView({k:'home'})} onDone=${r=>{if(r.queued)readOutbox(me).then(setQueue);else reload();setView({k:'done',a,res:r})}}/>`
       :html`<div class="panel p-4 text-[14px]">There’s no prestart checklist for ${machCatOf(a.m)||'this machine'} any more. <button class="btn mt-2" type="button" onClick=${()=>setView({k:'home'})}>Back</button></div>`}
   else if(view.k==='done'){body=html`<${PsDone} res=${view.res} a=${view.a} onHome=${()=>setView({k:'home'})} onView=${()=>{const p=db.prestarts.find(x=>x.id===view.res.id);if(p)setShow(p)}}/>`}
   else{
@@ -281,6 +321,15 @@ function PrestartScreen({data,live,notify}){
         <div class="min-w-0 flex-1"><div class="text-[14px] font-semibold">Put FraserFlow on your home screen</div><div class="text-[12.5px] text-muted">${inst.kind==='prompt'?'It opens like an app, straight to your prestarts.':inst.steps}</div></div>
         ${inst.kind==='prompt'&&html`<button type="button" class="btn btn-primary" style=${{height:38}} onClick=${inst.go}>Install</button>`}
         <button type="button" class="p-1 rounded text-muted hover:text-ink" aria-label="Not now" onClick=${()=>{setHideInst(true);try{localStorage.setItem(KEY+':ps-noinstall','1')}catch(e){}}}>${Icon.x}</button></div>`}
+      ${queue.length>0&&html`<section id="ps-outbox" class="panel p-3 grid gap-2" aria-label="Waiting to send" style=${{boxShadow:'inset 0 0 0 1.5px hsl(38 90% 45%)'}}>
+        <div class="flex items-center gap-2"><span class="text-[14.5px] font-semibold flex-1">Waiting to send (${queue.length})</span>${navigator.onLine&&html`<button type="button" class="btn" style=${{height:34}} onClick=${()=>flushOutbox(sb,me)}>Send now</button>`}</div>
+        <div class="text-[12.5px] text-muted">Saved on this phone with no reception. They send automatically when there’s reception.</div>
+        ${queue.map(x=>{const qa=M.byId.get(x.asset_id);return html`<div key=${x.client_id} class="grid gap-1 border-t border-line pt-2">
+          <div class="flex items-center gap-2"><span class="text-[14px] font-medium flex-1 truncate">${qa?qa.m.name:x.asset_id} <span class="text-muted font-normal">${qa?qa.m.sub||'':''}</span></span><span class="text-[12px] text-muted">${fmtTime(x.at)}</span>${resChip(x.result)}</div>
+          ${x.error&&html`<div class="flex items-center gap-2"><span class="text-[12.5px] flex-1" style=${{color:'var(--bad)'}}>Couldn’t send: ${x.error}</span>
+            <button type="button" class="text-[12.5px] text-muted hover:text-ink" onClick=${async()=>{await removeFromOutbox(me,[x.client_id]);setQueue(await readOutbox(me))}}>Remove</button>
+            <button type="button" class="btn" style=${{height:30}} onClick=${async()=>{const l=await readOutbox(me);await ffStore.set(OBK(me),l.map(y=>y.client_id===x.client_id?{...y,error:null}:y));flushOutbox(sb,me)}}>Try again</button></div>`}</div>`})}
+      </section>`}
       ${dlist.length>0&&html`<section class="grid gap-2" aria-label="Unfinished prestarts">${dlist.map(({dr,a})=>html`<div key=${a.m.id} class="panel p-3 flex items-center gap-3" style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
           <div class="min-w-0 flex-1"><div class="text-[14.5px] font-semibold truncate">Unfinished: ${a.m.name} · ${a.m.sub||''}</div><div class="text-[12.5px] text-muted">Started ${fmtTime(dr.started_at)}, ${Object.keys(dr.answers||{}).length} answered</div></div>
           <button type="button" class="text-[12.5px] text-muted hover:text-ink px-1" onClick=${()=>{writeDraft(me,{asset_id:a.m.id,del:true});setView({k:'home',t:Date.now()})}}>Discard</button>

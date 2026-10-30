@@ -1080,10 +1080,12 @@ function Board({data,days,view,onCreate,onEdit,onMove,onRename,onReorder,onExpor
 function useMachineAlerts(live,setRaw){
   useEffect(()=>{if(!live||!live.sb)return;const sb=live.sb;let off=false,t=null,ch=null;
     const load=async()=>{try{const {data:rows,error}=await sb.from('machine_alerts').select('*');if(error)throw error;
-      const o={};(rows||[]).forEach(r=>{if(r.restricted||r.open_defects||r.service)o[r.asset_id]=r});
-      if(!off)setRaw(d=>JSON.stringify(d.alerts||{})===JSON.stringify(o)?d:{...d,alerts:o})}catch(e){}};   /* not set up yet: no alerts */
+      const o={};(rows||[]).forEach(r=>{o[r.asset_id]=r});
+      if(!off)setRaw(d=>JSON.stringify(d.alerts||{})===JSON.stringify(o)?d:{...d,alerts:o})}catch(e){}   /* not set up yet: no alerts */
+      if(MAINT_ROLES.includes(live.role))try{const {data:ev,error}=await sb.from('maintenance_feed').select('*');if(error)throw error;
+        if(!off)setRaw(d=>JSON.stringify(d.mfeed||[])===JSON.stringify(ev||[])?d:{...d,mfeed:ev||[]})}catch(e){}};
     load();const iv=setInterval(load,5*60e3);
-    try{ch=sb.channel('alerts-'+uid());['restrictions','defects','meter_readings','service_records','service_plans','asset_profiles'].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,600)}));ch.subscribe()}catch(e){}
+    try{ch=sb.channel('alerts-'+uid());['restrictions','defects','meter_readings','service_records','service_plans','asset_profiles','prestarts','work_orders'].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,600)}));ch.subscribe()}catch(e){}
     return()=>{off=true;clearInterval(iv);clearTimeout(t);try{if(ch)sb.removeChannel(ch)}catch(e){}}},[]);
 }
 /* what to tell the planner about a machine: block = restricted (can't be added) */
@@ -2163,9 +2165,35 @@ const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking
   {id:'booking',label:'Bookings',desc:'Bookings added, moved, changed or deleted.'},
   {id:'job',label:'Jobs',desc:'Jobs added, changed, completed or deleted.'},
   {id:'resource',label:'Crews, staff, machines & plants',desc:'Added, renamed or removed.'},
-  {id:'lists',label:'Mixes & seal lists',desc:'Mix, seal and binder lists edited.'}];
+  {id:'lists',label:'Mixes & seal lists',desc:'Mix, seal and binder lists edited.'},
+  /* maintenance (shown to people with Fleet & Maintenance) */
+  {id:'mcritical',maint:true,label:'Critical defects & restrictions',desc:'A machine is restricted: do not use.'},
+  {id:'mbooking',maint:true,label:'Restricted machines on bookings',desc:'A booking from today on has a machine that must not be used.'},
+  {id:'mbreak',maint:true,label:'Breakdowns',desc:'A breakdown is reported.'},
+  {id:'mprestart',maint:true,label:'Prestart missing',desc:'A machine on today’s jobs has no prestart by 9 am (9 pm for night works).'},
+  {id:'mreturn',maint:true,label:'Returned to service',desc:'A restricted machine is cleared to work again.'},
+  {id:'mwo',maint:true,label:'Work orders',desc:'New work orders, and work orders completed and waiting for verification.'},
+  {id:'mservice',maint:true,label:'Services due',desc:'Services overdue or due soon (once a day).'}];
 const NOTIF_KEY=KEY+':notif-prefs';
-const NOTIF_DEFAULT={quote:false,booking:false,job:false,resource:false,lists:false}; /* all off until a person turns them on */
+const NOTIF_DEFAULT={quote:false,booking:false,job:false,resource:false,lists:false,   /* roster changes: off until a person turns them on */
+  mcritical:true,mbooking:true,mbreak:true,mprestart:false,mreturn:true,mwo:false,mservice:false};   /* maintenance: the safety ones start on */
+const MAINT_ROLES=['admin','superuser','planner','supervisor','mechanic'];
+/* maintenance notifications: events from the database feed, plus things true right now (services due, missing prestarts, restricted machines on bookings) */
+function maintNotifs(data,prefs){
+  const out=[],now=Date.now(),today=iso(TODAY),A=data.alerts||{};
+  const name=id=>(data.resources.find(r=>r.id===id)||{}).name||(A[id]&&A[id].name)||id;
+  const where=b=>{const c=data.resources.find(r=>r.id===b.resourceId);const j=data.jobs.find(x=>x.id===b.jobId);return [c&&c.name,j&&jobLabel(j)].filter(Boolean).join(' · ')};
+  (data.mfeed||[]).forEach(e=>{if(!prefs[e.type])return;const at=Date.parse(e.at);if(!at||now-at>NOTIF_MS)return;out.push({id:'m-'+e.id,at,text:`${name(e.asset_id)}: ${e.text}`,sub:e.sub,assetId:e.asset_id})});
+  const six=new Date(TODAY);six.setHours(6,0,0,0);
+  if(prefs.mservice)Object.values(A).forEach(a=>{if(a.service)out.push({id:`m-sv-${a.asset_id}-${a.service}-${today}`,at:Math.min(six.getTime(),now),text:`${name(a.asset_id)}: service ${a.service==='overdue'?'overdue':'due soon'}`,sub:a.service_plans,assetId:a.asset_id})});
+  if(prefs.mbooking)data.blocks.forEach(b=>{if(b.kind!=='job'||b.end<today)return;(b.plantIds||[]).forEach(id=>{const a=A[id];if(!a||!a.restricted)return;
+    out.push({id:`m-rb-${b.id}-${id}`,at:Date.parse(a.restricted_since)||now,text:`${name(id)} is restricted but booked`,sub:`${where(b)} · ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`,blockId:b.id})})});
+  if(prefs.mprestart){const nd=new Date();data.blocks.forEach(b=>{if(b.kind!=='job'||!covers(b,today)||!worksOn(b,TODAY))return;
+    const th=new Date(TODAY);th.setHours(b.shift==='night'?21:9,0,0,0);if(nd<th)return;
+    (b.plantIds||[]).forEach(id=>{const a=A[id];if(!a||(a.last_prestart_at&&iso(new Date(a.last_prestart_at))===today))return;
+      out.push({id:`m-pm-${id}-${today}`,at:th.getTime(),text:`No prestart yet today: ${name(id)}`,sub:where(b),blockId:b.id})})})}
+  const seen=new Set();return out.filter(c=>!seen.has(c.id)&&seen.add(c.id));
+}
 const loadNotifPrefs=()=>{try{return {...NOTIF_DEFAULT,...JSON.parse(localStorage.getItem(NOTIF_KEY)||'{}')}}catch(e){return {...NOTIF_DEFAULT}}};
 const recentQuoteChanges=data=>(data.quoteChanges||[]).filter(c=>Date.now()-c.at<NOTIF_MS).sort((a,b)=>b.at-a.at);
 const agoText=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.round(m/60);return `${h} hr${h===1?'':'s'} ago`};
@@ -2616,19 +2644,19 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
   </div>`;
 }
 
-/* ---------- Fleet & Maintenance and Prestarts: their own files (maint.js, prestart.js, defects.js), loaded the first time either screen opens ---------- */
+/* ---------- Fleet & Maintenance and Prestarts: their own files (maint.js, prestart.js, defects.js, reports.js), loaded the first time either screen opens ---------- */
 let maintLoading=null;
 function loadMaint(){
-  if(window.FleetScreen&&window.PrestartScreen&&window.FFD)return Promise.resolve();
+  if(window.FleetScreen&&window.PrestartScreen&&window.FFD&&window.FFR)return Promise.resolve();
   if(maintLoading)return maintLoading;
   const v=((document.querySelector('script[src*="/app.js"]')||{}).src||'').split('?v=')[1]||Date.now();
   const one=f=>new Promise((res,rej)=>{const s=document.createElement('script');s.src='/'+f+'?v='+v;s.onload=res;s.onerror=rej;document.body.appendChild(s)});
-  maintLoading=(window.FleetScreen?Promise.resolve():one('maint.js')).then(()=>window.PrestartScreen?null:one('prestart.js')).then(()=>window.FFD?null:one('defects.js')).catch(e=>{maintLoading=null;throw e});
+  maintLoading=(window.FleetScreen?Promise.resolve():one('maint.js')).then(()=>window.PrestartScreen?null:one('prestart.js')).then(()=>window.FFD?null:one('defects.js')).then(()=>window.FFR?null:one('reports.js')).catch(e=>{maintLoading=null;throw e});
   return maintLoading;
 }
 function LazyFleet(props){
   const comp=props.comp||'FleetScreen';
-  const [ok,setOk]=useState(!!(window.FleetScreen&&window.PrestartScreen&&window.FFD));const [err,setErr]=useState('');
+  const [ok,setOk]=useState(!!(window.FleetScreen&&window.PrestartScreen&&window.FFD&&window.FFR));const [err,setErr]=useState('');
   useEffect(()=>{if(ok)return;loadMaint().then(()=>setOk(true),()=>setErr('Couldn’t load '+(comp==='PrestartScreen'?'Prestarts':'Fleet & Maintenance')+'. Check the connection and reload.'))},[]);
   if(err)return html`<div class="panel p-6 text-[13px]" style=${{color:'var(--bad)'}}>${err}</div>`;
   if(!ok||!window[comp])return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;
@@ -2708,7 +2736,7 @@ function useInstall(){
   return null;
 }
 window.ffUseInstall=useInstall;
-function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview}){
+function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,maint}){
   const inst=useInstall();
   const [open,setOpen]=useState(false);
   const ref=React.useRef(null);
@@ -2735,7 +2763,7 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview}){
           ${inst.kind==='prompt'?html`<button id="set-install" class="w-full flex items-start gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-left" onClick=${()=>{setOpen(false);inst.go()}}>${Icon.download}<span><span class="block text-[13px] font-medium">Install FraserFlow as an app</span><span class="block text-[12px] text-muted">Opens from its own icon, full screen</span></span></button>`
             :html`<div class="px-2 py-2 flex items-start gap-2">${Icon.download}<span><span class="block text-[13px] font-medium">Add FraserFlow to your home screen</span><span class="block text-[12px] text-muted">${inst.steps}</span></span></div>`}`}
         ${sectionLabel('Notifications')}
-        ${NOTIF_TYPES.map(t=>html`<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
+        ${NOTIF_TYPES.filter(t=>maint||!t.maint).map((t,i,all)=>html`${t.maint&&!all[i-1].maint&&html`<div key=${'mh'+i} class="label px-2 pt-2 pb-1" style=${{color:'var(--muted)'}}>Maintenance</div>`}<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
         ${preview&&html`${sectionLabel('Features in progress')}
           <div class="px-2 pb-1 text-[12px] text-muted">Only you see these until you release them. Then everyone whose role allows it sees them.</div>
           ${Object.entries(SCREENS).filter(([,s])=>s.preview).map(([k,s])=>html`<${SwitchRow} key=${k} id=${'pv-'+k} label=${'Release '+s.title} desc=${preview.list.includes(k)?'In progress: only you can see it':'Released to everyone with access'}
@@ -2751,7 +2779,7 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview}){
   </div>`;
 }
 
-function Notifications({data,onOpen,prefs,setPrefs}){
+function Notifications({data,onOpen,prefs,setPrefs,maint,onMaint}){
   const SEEN=KEY+':quote-seen';
   /* deleting a notification only hides it for this person (in this browser); others still see it */
   const GONE=KEY+':notif-dismissed';
@@ -2767,9 +2795,9 @@ function Notifications({data,onOpen,prefs,setPrefs}){
     const out=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};const esc=e=>{if(e.key==='Escape')setOpen(false)};
     document.addEventListener('pointerdown',out);window.addEventListener('keydown',esc);
     return()=>{document.removeEventListener('pointerdown',out);window.removeEventListener('keydown',esc)}},[open]);
-  const list=[...(prefs.quote?recentQuoteChanges(data).map(c=>({...c,_q:true})):[]),...recentChanges(data,prefs)].filter(c=>!gone[c.id]).sort((a,b)=>b.at-a.at).slice(0,150);
+  const list=[...(prefs.quote?recentQuoteChanges(data).map(c=>({...c,_q:true})):[]),...recentChanges(data,prefs),...(maint?maintNotifs(data,prefs):[])].filter(c=>!gone[c.id]).sort((a,b)=>b.at-a.at).slice(0,150);
   const me=window.__rosterMe||'';
-  const allOff=NOTIF_TYPES.every(t=>!prefs[t.id]);
+  const allOff=NOTIF_TYPES.filter(t=>maint||!t.maint).every(t=>!prefs[t.id]);
   const unseen=list.filter(c=>c.at>seen).length;
   const toggle=()=>{const now=!open;setOpen(now);if(now){const t=Date.now();setSeen(t);try{localStorage.setItem(SEEN,String(t))}catch(e){}}};
   return html`<div class="relative" ref=${ref}>
@@ -2798,6 +2826,7 @@ function Notifications({data,onOpen,prefs,setPrefs}){
               <div class="text-[11.5px] text-faint">${agoText(c.at)}${c.by?` · ${c.by===me?'you':c.by}`:''}</div>
             </div>
             ${b&&html`<button class="btn shrink-0" style=${{height:28}} onClick=${()=>{setOpen(false);onOpen(b)}}>Open</button>`}
+            ${!b&&c.assetId&&onMaint&&html`<button class="btn shrink-0 nt-open-asset" style=${{height:28}} onClick=${()=>{setOpen(false);onMaint(c.assetId)}}>Open</button>`}
             <button class="w-7 h-7 shrink-0 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>dismiss(c.id)} aria-label="Delete this notification" title="Delete">${Icon.x}</button>
           </li>`}
           const b=data.blocks.find(x=>x.id===c.bookingId);const j=b&&data.jobs.find(x=>x.id===b.jobId);const crew=b&&data.resources.find(r=>r.id===b.resourceId);
@@ -4662,6 +4691,13 @@ function removeSampleData(d){
   return {...d,resources,blocks,jobs:d.jobs.filter(j=>!jid.has(j.id)),quoteChanges:(d.quoteChanges||[]).filter(c=>left.has(c.bookingId))};
 }
 /* ---------- app ---------- */
+function OfflineBar({at}){
+  const [on,setOn]=useState(navigator.onLine);
+  useEffect(()=>{const a=()=>setOn(true),b=()=>setOn(false);window.addEventListener('online',a);window.addEventListener('offline',b);return()=>{window.removeEventListener('online',a);window.removeEventListener('offline',b)}},[]);
+  return html`<div id="offline-bar" class="mb-2 rounded-lg px-3 py-2 text-[13px] flex flex-wrap items-center gap-2" style=${{background:on?'hsl(145 50% var(--blk-l))':'hsl(38 90% var(--blk-l))',color:'var(--ink)'}}>
+    ${on?html`<span class="flex-1">You’re back online.</span><button type="button" class="btn" style=${{height:30}} onClick=${()=>location.reload()}>Reload</button>`
+      :html`<span class="flex-1"><span class="font-semibold">No reception:</span> showing the copy saved on this device ${at?new Date(at).toLocaleString('en-AU',{weekday:'short',hour:'numeric',minute:'2-digit'}):''}. Prestarts still work: they send when you’re back online.</span>`}</div>`;
+}
 function App({boot,live}){
   /* ---- live data: local state, saved to Supabase, kept current with everyone else's changes ---- */
   const [data,setDataRaw]=useState(()=>({...boot,sectionOrder:boot.sectionOrder||[...DEFAULT_ORDER]}));
@@ -4669,7 +4705,7 @@ function App({boot,live}){
   const setData=fn=>setDataRaw(cur=>{const next=typeof fn==='function'?fn(cur):fn;
     /* view-only people may only add suggestions */
     const noSugg=d=>({...d,suggestions:[]});const onlySugg=sharedKey(noSugg(next))===sharedKey(noSugg(cur))&&(cur.suggestions||[]).every(x=>(next.suggestions||[]).some(y=>y.id===x.id));
-    if(!live.canEdit&&!onlySugg){setTimeout(()=>setToast('You have view-only access. Ask an administrator for planner access to make changes.'),0);return cur}
+    if(!live.canEdit&&!onlySugg){setTimeout(()=>setToast(live.offline?'You’re offline: changes can’t be saved until you have reception again.':'You have view-only access. Ask an administrator for planner access to make changes.'),0);return cur}
     return withChangeLog(cur,next,live.user.email)});
   window.__rosterMe=live.user.email;
   const reloadAll=async()=>{try{const nd={...rowsToData(await fetchAllRows(live.sb))};nd.sectionOrder=nd.sectionOrder||[...DEFAULT_ORDER];setDataRaw(cur=>{const x={...nd,alerts:cur.alerts};remoteRef.current=x;return x})}catch(e){}};
@@ -4853,12 +4889,13 @@ function App({boot,live}){
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>`}
         <button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>
-        <${Notifications} data=${data} onOpen=${b=>setEditing(b)} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
+        <${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} onMaint=${screenOK('fleet',live.role,data)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
         ${boardScreen&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
-        <${SettingsMenu} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
+        <${SettingsMenu} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
       </header>
 
+      ${live.offline&&html`<${OfflineBar} at=${live.offline.at}/>`}
       ${screen==='fleet'||screen==='prestarts'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
       <section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
         <${Stat} k="Crews on jobs today" v=${`${crewsOnJob.length}/${vis('crew').length}`} sub=${`${util}% of crew-days booked`}/>
@@ -5070,29 +5107,53 @@ function FirstRun({canEdit,onStart}){
   <//>`;
 }
 /* people created with a temporary password haven't chosen their own yet */
+/* ---------- a small store on this device (IndexedDB) for working without reception ---------- */
+const ffStore=(()=>{let dbp=null;
+  const open=()=>dbp||(dbp=new Promise((res,rej)=>{try{const r=indexedDB.open('fraserflow',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}}));
+  const run=(mode,fn)=>open().then(db=>new Promise((res,rej)=>{const tx=db.transaction('kv',mode);const st=tx.objectStore('kv');const q=fn(st);tx.oncomplete=()=>res(q&&q.result);tx.onerror=()=>rej(tx.error)}));
+  return {get:k=>run('readonly',s=>s.get(k)).catch(()=>undefined),set:(k,v)=>run('readwrite',s=>s.put(v,k)).catch(()=>{}),del:k=>run('readwrite',s=>s.delete(k)).catch(()=>{}),
+    keys:()=>run('readonly',s=>s.getAllKeys()).catch(()=>[])};
+})();
+window.ffStore=ffStore;
+/* a dropped connection (try again later), not a refusal from the server */
+const isNetErr=e=>{if(!e)return false;if(typeof navigator!=='undefined'&&navigator.onLine===false)return true;
+  const m=String((e&&(e.message||e.error_description))||e);return !(e.code||e.statusCode||e.status)&&(/fetch|network|load failed|offline|timed? ?out|internet/i.test(m)||e.name==='TypeError')};
+window.isNetErr=isNetErr;
 const needsPw=s=>!(s&&s.user&&s.user.user_metadata&&s.user.user_metadata.password_set);
 function Root(){
   const [phase,setPhase]=useState('boot');            /* boot | error | login | loading | empty | ready */
   const [msg,setMsg]=useState('');
   const [sb,setSb]=useState(null);const [session,setSession]=useState(null);
   const [role,setRole]=useState('viewer');const [boot,setBoot]=useState(null);
+  const [offline,setOffline]=useState(null);   /* {at}: running from the copy saved on this device */
   useEffect(()=>{(async()=>{
     try{
-      const r=await fetch('/api/config',{cache:'no-store'});const cfg=await r.json();
+      let cfg;try{const r=await fetch('/api/config',{cache:'no-store'});cfg=await r.json();try{localStorage.setItem('ff:cfg',JSON.stringify(cfg))}catch(e){}}
+      catch(e){cfg=JSON.parse(localStorage.getItem('ff:cfg')||'null');if(!cfg)throw e}   /* no reception: the settings saved last time */
       if(!cfg.url||!cfg.anonKey){setMsg('The app isn’t connected to its database yet. Add SUPABASE_URL and SUPABASE_ANON_KEY in Vercel, then redeploy.');setPhase('error');return}
       const client=window.supabase.createClient(cfg.url,cfg.anonKey);setSb(client);
-      const {data:{session:s}}=await client.auth.getSession();setSession(s);setPhase(s?(needsPw(s)?'setpw':'loading'):'login');
+      let s=null;try{s=(await client.auth.getSession()).data.session}catch(e){}
+      if(!s&&!navigator.onLine){const u=JSON.parse(localStorage.getItem('ff:lastUser')||'null');if(u)s={user:{...u,user_metadata:{password_set:true}},offline:true}}   /* signed in last time, no reception now */
+      setSession(s);setPhase(s?(needsPw(s)?'setpw':'loading'):'login');
       client.auth.onAuthStateChange((_e,s2)=>{setSession(s2);setPhase(p=>s2?(p==='login'?(needsPw(s2)?'setpw':'loading'):p):'login')});
     }catch(e){setMsg('Couldn’t reach the server. Check your connection and reload.');setPhase('error')}
   })()},[]);
   useEffect(()=>{if(phase!=='loading'||!sb||!session)return;(async()=>{
     try{
-      const {data:prof}=await sb.from('profiles').select('role').eq('id',session.user.id).maybeSingle();
-      const rl=(prof&&prof.role)||'viewer';setRole(rl);
-      const rows=await fetchAllRows(sb);
-      if(!rows.length){setPhase('empty');return}
-      setBoot(rowsToData(rows));setPhase('ready');
-    }catch(e){setMsg('Couldn’t load the roster: '+(e.message||e));setPhase('error')}
+      const uidK=session.user.id;
+      try{
+        const {data:prof,error:pe}=await sb.from('profiles').select('role').eq('id',uidK).maybeSingle();if(pe)throw pe;
+        const rl=(prof&&prof.role)||'viewer';setRole(rl);
+        const rows=await fetchAllRows(sb);
+        if(!rows.length){setPhase('empty');return}
+        setBoot(rowsToData(rows));setOffline(null);setPhase('ready');
+        try{localStorage.setItem('ff:lastUser',JSON.stringify({id:uidK,email:session.user.email}));localStorage.setItem('ff:role:'+uidK,rl)}catch(e){}
+        ffStore.set('rows:'+uidK,{at:Date.now(),rows});   /* the copy used when there's no reception */
+      }catch(e){
+        const saved=isNetErr(e)?await ffStore.get('rows:'+uidK):null;if(!saved)throw e;
+        setRole(localStorage.getItem('ff:role:'+uidK)||'viewer');setBoot(rowsToData(saved.rows));setOffline({at:saved.at});setPhase('ready');
+      }
+    }catch(e){setMsg(isNetErr(e)?'Couldn’t reach the server. Check your connection and reload.':'Couldn’t load the roster: '+(e.message||e));setPhase('error')}
   })()},[phase,sb,session]);
   const start=async d=>{try{await pushRows(sb,diffRows({},d));setBoot(rowsToData(await fetchAllRows(sb)));setPhase('ready')}catch(e){setMsg('Couldn’t save: '+(e.message||e));setPhase('error')}};
   if(phase==='boot'||phase==='loading')return html`<${Centered}><p class="text-[13px] text-muted">Loading…</p><//>`;
@@ -5100,7 +5161,7 @@ function Root(){
   if(phase==='login')return html`<${Login} sb=${sb}/>`;
   if(phase==='setpw')return html`<${SetPassword} sb=${sb} first=${true} onDone=${()=>setPhase('loading')}/>`;
   if(phase==='empty')return html`<${FirstRun} canEdit=${role!=='viewer'} onStart=${start}/>`;
-  return html`<${App} boot=${boot} live=${{sb,user:session.user,role,canEdit:role==='admin'||role==='superuser'||role==='planner'}}/>`;
+  return html`<${App} boot=${boot} live=${{sb,user:session.user,role,offline,canEdit:!offline&&(role==='admin'||role==='superuser'||role==='planner')}}/>`;
 }
 
 

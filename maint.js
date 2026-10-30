@@ -37,7 +37,9 @@ function useMaint(sb){
       catch(e){P3.forEach(t=>o[t]=[]);o.prestarts=[];o.p3=false;o.p3err=errMsg(e)}
       try{const r4=await Promise.all(P4.map(t=>fetchAll(sb,t)));P4.forEach((t,i)=>o[t]=r4[i]);o.p4=true}
       catch(e){P4.forEach(t=>o[t]=[]);o.p4=false;o.p4err=errMsg(e)}
-      setDb(o);setErr('')}catch(e){setErr(errMsg(e))}};
+      setDb(o);setErr('');if(window.ffStore)window.ffStore.set('maint',{...o,savedAt:Date.now()})}   /* kept on this device for working without reception */
+    catch(e){const saved=window.isNetErr&&window.isNetErr(e)&&window.ffStore?await window.ffStore.get('maint'):null;
+      if(saved){setDb(d=>d&&!d.offline?d:{...saved,offline:true});setErr('')}else setErr(errMsg(e))}};
   useEffect(()=>{load();let t=null;let ch=null;
     try{ch=sb.channel('maint-'+uid());[...MT,...P3,'prestarts',...P4].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,350)}));ch.subscribe()}catch(e){}
     return()=>{clearTimeout(t);try{if(ch)sb.removeChannel(ch)}catch(e){}}},[]);
@@ -334,7 +336,7 @@ function PlanDialog({ctx,plan,onClose}){
 
 /* ---------- one machine's maintenance ---------- */
 function AssetPanel({ctx,a,onClose,open,behind}){
-  const {perms,data,M}=ctx;
+  const {perms,data,M}=ctx;const [pdfBusy,setPdfBusy]=useState(false);
   const plans=a.plans.slice().sort((x,y)=>({overdue:0,soon:1,nobase:2,ok:3}[x.state]-{overdue:0,soon:1,nobase:2,ok:3}[y.state]));
   const recs=M.recs.filter(r=>r.asset_id===a.m.id);
   const reads=ctx.db.meter_readings.filter(r=>r.asset_id===a.m.id&&['manual','correction','replacement','work_order'].includes(r.source));
@@ -355,7 +357,7 @@ function AssetPanel({ctx,a,onClose,open,behind}){
   const p=a.p||{};
   return html`<${Modal} wide=${true} noEsc=${behind} title=${html`<span class="inline-flex items-center gap-2 flex-wrap">${a.m.name} <span class="text-muted font-normal text-[15px]">${a.m.sub||''}</span> ${stChip(a.status)}</span>`}
     sub=${[machCatOf(a.m)||'No category',a.m.rego&&'Rego '+a.m.rego,a.crew&&a.crew.name,a.retired&&'Retired'].filter(Boolean).join(' · ')} onClose=${onClose}
-    foot=${html`<span class="text-[12px] text-muted mr-auto">${a.open.length} open work order${a.open.length===1?'':'s'}</span>
+    foot=${html`${window.FFR&&html`<button id="ap-pdf" type="button" class="btn" disabled=${!!pdfBusy} onClick=${async()=>{setPdfBusy(true);try{await window.FFR.machinePdf(ctx,a)}catch(e){ctx.notify(errMsg(e))}finally{setPdfBusy(false)}}}>${Icon.download} ${pdfBusy?'Making PDF…':'History PDF'}</button>`}<span class="text-[12px] text-muted mr-auto">${a.open.length} open work order${a.open.length===1?'':'s'}</span>
       ${perms.work&&html`<button id="ap-breakdown" type="button" class="btn" style=${{color:'hsl(0 72% 47%)'}} onClick=${()=>open({k:'breakdown',a})}>${Icon.alert} Report breakdown</button>
         <button id="ap-newwo" type="button" class="btn btn-primary" onClick=${()=>open({k:'wo',init:{asset_id:a.m.id}})}>${Icon.plus} Work order</button>`}`}>
     <div class="grid gap-4">
@@ -568,7 +570,7 @@ function FleetScreen({data,live,notify}){
   const a=asset&&M.byId.get(asset);
   const P=window.FFP;
   const D=window.FFD;
-  const TABS=[['dash','Dashboard'],['wo','Work orders'],...(D?[['df','Defects']]:[]),['cal','Calendar'],['plans','Service plans'],...(P?[['ps','Prestarts'],['cl','Checklists']]:[]),...(P&&perms.mgr?[['lg','Logins']]:[])];
+  const TABS=[['dash','Dashboard'],['wo','Work orders'],...(D?[['df','Defects']]:[]),['cal','Calendar'],['plans','Service plans'],...(P?[['ps','Prestarts'],['cl','Checklists']]:[]),...(window.FFR?[['rp','Reports']]:[]),...(P&&perms.mgr?[['lg','Logins']]:[])];
   const tabOk=TABS.some(x=>x[0]===tab)?tab:'dash';
   return html`<div class="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto pr-1">
     <div class="flex flex-wrap items-center gap-2">
@@ -577,7 +579,7 @@ function FleetScreen({data,live,notify}){
       ${!perms.work&&html`<span class="text-[12px] text-muted">View only: mechanics, supervisors and administrators record maintenance</span>`}
     </div>
     ${tabOk==='dash'?html`<${Dashboard} ctx=${ctx} open=${open}/>`:tabOk==='wo'?html`<${WorkOrders} ctx=${ctx} open=${open}/>`:tabOk==='cal'?html`<${Calendar} ctx=${ctx} open=${open}/>`
-      :tabOk==='df'?html`<${D.DefectsTab} ctx=${ctx} open=${open}/>`:tabOk==='ps'?html`<${P.PrestartsTab} ctx=${ctx} open=${open}/>`:tabOk==='cl'?html`<${P.ChecklistsTab} ctx=${ctx} open=${open}/>`:tabOk==='lg'?html`<${P.LoginsTab} ctx=${ctx}/>`:html`<${Plans} ctx=${ctx} open=${open}/>`}
+      :tabOk==='df'?html`<${D.DefectsTab} ctx=${ctx} open=${open}/>`:tabOk==='ps'?html`<${P.PrestartsTab} ctx=${ctx} open=${open}/>`:tabOk==='cl'?html`<${P.ChecklistsTab} ctx=${ctx} open=${open}/>`:tabOk==='lg'?html`<${P.LoginsTab} ctx=${ctx}/>`:tabOk==='rp'?html`<${window.FFR.ReportsTab} ctx=${ctx}/>`:html`<${Plans} ctx=${ctx} open=${open}/>`}
     ${a&&html`<${AssetPanel} ctx=${ctx} a=${a} open=${open} behind=${!!dlg} onClose=${()=>setAsset(null)}/>`}
     ${dlg&&dlg.k==='wo'&&html`<${WorkOrderDialog} ctx=${ctx} wo=${dlg.wo&&db.work_orders.find(w=>w.id===dlg.wo.id)||dlg.wo} init=${dlg.init} onClose=${()=>setDlg(null)}/>`}
     ${dlg&&dlg.k==='service'&&html`<${ServiceDialog} ctx=${ctx} a=${M.byId.get(dlg.a.m.id)} plan=${dlg.plan} baseline=${dlg.baseline} onClose=${()=>setDlg(null)}/>`}

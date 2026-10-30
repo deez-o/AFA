@@ -6,7 +6,9 @@
 --    booking (its Machines tab) or a job plan (Machines needed), from any screen. Bookings and plans that already
 --    had it keep it, so nothing in the roster breaks: the app flags them instead.
 -- 2. machine_alerts: one row per machine with what the planner should know (restricted, open defects,
---    service overdue or due soon), so the booking and planning screens can warn without loading all of maintenance.
+--    service overdue or due soon, today's prestart), so the booking and planning screens can warn without
+--    loading all of maintenance.
+-- 3. maintenance_feed: the last 7 days of maintenance events for the notifications bell (Phase 6).
 
 -- 1. No restricted machine added to a booking or plan --------------------------------------
 create or replace function public.items_no_restricted_machines()
@@ -69,9 +71,37 @@ select m.asset_id, m.name,
        (select count(*) from public.defects d where d.asset_id = m.asset_id and d.status not in ('closed','dismissed'))::int as open_defects,
        (select count(*) from public.defects d where d.asset_id = m.asset_id and d.status not in ('closed','dismissed') and d.severity = 'critical')::int as critical_defects,
        case when s.overdue is not null then 'overdue' when s.soon is not null then 'soon' end as service,
-       coalesce(s.overdue, s.soon) as service_plans
+       coalesce(s.overdue, s.soon) as service_plans,
+       (select min(r.created_at) from public.restrictions r where r.asset_id = m.asset_id and r.active) as restricted_since,
+       (select max(p.submitted_at) from public.prestarts p where p.asset_id = m.asset_id) as last_prestart_at
   from m left join svc s using (asset_id)
  where not m.retired;
 
 revoke all on public.machine_alerts from anon;
 grant select on public.machine_alerts to authenticated;
+
+-- 3. Maintenance events for the notifications bell (last 7 days) -------------------------------
+create or replace view public.maintenance_feed with (security_invoker = true) as
+select 'df-' || d.id as id, 'mcritical' as type, d.created_at as at, d.asset_id,
+       'Critical defect D-' || d.number || ': ' || d.title as text, 'Reported by ' || coalesce(d.reported_name, 'someone') as sub
+  from public.defects d where d.severity = 'critical' and d.created_at > now() - interval '7 days'
+union all
+select 'rs-' || r.id, 'mcritical', r.created_at, r.asset_id, 'Taken out of service', r.reason
+  from public.restrictions r where r.defect_id is null and r.created_at > now() - interval '7 days'
+union all
+select 'rr-' || r.id, 'mreturn', r.released_at, r.asset_id, 'Returned to service', coalesce(r.release_note, r.reason)
+  from public.restrictions r where r.released_at > now() - interval '7 days'
+union all
+select 'bd-' || w.id, 'mbreak', w.created_at, w.asset_id, 'Breakdown: ' || w.title,
+       case when w.safe_to_operate = false then 'Not safe to operate' else 'Can keep working' end
+  from public.work_orders w where w.wo_type = 'breakdown' and w.created_at > now() - interval '7 days'
+union all
+select 'wn-' || w.id, 'mwo', w.created_at, w.asset_id, 'New work order WO ' || w.number || ': ' || w.title,
+       concat_ws(' · ', initcap(w.priority) || ' priority', 'for ' || w.assigned_to)
+  from public.work_orders w where w.wo_type <> 'breakdown' and w.created_at > now() - interval '7 days'
+union all
+select 'wc-' || w.id, 'mwo', w.completed_at, w.asset_id, 'WO ' || w.number || ' completed: ' || w.title, 'Waiting for a supervisor to verify'
+  from public.work_orders w where w.status = 'completed' and w.completed_at > now() - interval '7 days';
+
+revoke all on public.maintenance_feed from anon;
+grant select on public.maintenance_feed to authenticated;

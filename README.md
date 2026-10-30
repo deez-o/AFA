@@ -72,16 +72,17 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 - `maint.js`: the Fleet screens, loaded only when someone opens Fleet or Prestarts
 - `prestart.js`: the Prestarts screen, the checklist builder, prestart history, logins, and machine manuals
 - `defects.js`: the defect register, defect actions, restrictions and return to service
+- `reports.js`: Fleet reports (CSV and PDF) and each machine's history PDF
 - `supabase/maintenance.sql`: the maintenance tables, roles and database rules
 - `supabase/prestarts.sql`: prestart checklists and prestarts, the `maintenance` file store, and the link from each login to its Staff record
 - `supabase/defects.sql`: defects, restrictions, and how work orders carry defects through repair
-- `supabase/planner_link.sql`: stops restricted machines being added to bookings or plans; `machine_alerts` for the planner's warnings
+- `supabase/planner_link.sql`: stops restricted machines being added to bookings or plans; `machine_alerts` for the planner's warnings; `maintenance_feed` for the notifications bell
 - `tests/maintenance_test.sql`, `tests/prestarts_test.sql`, `tests/defects_test.sql`, `tests/planner_link_test.sql`: check the database rules; they leave no data behind
 
 ### Set up (once)
 1. Supabase → **SQL Editor** → **New query**. Paste all of `supabase/maintenance.sql` and click **Run**. It is safe to run again and doesn't change roster data.
 2. Do the same with `supabase/prestarts.sql` (after `maintenance.sql`). It also creates the private file store (Storage bucket `maintenance`) for prestart photos, signatures and manuals.
-3. Then `supabase/defects.sql` (after `prestarts.sql`), then `supabase/planner_link.sql`.
+3. Then `supabase/defects.sql` (after `prestarts.sql`), then `supabase/planner_link.sql` (run it again after updates: it adds the notification feed).
 4. To check them: paste `tests/maintenance_test.sql` into a new query and **Run**, then `tests/prestarts_test.sql`, `tests/defects_test.sql` and `tests/planner_link_test.sql`. The messages list each check as PASS and finish with `ALL … TESTS PASSED`. They roll themselves back.
 
 ### Roles
@@ -114,6 +115,15 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 - A **restricted** machine can't be ticked on a booking's Machines tab or in a plan's *Machines needed*, and the database refuses it from any route (copies, plan pushes, imports).
 - Bookings that already had it keep it, but are flagged: a red ⚠ on the booking bar (today onwards), a warning when the booking opens, ⚠ on the Machines tab. A plan with a newly added restricted machine can't be sent to the schedule.
 - Machine pickers also warn (without blocking) when a machine's **service is overdue or due soon**, or it has **open defects**. The Machines screen marks restricted machines.
+
+### Reports
+Fleet › **Reports**: work order backlog, service compliance, prestart compliance (prestarts on the days each machine was booked), downtime, breakdowns, defects and service history. Pick the dates and category; export each to **CSV** (Excel) or a branded **PDF**. Each machine's panel has a **History PDF**.
+
+### Notifications
+The bell gets maintenance notifications for people with Fleet & Maintenance: critical defects and restrictions, restricted machines on bookings, breakdowns and returns to service (on by default), plus prestarts missing by 9 am (9 pm for night works), work orders, and services due (switch on in Settings). **Open** goes to the machine in Fleet, or to the booking.
+
+### Working without reception
+Once FraserFlow has been opened on a phone with reception, it opens again without reception from the copy saved on that phone (a bar at the top says so; nothing can be changed except prestarts). Prestarts, their photos and signature are saved on the phone and **send themselves** when reception returns (or *Send now*), never twice. Anything the server refuses stays listed under *Waiting to send* with the reason.
 
 **Features in progress:** Fleet & Maintenance and Prestarts start out visible to the `admin` only (marked *Preview* in the left menu). Release each one from the settings menu (top right) under *Features in progress*.
 
