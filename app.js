@@ -2736,8 +2736,8 @@ function useInstall(){
   return null;
 }
 window.ffUseInstall=useInstall;
-function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,maint}){
-  const inst=useInstall();
+function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,maint,simple}){   /* simple (operators): dark mode and their account only */
+  const inst0=useInstall();const inst=simple?null:inst0;const [left,setLeft]=useState(false);   /* open towards whichever side has room */
   const [open,setOpen]=useState(false);
   const ref=React.useRef(null);
   useEffect(()=>{if(!open)return;
@@ -2747,10 +2747,10 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,ma
   const initial=account&&account.email?account.email[0].toUpperCase():'';
   const sectionLabel=t=>html`<div class="label px-2 pt-2 pb-1">${t}</div>`;
   return html`<div class="relative" ref=${ref}>
-    <button class="btn px-2" onClick=${()=>setOpen(o=>!o)} aria-expanded=${open} aria-label="Settings" title="Settings">
+    <button class="btn px-2" onClick=${()=>{if(!open&&ref.current)setLeft(ref.current.getBoundingClientRect().right<330);setOpen(o=>!o)}} aria-expanded=${open} aria-label="Settings" title="Settings">
       ${account?html`<span class="w-6 h-6 rounded-full inline-flex items-center justify-center text-[12px] font-bold" style=${{background:'var(--ink)',color:'var(--surface)'}}>${initial}</span>`:Icon.gear}
     </button>
-    ${open&&html`<div class="panel pop absolute right-0 top-[38px] z-40 w-[min(320px,calc(100vw-32px))] overflow-hidden" role="dialog" aria-label="Settings">
+    ${open&&html`<div class=${'panel pop absolute top-[38px] z-40 w-[min(320px,calc(100vw-32px))] overflow-hidden '+(left?'left-0':'right-0')} role="dialog" aria-label="Settings">
       ${account&&html`<div class="px-4 py-3 border-b border-line">
         <div class="text-[12px] text-muted">Signed in as</div>
         <div class="text-[13.5px] font-semibold truncate">${account.email}</div>
@@ -2762,8 +2762,8 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,ma
         ${inst&&html`${sectionLabel('This device')}
           ${inst.kind==='prompt'?html`<button id="set-install" class="w-full flex items-start gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-left" onClick=${()=>{setOpen(false);inst.go()}}>${Icon.download}<span><span class="block text-[13px] font-medium">Install FraserFlow as an app</span><span class="block text-[12px] text-muted">Opens from its own icon, full screen</span></span></button>`
             :html`<div class="px-2 py-2 flex items-start gap-2">${Icon.download}<span><span class="block text-[13px] font-medium">Add FraserFlow to your home screen</span><span class="block text-[12px] text-muted">${inst.steps}</span></span></div>`}`}
-        ${sectionLabel('Notifications')}
-        ${NOTIF_TYPES.filter(t=>maint||!t.maint).map((t,i,all)=>html`${t.maint&&!all[i-1].maint&&html`<div key=${'mh'+i} class="label px-2 pt-2 pb-1" style=${{color:'var(--muted)'}}>Maintenance</div>`}<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
+        ${!simple&&sectionLabel('Notifications')}
+        ${!simple&&NOTIF_TYPES.filter(t=>maint||!t.maint).map((t,i,all)=>html`${t.maint&&!all[i-1].maint&&html`<div key=${'mh'+i} class="label px-2 pt-2 pb-1" style=${{color:'var(--muted)'}}>Maintenance</div>`}<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
         ${preview&&html`${sectionLabel('Features in progress')}
           <div class="px-2 pb-1 text-[12px] text-muted">Only you see these until you release them. Then everyone whose role allows it sees them.</div>
           ${Object.entries(SCREENS).filter(([,s])=>s.preview).map(([k,s])=>html`<${SwitchRow} key=${k} id=${'pv-'+k} label=${'Release '+s.title} desc=${preview.list.includes(k)?'In progress: only you can see it':'Released to everyone with access'}
@@ -4867,7 +4867,7 @@ function App({boot,live}){
           <img src=${BRAND_OVAL} alt="Alex Fraser Group" class="block h-[50px] w-auto select-none" draggable="false"/>
           <img src=${BRAND_TAG} alt="Building greener roads" class="brand-tag hidden xl:block h-[30px] w-auto select-none" draggable="false"/>
         </div>
-        ${screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet'&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
+        ${screen!=='ideas'&&screen!=='jobs'&&screen!=='fleet'&&screen!=='prestarts'&&live.role!=='operator'&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
           title=${on?'Hide Settings':'Crews, plant, mixes, seal, trucks and subcontractors'}
           style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.gear} Settings</button>`)(panel&&tab!=='jobs')}
         ${screen==='schedule'&&html`<${ExportsMenu} items=${[{id:'exp-program',label:'Daily program',desc:'PDF for each job working on a day',run:()=>setProgram(true)},
@@ -4888,11 +4888,11 @@ function App({boot,live}){
           <button class="btn" onClick=${()=>setAnchor(mondayOf(TODAY))} disabled=${atToday}>Today</button>
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>`}
-        <button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>
-        <${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} onMaint=${screenOK('fleet',live.role,data)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>
+        ${live.role!=='operator'&&html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
+        ${live.role!=='operator'&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} onMaint=${screenOK('fleet',live.role,data)?id=>{try{localStorage.setItem(KEY+':fleetAsset',id)}catch(e){}goScreen('fleet')}:null} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
         ${boardScreen&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
-        <${SettingsMenu} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
+        <${SettingsMenu} simple=${live.role==='operator'} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
       </header>
 
       ${live.offline&&html`<${OfflineBar} at=${live.offline.at}/>`}
