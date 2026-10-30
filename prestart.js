@@ -323,7 +323,7 @@ function PrestartScreen({data,live,notify}){
     const showInst=inst&&!hideInst&&window.innerWidth<900;
     body=html`<div class="grid gap-3 pb-6">
       <div class="grid gap-0.5"><div class="font-display text-[20px] font-semibold">Prestart check</div>
-        <div class="text-[13px] text-muted">${staff?`Signed in as ${staff.name}`:html`Signed in as ${live.user.email}. <span style=${{color:'hsl(30 90% 38%)'}}>Your login isn’t linked to your Staff record yet: ask an administrator.</span>`}</div></div>
+        <div class="text-[13px] text-muted">${staff?`Signed in as ${staff.name}`:html`Signed in as ${showLogin(live.user.email)}. <span style=${{color:'hsl(30 90% 38%)'}}>Your login isn’t linked to your Staff record yet: ask an administrator.</span>`}</div></div>
       ${showInst&&html`<div id="ps-install" class="panel p-3 flex items-center gap-3"><img src="/icons/icon-192.png" alt="" class="w-11 h-11 rounded-xl border border-line shrink-0"/>
         <div class="min-w-0 flex-1"><div class="text-[14px] font-semibold">Put FraserFlow on your home screen</div><div class="text-[12.5px] text-muted">${inst.kind==='prompt'?'It opens like an app, straight to your prestarts.':inst.steps}</div></div>
         ${inst.kind==='prompt'&&html`<button type="button" class="btn btn-primary" style=${{height:38}} onClick=${inst.go}>Install</button>`}
@@ -478,20 +478,20 @@ function LoginsTab({ctx}){
   const people=data.resources.filter(r=>r.type==='person').sort((a,b)=>a.name.localeCompare(b.name));
   if(!rows)return html`<div class="panel p-6 text-[13px] text-muted">${err||'Loading logins…'}</div>`;
   const linked=new Map(rows.filter(r=>r.staff_id).map(r=>[r.staff_id,r.id]));const ql=q.trim().toLowerCase();
-  const list=rows.filter(r=>!ql||[r.email,(people.find(p=>p.id===r.staff_id)||{}).name,r.role].join(' ').toLowerCase().includes(ql));
+  const list=rows.filter(r=>!ql||[r.email,showLogin(r.email),(people.find(p=>p.id===r.staff_id)||{}).name,r.role].join(' ').toLowerCase().includes(ql));
   return html`<section class="panel flex flex-col min-h-0">
     <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
-      <input id="lg-search" class="field" style=${{...fs,width:220}} placeholder="Search email, name, role" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search logins"/>
-      <span class="text-[12.5px] text-muted flex-1 min-w-[240px]">New logins are added in Supabase → Authentication → Users and start as Viewer. Link each operator to their Staff record so their prestarts carry their name.</span></div>
+      <input id="lg-search" class="field" style=${{...fs,width:220}} placeholder="Search username, name, role" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search logins"/>
+      <span class="text-[12.5px] text-muted flex-1 min-w-[240px]">New logins are added in Supabase → Authentication → Users (a username like jsmith goes in as jsmith@fraserflow.local) and start as Viewer. Link each operator to their Staff record so their prestarts carry their name.</span></div>
     ${err&&html`<div id="lg-err" class="px-3 py-2 text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
     <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="lg-table">
-      <thead><tr class="text-left">${['Login','Role','Staff record'].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+      <thead><tr class="text-left">${['Username','Role','Staff record'].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
       <tbody>${list.map(r=>{const self=r.id===me;const lockRole=self||((r.role==='admin')&&role!=='admin');
         return html`<tr key=${r.id} class="border-t border-line" data-email=${r.email}>
-          <td class="py-2 px-3 whitespace-nowrap">${r.email}${self&&html` <span class="text-muted">(you)</span>`}</td>
-          <td class="py-2 px-3"><select class="field w-auto lg-role" style=${fs} value=${r.role} disabled=${lockRole} title=${self?'You can’t change your own role':lockRole?'Only the admin can change this':''} onChange=${e=>save(r,{role:e.target.value})} aria-label=${'Role for '+r.email}>
+          <td class="py-2 px-3 whitespace-nowrap">${showLogin(r.email)}${self&&html` <span class="text-muted">(you)</span>`}</td>
+          <td class="py-2 px-3"><select class="field w-auto lg-role" style=${fs} value=${r.role} disabled=${lockRole} title=${self?'You can’t change your own role':lockRole?'Only the admin can change this':''} onChange=${e=>save(r,{role:e.target.value})} aria-label=${'Role for '+showLogin(r.email)}>
             ${ROLES.filter(([k])=>k!=='admin'||role==='admin'||r.role==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select></td>
-          <td class="py-2 px-3"><select class="field w-auto lg-staff" style=${{...fs,minWidth:200}} value=${r.staff_id||''} onChange=${e=>save(r,{staff_id:e.target.value||null})} aria-label=${'Staff record for '+r.email}>
+          <td class="py-2 px-3"><select class="field w-auto lg-staff" style=${{...fs,minWidth:200}} value=${r.staff_id||''} onChange=${e=>save(r,{staff_id:e.target.value||null})} aria-label=${'Staff record for '+showLogin(r.email)}>
             <option value="">Not linked</option>${people.map(p=>html`<option key=${p.id} value=${p.id} disabled=${linked.has(p.id)&&linked.get(p.id)!==r.id}>${p.name}${linked.has(p.id)&&linked.get(p.id)!==r.id?' (linked to another login)':''}</option>`)}</select></td></tr>`})}</tbody></table></div>
   </section>`;
 }

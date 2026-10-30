@@ -2338,7 +2338,7 @@ function ChangeLogDialog({data,onClose,onOpen}){
                 <div class="text-[13px] font-medium">${c.text}</div>
                 ${c.sub&&html`<div class="text-[12px] text-muted">${c.sub}</div>`}
                 ${c.details&&c.details.length>0&&html`<ul class="mt-1 grid gap-0.5 text-[12px] leading-snug">${c.details.map((d,i)=>html`<li key=${i} class="flex gap-1.5"><span class="text-faint shrink-0">•</span><span class="min-w-0 break-words">${d}</span></li>`)}</ul>`}
-                ${c.by&&html`<div class="text-[11.5px] text-faint mt-0.5">by ${c.by}</div>`}
+                ${c.by&&html`<div class="text-[11.5px] text-faint mt-0.5">by ${showLogin(c.by)}</div>`}
               </div>
               ${b&&html`<button class="btn shrink-0" style=${{height:28}} onClick=${()=>{onClose();onOpen(b)}}>Open</button>`}
             </div></div>`})}
@@ -2744,7 +2744,7 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,ma
     const out=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};const esc=e=>{if(e.key==='Escape')setOpen(false)};
     document.addEventListener('pointerdown',out);window.addEventListener('keydown',esc);
     return()=>{document.removeEventListener('pointerdown',out);window.removeEventListener('keydown',esc)}},[open]);
-  const initial=account&&account.email?account.email[0].toUpperCase():'';
+  const initial=account&&account.email?showLogin(account.email)[0].toUpperCase():'';
   const sectionLabel=t=>html`<div class="label px-2 pt-2 pb-1">${t}</div>`;
   return html`<div class="relative" ref=${ref}>
     <button class="btn px-2" onClick=${()=>{if(!open&&ref.current)setLeft(ref.current.getBoundingClientRect().right<330);setOpen(o=>!o)}} aria-expanded=${open} aria-label="Settings" title="Settings">
@@ -2753,7 +2753,7 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,ma
     ${open&&html`<div class=${'panel pop absolute top-[38px] z-40 w-[min(320px,calc(100vw-32px))] overflow-hidden '+(left?'left-0':'right-0')} role="dialog" aria-label="Settings">
       ${account&&html`<div class="px-4 py-3 border-b border-line">
         <div class="text-[12px] text-muted">Signed in as</div>
-        <div class="text-[13.5px] font-semibold truncate">${account.email}</div>
+        <div class="text-[13.5px] font-semibold truncate">${showLogin(account.email)}</div>
         ${(account.role==='admin'||account.role==='superuser')&&html`<div class="text-[11.5px] text-muted mt-0.5 acct-role">${({admin:'Administrator',superuser:'Superuser (full access)'})[account.role]}</div>`}   ${'' /* roles are only shown to administrators and superusers */}
       </div>`}
       <div class="p-2">
@@ -2823,7 +2823,7 @@ function Notifications({data,onOpen,prefs,setPrefs,maint,onMaint}){
               <div class="text-[13px]">${c.text}</div>
               ${c.sub&&html`<div class="text-[12px] text-muted">${c.sub}</div>`}
               ${c.details&&c.details.length>0&&html`<ul class="mt-1 grid gap-0.5 text-[12px] leading-snug">${c.details.map((t,i)=>html`<li key=${i} class="flex gap-1.5"><span class="text-faint shrink-0">•</span><span class="min-w-0 break-words">${t}</span></li>`)}</ul>`}
-              <div class="text-[11.5px] text-faint">${agoText(c.at)}${c.by?` · ${c.by===me?'you':c.by}`:''}</div>
+              <div class="text-[11.5px] text-faint">${agoText(c.at)}${c.by?` · ${c.by===me?'you':showLogin(c.by)}`:''}</div>
             </div>
             ${b&&html`<button class="btn shrink-0" style=${{height:28}} onClick=${()=>{setOpen(false);onOpen(b)}}>Open</button>`}
             ${!b&&c.assetId&&onMaint&&html`<button class="btn shrink-0 nt-open-asset" style=${{height:28}} onClick=${()=>{setOpen(false);onMaint(c.assetId)}}>Open</button>`}
@@ -4915,7 +4915,7 @@ function App({boot,live}){
           <span class="inline-flex items-center gap-1.5"><span class="inline-flex items-center justify-center w-5 h-3 rounded-[3px]" style=${blockStyle({kind:'job',shift:'night'},data)}>${Icon.moon}</span>Night works</span>
           <span class="inline-flex items-center gap-1.5"><span class="inline-block w-5 h-3 rounded-[3px]" style=${{boxShadow:'inset 0 0 0 2px hsl(0 75% var(--blk-edge-l))',backgroundImage:'repeating-linear-gradient(135deg,hsl(0 80% 50% / .16) 0 4px,transparent 4px 8px)'}}></span>Job on a plant maintenance day</span>
           <span class="flex-1"></span>
-          <span>Signed in as ${live.user.email}${live.canEdit?'':' · view only'}</span>
+          <span>Signed in as ${showLogin(live.user.email)}${live.canEdit?'':' · view only'}</span>
         </div>
       </section>`}
     </main>
@@ -5040,19 +5040,25 @@ function Centered({children}){
       <span class="font-display text-[19px] font-semibold">Fraser<span style=${{color:'var(--accent)'}}>Flow</span></span></div>
     ${children}</div></div>`;
 }
+/* usernames: Supabase needs an email address for each login, so a username like "jsmith" is stored as
+   jsmith@fraserflow.local (no mail is ever sent there). People type and see just the username. */
+const LOGIN_DOMAIN='fraserflow.local';
+const toLogin=v=>{v=String(v||'').trim();return v.includes('@')?v:v.toLowerCase()+'@'+LOGIN_DOMAIN};
+const showLogin=e=>{e=String(e||'');return e.toLowerCase().endsWith('@'+LOGIN_DOMAIN)?e.slice(0,-LOGIN_DOMAIN.length-1):e};
+window.showLogin=showLogin;
 function Login({sb}){
   /* Email + password. Accounts are created by an administrator in Supabase with a temporary
      password; on first sign-in the person is asked to choose their own (see SetPassword). */
   const [email,setEmail]=useState('');const [pw,setPw]=useState('');const [show,setShow]=useState(false);
   const [busy,setBusy]=useState(false);const [err,setErr]=useState('');const [forgot,setForgot]=useState(false);
   const signIn=async e=>{e.preventDefault();setBusy(true);setErr('');
-    const {error}=await sb.auth.signInWithPassword({email:email.trim(),password:pw});
+    const {error}=await sb.auth.signInWithPassword({email:toLogin(email),password:pw});
     setBusy(false);
-    if(error)setErr(/invalid login|credentials/i.test(error.message)?'That email or password is wrong.':/not confirmed/i.test(error.message)?'This account isn’t active yet. Ask your administrator to confirm it.':error.message)};
+    if(error)setErr(/invalid login|credentials/i.test(error.message)?'That username or password is wrong.':/not confirmed/i.test(error.message)?'This account isn’t active yet. Ask your administrator to confirm it.':error.message)};
   return html`<${Centered}>
     <form class="flex flex-col gap-3" onSubmit=${signIn}>
-      <label class="grid gap-1"><span class="label">Email</span>
-        <input id="login-email" type="email" required autocomplete="username" class="field" value=${email} onInput=${e=>setEmail(e.target.value)}/></label>
+      <label class="grid gap-1"><span class="label">Username</span>
+        <input id="login-email" type="text" required autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" class="field" value=${email} onInput=${e=>setEmail(e.target.value)}/></label>
       <label class="grid gap-1"><span class="label">Password</span>
         <div class="flex gap-2">
           <input id="login-password" type=${show?'text':'password'} required autocomplete="current-password" class="field" value=${pw} onInput=${e=>setPw(e.target.value)}/>

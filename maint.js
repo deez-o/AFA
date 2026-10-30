@@ -280,7 +280,7 @@ function BreakdownDialog({ctx,a,onClose}){
   const save=async()=>{setErr('');if(!f.what.trim()){setErr('Describe what failed.');return}if(f.safe==null){setErr('Say whether it is safe to operate.');return}setBusy(true);
     try{const first=f.what.trim().split('\n')[0];
       const {error}=await sb.from('work_orders').insert({asset_id:a.m.id,wo_type:'breakdown',title:first.length>80?first.slice(0,77)+'…':first,
-        description:[f.what.trim(),f.location.trim()?'Location / job: '+f.location.trim():'',`Reported by ${window.__rosterMe||'someone'} at ${new Date().toLocaleString('en-AU',{dateStyle:'medium',timeStyle:'short'})}`].filter(Boolean).join('\n\n'),
+        description:[f.what.trim(),f.location.trim()?'Location / job: '+f.location.trim():'',`Reported by ${window.__rosterMe?showLogin(window.__rosterMe):'someone'} at ${new Date().toLocaleString('en-AU',{dateStyle:'medium',timeStyle:'short'})}`].filter(Boolean).join('\n\n'),
         priority:f.priority,safe_to_operate:f.safe,reported_hours:n0(f.hours),reported_km:n0(f.km),start_date:f.safe?null:iso(TODAY),end_date:f.safe?null:iso(TODAY),status:f.safe?'open':'scheduled'});
       if(error)throw error;
       let warn='';for(const [k,v] of [['hours',f.hours],['km',f.km]])if(v!==''){const {error:e2}=await sb.from('meter_readings').insert({asset_id:a.m.id,kind:k,value:+v,source:'manual',note:'Breakdown report'});if(e2)warn=' (the meter reading wasn’t saved: '+errMsg(e2)+')'}

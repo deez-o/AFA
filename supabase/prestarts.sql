@@ -37,10 +37,10 @@ end; $$;
 drop trigger if exists profiles_guard on public.profiles;
 create trigger profiles_guard before update on public.profiles for each row execute function public.profile_guard();
 
--- the signed-in person's name: their Staff record if linked, otherwise their email
+-- the signed-in person's name: their Staff record if linked, otherwise their username (or email)
 create or replace function public.my_name()
 returns text language sql stable security definer set search_path = public as $$
-  select coalesce((select i.data->>'name' from public.items i where i.kind = 'resource' and i.id = p.staff_id), p.email)
+  select coalesce((select i.data->>'name' from public.items i where i.kind = 'resource' and i.id = p.staff_id), regexp_replace(p.email, '@fraserflow\.local$', '', 'i'))
   from public.profiles p where p.id = auth.uid()
 $$;
 
