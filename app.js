@@ -4822,7 +4822,9 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
   const leaveOf=p=>{const bs=data.blocks.filter(b=>b.resourceId===p.id&&LEAVE_KINDS.includes(b.kind)&&b.end>=today).sort((a,b)=>a.start.localeCompare(b.start));const b=bs[0];if(!b)return null;
     return b.start<=today?{now:true,b,t:`${KINDS[b.kind].label} · back ${fmtShort(addDays(parse(b.end),1))}`}:{b,t:`${KINDS[b.kind].label} ${leaveRange(b)}`}};
   const ql=q.trim().toLowerCase();
-  const list=people.filter(p=>(!crew||(crew==='~'?!p.crewId:p.crewId===crew))&&(!ql||[p.name,p.sub,crewName(p.crewId),profOf.get(p.id)&&showLogin(profOf.get(p.id).email)].join(' ').toLowerCase().includes(ql))).sort((a,b)=>a.name.localeCompare(b.name));
+  const roleRank=p=>{const pr=profOf.get(p.id);if(!pr)return 99;const i=LOGIN_ROLES.findIndex(([k])=>k===roleKey(pr.role));return i<0?98:i};
+  const list=people.filter(p=>(!crew||(crew==='~'?!p.crewId:p.crewId===crew))&&(!ql||[p.name,p.sub,crewName(p.crewId),profOf.get(p.id)&&showLogin(profOf.get(p.id).email)].join(' ').toLowerCase().includes(ql)))
+    .sort((a,b)=>roleRank(a)-roleRank(b)||a.name.localeCompare(b.name));   /* by login role (admin first, no login last), then name */
   const roleSel=p=>{const self=p.id===me;const lock=self||(roleKey(p.role)==='admin'&&myRole!=='admin');
     return html`<select class="field w-auto lg-role" style=${{height:30,fontSize:12.5}} value=${roleKey(p.role)} disabled=${lock} title=${self?'You can’t change your own role':lock?'Only the admin can change this':''} onChange=${e=>saveProf(p,{role:e.target.value})} aria-label=${'Role for '+showLogin(p.email)}>
       ${LOGIN_ROLES.filter(([k])=>k!=='admin'||myRole==='admin'||roleKey(p.role)==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select>`};
