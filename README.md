@@ -93,7 +93,7 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 | `planner` | Edit | View |
 | `supervisor` | View | Record work, verify & close work orders |
 | `mechanic` | View | Record services, readings and work order progress |
-| `operator` (shown as **Prestart**) | Prestarts only (once Prestarts is released; until then, View) | Prestarts |
+| `prestart` | Prestarts only (once Prestarts is released; until then, View) | Prestarts |
 | `viewer` | View | None |
 
 **Ideas** is for the `admin` only, never superusers.
@@ -138,6 +138,8 @@ This needs one setting, because creating logins uses Supabase's admin key, which
 3. Vercel → **Deployments** → redeploy the latest.
 
 The key is only used by `api/users.js`, which checks that the person asking is signed in as an administrator or superuser. `tests/api_users_test.js` checks those rules (`node tests/api_users_test.js`).
+
+The **prestart** role was called `operator` before. Running `supabase/schema.sql` (or `maintenance.sql`) again renames it for everyone who had it; until then the app treats both names the same.
 
 ### Usernames instead of email addresses
 People can sign in with a plain username (e.g. `jsmith`) instead of an email. Supabase still needs an address for every login, so a username is stored as `jsmith@fraserflow.local` (nothing is ever sent there); FraserFlow only ever shows `jsmith`.

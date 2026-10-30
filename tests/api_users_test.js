@@ -4,7 +4,7 @@ const ENV = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'anon', 
 const USERS = { 'tok-admin': { id: '00000000-0000-0000-0000-0000000000a1', role: 'admin' }, 'tok-super': { id: '00000000-0000-0000-0000-0000000000a6', role: 'superuser' },
   'tok-planner': { id: '00000000-0000-0000-0000-0000000000a2', role: 'planner' } };
 let made = [], patched = [], resets = [], existing = new Set(['taken@fraserflow.local']);
-const ROLE_OF = { '00000000-0000-0000-0000-0000000000a1': 'admin', '00000000-0000-0000-0000-0000000000a7': 'operator' };
+const ROLE_OF = { '00000000-0000-0000-0000-0000000000a1': 'admin', '00000000-0000-0000-0000-0000000000a7': 'prestart' };
 const json = (status, body) => ({ ok: status < 300, status, json: async () => body });
 async function http(url, o = {}) {
   const h = o.headers || {};
@@ -37,10 +37,10 @@ const ok = (c, l) => { console.log((c ? 'PASS' : 'FAIL') + ': ' + l); if (!c) fa
   r = await call('tok-super', { action: 'create', login: 'boss', password: 'temporary1', role: 'admin' }); ok(r.statusCode === 403 && made.length === 0, 'a superuser can’t create an admin');
   r = await call('tok-admin', { action: 'create', login: 'jsmith', password: 'short' }); ok(r.statusCode === 400 && made.length === 0, 'a temporary password under 8 characters is refused');
   r = await call('tok-admin', { action: 'create', login: 'j smith!', password: 'temporary1' }); ok(r.statusCode === 400, 'a username with spaces or symbols is refused');
-  r = await call('tok-super', { action: 'create', login: 'JSmith', password: 'temporary1', role: 'operator', staff_id: 'p-js' });
+  r = await call('tok-super', { action: 'create', login: 'JSmith', password: 'temporary1', role: 'prestart', staff_id: 'p-js' });
   ok(r.statusCode === 200 && made[0].email === 'jsmith@fraserflow.local' && made[0].email_confirm === true && made[0].user_metadata.password_set === false,
     'a superuser creates "JSmith": stored as jsmith@fraserflow.local, confirmed, must choose a password at first sign-in');
-  ok(patched[0] && patched[0].body.role === 'operator' && patched[0].body.staff_id === 'p-js', 'its role and Staff link are set');
+  ok(patched[0] && patched[0].body.role === 'prestart' && patched[0].body.staff_id === 'p-js', 'its role and Staff link are set');
   r = await call('tok-admin', { action: 'create', login: 'dan@afa.com.au', password: 'temporary1', role: 'planner' }); ok(r.statusCode === 200 && made[1].email === 'dan@afa.com.au', 'an email login can be created too');
   r = await call('tok-admin', { action: 'create', login: 'taken', password: 'temporary1' }); ok(r.statusCode === 409 && /already taken/.test(r.body.error), 'a username that exists already: “already taken”');
   r = await call('tok-super', { action: 'reset', id: '00000000-0000-0000-0000-0000000000a1', password: 'temporary2' }); ok(r.statusCode === 403 && resets.length === 0, 'a superuser can’t reset the admin’s password');

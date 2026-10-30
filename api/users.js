@@ -5,12 +5,12 @@
 // the same rules as Fleet › Logins apply (only the administrator creates admins or resets an admin's password).
 //
 // POST /api/users  (Authorization: Bearer <the signed-in person's access token>)
-//   { action: 'create', login: 'jsmith' | 'name@company.com', password: '<temporary>', role: 'operator', staff_id: '...' }
+//   { action: 'create', login: 'jsmith' | 'name@company.com', password: '<temporary>', role: 'prestart', staff_id: '...' }
 //   { action: 'reset', id: '<login id>', password: '<temporary>' }
 // A temporary password: the person chooses their own the first time they sign in.
 
 const LOGIN_DOMAIN = 'fraserflow.local';
-const ROLES = ['admin', 'superuser', 'planner', 'supervisor', 'mechanic', 'operator', 'viewer'];
+const ROLES = ['admin', 'superuser', 'planner', 'supervisor', 'mechanic', 'prestart', 'viewer'];
 
 function send(res, status, body) {
   res.statusCode = status;
@@ -71,7 +71,7 @@ async function handler(req, res, env = process.env, http = fetch) {
       up = await http(`${url}/rest/v1/profiles?id=eq.${mj.id}`, { method: 'PATCH', headers: { ...admin, Prefer: 'return=minimal' }, body: JSON.stringify(patch) });
       return send(res, 200, { id: mj.id, email: mj.email, warning: 'Login created, but that Staff record is already linked to another login.' });
     }
-    if (!up.ok) return send(res, 200, { id: mj.id, email: mj.email, warning: 'Login created, but its role couldn’t be set. Set it in the list.' });
+    if (!up.ok) return send(res, 200, { id: mj.id, email: mj.email, warning: 'Login created, but its role couldn’t be set (if it is Prestart: run supabase/schema.sql again first). Set it in the list.' });
     return send(res, 200, { id: mj.id, email: mj.email });
   }
 

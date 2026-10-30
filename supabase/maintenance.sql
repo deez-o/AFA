@@ -12,11 +12,12 @@
 --    planner:    the schedule, as before; can see maintenance
 --    supervisor: reviews and verifies maintenance work, allocates work orders
 --    mechanic:   records services, meter readings and work order progress
---    operator:   prestarts (Phase 3); can see maintenance status
+--    prestart:   prestarts only (called "operator" before); can see maintenance status
 --    viewer:     look only
 alter table public.profiles drop constraint if exists profiles_role_check;
+update public.profiles set role = 'prestart' where role = 'operator';   -- the role once called "operator" is now "prestart"
 alter table public.profiles add constraint profiles_role_check
-  check (role in ('admin','superuser','planner','supervisor','mechanic','operator','viewer'));
+  check (role in ('admin','superuser','planner','supervisor','mechanic','prestart','viewer'));
 
 create or replace function public.maint_can_work()
 returns boolean language sql stable security definer set search_path = public as $$

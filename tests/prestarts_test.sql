@@ -19,9 +19,9 @@ insert into public.profiles (id, email, role) values
   ('00000000-0000-0000-0000-0000000000a2','t-planner@test.local','planner'),
   ('00000000-0000-0000-0000-0000000000a4','t-mech@test.local','mechanic'),
   ('00000000-0000-0000-0000-0000000000a5','t-viewer@test.local','viewer'),
-  ('00000000-0000-0000-0000-0000000000a6','t-operator@test.local','operator'),
+  ('00000000-0000-0000-0000-0000000000a6','t-operator@test.local','prestart'),
   ('00000000-0000-0000-0000-0000000000a7','t-superuser@test.local','superuser'),
-  ('00000000-0000-0000-0000-0000000000a8','t-operator2@test.local','operator')
+  ('00000000-0000-0000-0000-0000000000a8','t-operator2@test.local','prestart')
 on conflict (id) do update set role = excluded.role, staff_id = null;
 insert into public.items (kind, id, data) values
   ('resource','t-mach-1','{"type":"machine","name":"TEST01","sub":"Test roller","category":"Test Rollers"}'),
@@ -74,8 +74,8 @@ set local role authenticated;
 select pg_temp.refused($$update public.profiles set role = 'admin' where id = '00000000-0000-0000-0000-0000000000a2'$$, 'superuser making someone an admin');
 select pg_temp.refused($$update public.profiles set role = 'viewer' where id = '00000000-0000-0000-0000-0000000000a1'$$, 'superuser demoting the admin');
 select pg_temp.refused($$update public.profiles set role = 'planner' where id = '00000000-0000-0000-0000-0000000000a7'$$, 'superuser demoting themselves');
-update public.profiles set role = 'operator' where id = '00000000-0000-0000-0000-0000000000a8';
-select pg_temp.ok((select role from public.profiles where id = '00000000-0000-0000-0000-0000000000a8') = 'operator', 'superuser can set other roles');
+update public.profiles set role = 'prestart' where id = '00000000-0000-0000-0000-0000000000a8';
+select pg_temp.ok((select role from public.profiles where id = '00000000-0000-0000-0000-0000000000a8') = 'prestart', 'superuser can set other roles');
 reset role;
 
 -- 2. Checklists: administrators only; saved versions never change ----------------------

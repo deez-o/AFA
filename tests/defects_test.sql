@@ -15,7 +15,7 @@ insert into public.profiles (id, email, role) values
   ('00000000-0000-0000-0000-0000000000a1','t-admin@test.local','admin'),
   ('00000000-0000-0000-0000-0000000000a3','t-super@test.local','supervisor'),
   ('00000000-0000-0000-0000-0000000000a4','t-mech@test.local','mechanic'),
-  ('00000000-0000-0000-0000-0000000000a6','t-operator@test.local','operator')
+  ('00000000-0000-0000-0000-0000000000a6','t-operator@test.local','prestart')
 on conflict (id) do update set role = excluded.role, staff_id = null;
 insert into public.items (kind, id, data) values
   ('resource','t-mach-1','{"type":"machine","name":"TEST01","sub":"Test roller","category":"Test Rollers"}'),

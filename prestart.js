@@ -469,7 +469,7 @@ function ChecklistsTab({ctx,open}){
 }
 
 /* ---------- Fleet › Logins: roles and Staff links ---------- */
-const ROLES=[['admin','Admin'],['superuser','Superuser'],['planner','Planner'],['supervisor','Supervisor'],['mechanic','Mechanic'],['operator','Prestart'],['viewer','Viewer']];
+const ROLES=[['admin','Admin'],['superuser','Superuser'],['planner','Planner'],['supervisor','Supervisor'],['mechanic','Mechanic'],['prestart','Prestart'],['viewer','Viewer']];
 /* a temporary password that's easy to read out: two words and a number */
 const TEMP_WORDS=['Asphalt','Roller','Paver','Bitumen','Gravel','Kerb','Tipper','Grader','Screed','Binder','Stone','Bobcat','Broom','Drum','Spray','Road'];
 const tempPw=()=>{const r=n=>{const a=new Uint32Array(1);crypto.getRandomValues(a);return a[0]%n};return TEMP_WORDS[r(16)]+'-'+TEMP_WORDS[r(16)]+'-'+(100+r(900))};
@@ -480,7 +480,7 @@ async function usersApi(sb,body){
   catch(e){throw new Error('No connection. Try again when you have reception.')}
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('The server said no ('+r.status+').'));return j}
 function NewLogin({ctx,people,linked,onDone,onCancel}){
-  const {sb,role}=ctx;const [f,setF]=useState(()=>({login:'',password:tempPw(),role:'operator',staff_id:''}));const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const {sb,role}=ctx;const [f,setF]=useState(()=>({login:'',password:tempPw(),role:'prestart',staff_id:''}));const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
   const go=async()=>{setErr('');if(!f.login.trim()){setErr('Enter a username, e.g. jsmith.');return}setBusy(true);
     try{const r=await usersApi(sb,{action:'create',...f});onDone({login:f.login.trim(),password:f.password,warning:r.warning})}catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
   return html`<div id="lg-new" class="px-3 py-3 border-b border-line grid gap-2" style=${{background:'var(--sunken)'}}>
@@ -506,8 +506,8 @@ function LoginsTab({ctx}){
   const people=data.resources.filter(r=>r.type==='person').sort((a,b)=>a.name.localeCompare(b.name));
   if(!rows)return html`<div class="panel p-6 text-[13px] text-muted">${err||'Loading logins…'}</div>`;
   const linked=new Map(rows.filter(r=>r.staff_id).map(r=>[r.staff_id,r.id]));const ql=q.trim().toLowerCase();
-  const rank=r=>{const i=ROLES.findIndex(([k])=>k===r.role);return i<0?99:i};   /* by role (admin first), then username */
-  const list=rows.filter(r=>!ql||[r.email,showLogin(r.email),(people.find(p=>p.id===r.staff_id)||{}).name,r.role,(ROLES.find(([k])=>k===r.role)||[])[1]].join(' ').toLowerCase().includes(ql))
+  const rank=r=>{const i=ROLES.findIndex(([k])=>k===(r.role==='operator'?'prestart':r.role));return i<0?99:i};   /* by role (admin first), then username */
+  const list=rows.filter(r=>!ql||[r.email,showLogin(r.email),(people.find(p=>p.id===r.staff_id)||{}).name,r.role,(ROLES.find(([k])=>k===(r.role==='operator'?'prestart':r.role))||[])[1]].join(' ').toLowerCase().includes(ql))
     .sort((a,b)=>rank(a)-rank(b)||showLogin(a.email).localeCompare(showLogin(b.email)));
   return html`<section class="panel flex flex-col min-h-0">
     <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
@@ -524,7 +524,7 @@ function LoginsTab({ctx}){
       <tbody>${list.map(r=>{const self=r.id===me;const lockRole=self||((r.role==='admin')&&role!=='admin');
         return html`<tr key=${r.id} class="border-t border-line" data-email=${r.email}>
           <td class="py-2 px-3 whitespace-nowrap">${showLogin(r.email)}${self&&html` <span class="text-muted">(you)</span>`}</td>
-          <td class="py-2 px-3"><select class="field w-auto lg-role" style=${fs} value=${r.role} disabled=${lockRole} title=${self?'You can’t change your own role':lockRole?'Only the admin can change this':''} onChange=${e=>save(r,{role:e.target.value})} aria-label=${'Role for '+showLogin(r.email)}>
+          <td class="py-2 px-3"><select class="field w-auto lg-role" style=${fs} value=${r.role==='operator'?'prestart':r.role} disabled=${lockRole} title=${self?'You can’t change your own role':lockRole?'Only the admin can change this':''} onChange=${e=>save(r,{role:e.target.value})} aria-label=${'Role for '+showLogin(r.email)}>
             ${ROLES.filter(([k])=>k!=='admin'||role==='admin'||r.role==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select></td>
           <td class="py-2 px-3"><select class="field w-auto lg-staff" style=${{...fs,minWidth:200}} value=${r.staff_id||''} onChange=${e=>save(r,{staff_id:e.target.value||null})} aria-label=${'Staff record for '+showLogin(r.email)}>
             <option value="">Not linked</option>${people.map(p=>html`<option key=${p.id} value=${p.id} disabled=${linked.has(p.id)&&linked.get(p.id)!==r.id}>${p.name}${linked.has(p.id)&&linked.get(p.id)!==r.id?' (linked to another login)':''}</option>`)}</select></td>
