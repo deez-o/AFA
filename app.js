@@ -3416,7 +3416,8 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
   const [p,setP]=useState(plan);const dirty=useRef(false);const pRef=useRef(p);pRef.current=p;
   const [editPast,setEditPast]=useState(false);   /* shifts before today are locked unless this is ticked */
   const [quickSetup,setQuickSetup]=useState(false);
-  const [stepsSetup,setStepsSetup]=useState(null);   /* which shift's method quick-adds are being edited */   /* editing the quick-add buttons and their default suppliers */
+  const [stepsSetup,setStepsSetup]=useState(null);
+  const [delImg,setDelImg]=useState(null);   /* picture waiting for "Remove?" to be confirmed */   /* which shift's method quick-adds are being edited */   /* editing the quick-add buttons and their default suppliers */
   useEffect(()=>{setP(plan);dirty.current=false},[plan.id]);
   /* pick up changes made elsewhere (e.g. sent to the schedule) when nothing is waiting to save */
   useEffect(()=>{if(!dirty.current)setP(plan)},[plan]);
@@ -3601,8 +3602,13 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
               <div class="flex flex-wrap gap-2">
                 ${(sp.images||[]).map(id=>{const im=planImgsOf(data).find(x=>x.id===id);return im?html`<div key=${id} class="relative w-[120px] h-[90px] rounded-md overflow-hidden border border-line bg-sunken">
                     <img src=${im.data} alt=${im.name||'Shift picture'} class="w-full h-full object-cover"/>
-                    <button type="button" class="absolute top-1 right-1 w-6 h-6 inline-flex items-center justify-center rounded bg-surface/90 text-muted hover:text-ink border border-line"
-                      onClick=${()=>{setSP(i,{images:(sp.images||[]).filter(x=>x!==id)});onDelImg(id)}} aria-label="Remove picture">${Icon.x}</button></div>`:null})}
+                    ${delImg===id
+                      ?html`<div class="absolute inset-0 flex flex-col items-center justify-center gap-1.5" style=${{background:'rgba(0,0,0,.6)'}}>
+                          <button type="button" class="px-2.5 h-7 rounded-md text-[12px] font-semibold text-white" style=${{background:'hsl(0 70% 45%)'}}
+                            onClick=${()=>{setSP(i,{images:(sp.images||[]).filter(x=>x!==id)});onDelImg(id);setDelImg(null)}} aria-label="Yes, remove this picture">Remove</button>
+                          <button type="button" class="text-[11.5px] font-medium text-white underline" onClick=${()=>setDelImg(null)}>Keep</button></div>`
+                      :html`<button type="button" class="absolute top-1 right-1 h-6 pl-1 pr-2 inline-flex items-center gap-0.5 rounded-full text-[11px] font-semibold text-white"
+                          style=${{background:'rgba(0,0,0,.65)'}} onClick=${()=>setDelImg(id)} aria-label="Remove picture" title="Remove this picture">${Icon.x} Remove</button>`}</div>`:null})}
                 <label class="relative w-[120px] h-[90px] rounded-md border-2 border-dashed border-line flex flex-col items-center justify-center gap-1 text-[12px] text-muted cursor-pointer hover:bg-sunken hover:text-ink">
                   ${Icon.plus}<span>Add picture</span>
                   <input id=${`pl-s${i}-pic`} type="file" accept="image/*" multiple class="sr-only" onChange=${e=>{holdPlanScroll();const fl=[...e.target.files];e.target.value='';e.target.blur();addPics(i,fl)}}/></label>
