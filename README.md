@@ -120,7 +120,7 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 Fleet › **Reports**: work order backlog, service compliance, prestart compliance (prestarts on the days each machine was booked), downtime, breakdowns, defects and service history. Pick the dates and category; export each to **CSV** (Excel) or a branded **PDF**. Each machine's panel has a **History PDF**.
 
 ### Notifications
-The bell gets maintenance notifications for people with Fleet & Maintenance: critical defects and restrictions, restricted machines on bookings, breakdowns and returns to service (on by default), plus prestarts missing by 9 am (9 pm for night works), work orders, and services due (switch on in Settings). **Open** goes to the machine in Fleet, or to the booking.
+The bell gets maintenance notifications for people with Fleet & Maintenance: critical defects and restrictions, restricted machines on bookings, breakdowns, returns to service, prestarts missing by 9 am (9 pm for night works), work orders, and services due. All start off: each person switches on the ones they want in Settings (top right). **Open** goes to the machine in Fleet, or to the booking.
 
 ### Working without reception
 Once FraserFlow has been opened on a phone with reception, it opens again without reception from the copy saved on that phone (a bar at the top says so; nothing can be changed except prestarts). Prestarts, their photos and signature are saved on the phone and **send themselves** when reception returns (or *Send now*), never twice. Anything the server refuses stays listed under *Waiting to send* with the reason.

@@ -2176,7 +2176,7 @@ const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking
   {id:'mservice',maint:true,label:'Services due',desc:'Services overdue or due soon (once a day).'}];
 const NOTIF_KEY=KEY+':notif-prefs';
 const NOTIF_DEFAULT={quote:false,booking:false,job:false,resource:false,lists:false,   /* roster changes: off until a person turns them on */
-  mcritical:true,mbooking:true,mbreak:true,mprestart:false,mreturn:true,mwo:false,mservice:false};   /* maintenance: the safety ones start on */
+  mcritical:false,mbooking:false,mbreak:false,mprestart:false,mreturn:false,mwo:false,mservice:false};   /* maintenance: off too until switched on in Settings */
 const MAINT_ROLES=['admin','superuser','planner','supervisor','mechanic'];
 /* maintenance notifications: events from the database feed, plus things true right now (services due, missing prestarts, restricted machines on bookings) */
 function maintNotifs(data,prefs){
