@@ -521,6 +521,13 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
     if(machineCatsOf(data).some(x=>x.toLowerCase()===c.toLowerCase())){notify&&notify(`“${c}” is already a category`);return}
     setData(d=>({...d,machineCats:[...machineCatsOf(d),c]}));setNewCat(null);notify&&notify(`Category “${c}” added`)};
   const removeCat=key=>setData(d=>({...d,machineCats:(d.machineCats||[]).filter(c=>c.toLowerCase()!==key)}));
+  /* rename a category: its machines move with it; renaming to an existing category merges the two */
+  const [catEdit,setCatEdit]=useState(null);   /* {key, value} */
+  const renameCat=()=>{const c=catEdit;if(!c)return;const nv=(c.value||'').trim();setCatEdit(null);if(!nv||nv.toLowerCase()===c.key&&machineCatsOf(data).includes(nv))return;
+    setData(d=>{const list=machineCatsOf(d);const out=[];list.forEach(x=>{const y=x.toLowerCase()===c.key?nv:x;if(!out.some(o=>o.toLowerCase()===y.toLowerCase()))out.push(y)});
+      return {...d,machineCats:out,resources:d.resources.map(r=>r.type==='machine'&&(r.category||'').trim().toLowerCase()===c.key?{...r,category:nv}:r)}});
+    if(mCol[c.key]){const m={...mCol};delete m[c.key];m[nv.toLowerCase()]=true;saveMCol(m)}
+    notify&&notify(`Category renamed to “${nv}”`)};
   const canDragM=tab==='machine'&&!q;
   const mStart=(e,kind,id,cat)=>{if(e.button!==undefined&&e.button!==0)return;e.preventDefault();e.stopPropagation();try{e.currentTarget.setPointerCapture(e.pointerId)}catch(x){}setMdrag({kind,id,cat,over:null,after:false})};
   const mMove=e=>{if(!mdrag)return;const el=document.elementFromPoint(e.clientX,e.clientY);const t=el&&el.closest(mdrag.kind==='cat'?'[data-mcat-head]':'[data-mid]');
@@ -610,13 +617,21 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
       ${(tab==='crew'?groupCrews(list).flatMap(g=>g.rows.map((r,i)=>({r,head:i===0?g:null})))
         :tab==='machine'?groupMachines(list,data,!q).flatMap(g=>g.empty?[{r:null,head:g}]:g.rows.map((r,i)=>({r,head:i===0?g:null})))
         :list.map(r=>({r,head:null}))).map(({r,head})=>{
-        const hdr=head&&html`<li key=${'h-'+head.key} class="px-2 pt-3 pb-1 flex items-center gap-2" data-mcat-head=${tab==='machine'&&head.key!=='~'?head.key:undefined}
+        let hdr=head&&html`<li key=${'h-'+head.key} class="px-2 pt-3 pb-1 flex items-center gap-2" data-mcat-head=${tab==='machine'&&head.key!=='~'?head.key:undefined}
             style=${tab==='machine'?{boxShadow:mLine('cat',head.key),opacity:mdrag&&mdrag.kind==='cat'&&mdrag.id===head.key?.45:1}:null}>
           ${canDragM&&head.key!=='~'&&mGrip('cat',head.key,null,head.label)}
           ${tab==='machine'?html`<button type="button" class="flex items-center gap-1.5 min-w-0 text-left" onClick=${()=>saveMCol({...mCol,[head.key]:!mCol[head.key]})} aria-expanded=${!mCol[head.key]} title=${mCol[head.key]?'Show these machines':'Hide these machines'}>
               <span class="text-muted inline-flex transition-transform shrink-0" style=${{transform:mCol[head.key]&&!q?'rotate(-90deg)':'none'}}>${Icon.chevD}</span>
               <span class="label truncate" style=${{color:'var(--ink)'}}>${head.label}</span></button>`
-            :html`<span class="label" style=${{color:'var(--ink)'}}>${head.label}</span>`}<span class="mono text-[11px] text-faint">${head.rows.length}</span><span class="flex-1 h-px bg-line"></span></li>`;
+            :html`<span class="label" style=${{color:'var(--ink)'}}>${head.label}</span>`}<span class="mono text-[11px] text-faint">${head.rows.length}</span><span class="flex-1 h-px bg-line"></span>
+          ${tab==='machine'&&head.key!=='~'&&html`<button type="button" class="p-0.5 rounded text-faint hover:text-ink" onClick=${()=>setCatEdit({key:head.key,value:head.label})} aria-label=${'Rename category '+head.label} title="Rename category">${Icon.pencil}</button>`}</li>`;
+        const hdrEdit=head&&tab==='machine'&&catEdit&&catEdit.key===head.key&&html`<li key=${'he-'+head.key} class="px-2 pt-3 pb-1"><div class="flex items-center gap-2" onKeyDown=${e=>{if(e.key==='Enter'){e.preventDefault();renameCat()}else if(e.key==='Escape'){e.stopPropagation();setCatEdit(null)}}}>
+            <label class="sr-only" for="mcat-rename">Category name</label>
+            <input id="mcat-rename" class="field field-sm flex-1" style=${{height:30}} value=${catEdit.value} autoFocus=${true} onInput=${e=>setCatEdit({...catEdit,value:e.target.value})}/>
+            <button id="mcat-rename-save" type="button" class="btn btn-primary" style=${{height:30}} disabled=${!catEdit.value.trim()} onClick=${renameCat}>Save</button>
+            <button type="button" class="btn btn-ghost" style=${{height:30}} onClick=${()=>setCatEdit(null)}>Cancel</button></div>
+            ${machineCatsOf(data).some(x=>x.toLowerCase()===catEdit.value.trim().toLowerCase()&&x.toLowerCase()!==catEdit.key)&&html`<div class="text-[11.5px] text-muted mt-1">That category already exists. Saving moves these machines into it.</div>`}</li>`;
+        if(hdrEdit)hdr=hdrEdit;
         if(!r)return [hdr,!mCol[head.key]&&html`<li key=${'e-'+head.key} class="px-3 py-2 flex items-center gap-2 text-[12px] text-muted">
             <span class="flex-1">No machines yet. Choose this category when adding or editing a machine.</span>
             <button type="button" class="font-medium underline underline-offset-2 hover:text-ink" onClick=${()=>removeCat(head.key)} aria-label=${'Remove category '+head.label}>Remove</button></li>`];
@@ -655,7 +670,7 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
               <input id=${'rn-sub-'+r.id} list=${r.type==='crew'?'work-types':undefined} class="field field-sm" style=${{height:30,fontSize:13}} value=${draft.sub}
                 placeholder=${r.type==='crew'?'Type of work':r.type==='person'?'Role':'Description'} onInput=${e=>setDraft({...draft,sub:e.target.value})}/>
               ${r.type==='machine'&&html`<div class="grid grid-cols-[1fr_96px] gap-1.5">
-                <input id=${'rn-cat-'+r.id} list="mach-cats" class="field field-sm" style=${{height:30,fontSize:13}} placeholder="Category" value=${draft.category||''} onInput=${e=>setDraft({...draft,category:e.target.value})} aria-label="Category"/>
+                <${Combo} id=${'rn-cat-'+r.id} className="field field-sm" style=${{height:30,fontSize:13}} placeholder="Category" label="Category" value=${draft.category||''} onChange=${v=>setDraft({...draft,category:v})} options=${machineCatsOf(data)}/>
                 <input id=${'rn-rego-'+r.id} class="field field-sm mono" style=${{height:30,fontSize:13}} placeholder="Rego" value=${draft.rego||''} onInput=${e=>setDraft({...draft,rego:e.target.value})} aria-label="Rego"/></div>`}
               ${r.type==='crew'&&html`<label class="inline-flex items-center gap-1.5 text-[12.5px] cursor-pointer pt-0.5">
                 <input id=${'rn-subbie-'+r.id} type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${!!draft.subbie} onChange=${e=>setDraft({...draft,subbie:e.target.checked})}/>
@@ -704,7 +719,7 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
       </div>
       <input id="new-sub" list=${tab==='crew'?'work-types':undefined} class="field" placeholder=${placeholders[tab][1]} value=${f.sub} onInput=${e=>setF({...f,sub:e.target.value})} aria-label="Description"/>
       ${tab==='machine'&&html`<div class="grid grid-cols-[1fr_100px] gap-2">
-        <input id="new-cat" list="mach-cats" class="field" placeholder="Category, e.g. Pavers" value=${f.category||''} onInput=${e=>setF({...f,category:e.target.value})} aria-label="Category"/>
+        <${Combo} id="new-cat" className="field" placeholder="Category, e.g. Pavers" label="Category" value=${f.category||''} onChange=${v=>setF({...f,category:v})} options=${machineCatsOf(data)}/>
         <input id="new-rego" class="field mono" placeholder="Rego" value=${f.rego||''} onInput=${e=>setF({...f,rego:e.target.value})} aria-label="Rego"/></div>`}
       <div class="flex gap-2">
         ${tab!=='crew'&&tab!=='aplant'&&html`<select id="new-crew" class="field" value=${f.crewId} onChange=${e=>setF({...f,crewId:e.target.value})} aria-label="Crew">
