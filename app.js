@@ -3121,6 +3121,19 @@ function SubWorksDialog({data,onClose,notify}){
     </div></div>`;
 }
 
+/* header "Exports" menu: the daily program and subcontractor works PDFs */
+function ExportsMenu({items}){
+  const [open,setOpen]=useState(false);const ref=useRef(null);
+  useEffect(()=>{if(!open)return;const out=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};const esc=e=>{if(e.key==='Escape')setOpen(false)};
+    document.addEventListener('pointerdown',out);window.addEventListener('keydown',esc);return()=>{document.removeEventListener('pointerdown',out);window.removeEventListener('keydown',esc)}},[open]);
+  return html`<div class="relative" ref=${ref}>
+    <button id="btn-exports" type="button" class="btn" aria-haspopup="menu" aria-expanded=${open} onClick=${()=>setOpen(!open)}>${Icon.download} Exports <span class="inline-flex transition-transform" style=${{transform:open?'rotate(180deg)':'none'}}>${Icon.chevD}</span></button>
+    ${open&&html`<div role="menu" class="panel pop absolute left-0 top-[calc(100%+6px)] z-40 w-[290px] p-1.5 grid gap-0.5" style=${{boxShadow:'0 10px 30px rgba(0,0,0,.18)'}}>
+      ${items.map(it=>html`<button key=${it.id} id=${it.id} role="menuitem" type="button" class="w-full text-left rounded-lg px-2.5 py-2 hover:bg-sunken grid gap-0.5" onClick=${()=>{setOpen(false);it.run()}}>
+        <span class="text-[13.5px] font-medium">${it.label}</span><span class="text-[12px] text-muted">${it.desc}</span></button>`)}
+    </div>`}
+  </div>`;
+}
 function DailyProgramDialog({data,onClose,notify}){
   const [day,setDay]=useState(()=>iso(addDays(TODAY,1)));
   const [incPlan,setIncPlan]=useState(true);
@@ -4566,8 +4579,8 @@ function App({boot,live}){
         ${screen==='schedule'&&(on=>html`<button id="btn-jobs" class="btn" onClick=${toggleJobs} aria-pressed=${on} aria-controls="resources-panel"
           title=${on?'Hide Jobs':'Jobs: add, edit, complete and import'}
           style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.briefcase} Jobs</button>`)(panel&&tab==='jobs')}
-        ${screen==='schedule'&&html`<button class="btn" onClick=${()=>setProgram(true)} title="Daily program PDFs for each job on a day">${Icon.download} Daily program</button>`}
-        ${screen==='schedule'&&data.resources.some(r=>r.type==='crew'&&r.subbie)&&html`<button id="btn-subworks" class="btn" onClick=${()=>setSubWorksOpen(true)} title="Upcoming works PDF for a subcontractor crew">${Icon.download} Subbie works</button>`}
+        ${screen==='schedule'&&html`<${ExportsMenu} items=${[{id:'exp-program',label:'Daily program',desc:'PDF for each job working on a day',run:()=>setProgram(true)},
+          ...(data.resources.some(r=>r.type==='crew'&&r.subbie)?[{id:'exp-subworks',label:'Subbie works',desc:'Upcoming works for a subcontractor crew',run:()=>setSubWorksOpen(true)}]:[])]}/>`}
         <div class="flex items-center gap-2 min-w-0">
           <h1 class=${'font-display font-semibold tracking-tight truncate '+(SCR.title==='FraserFlow'?'text-[24px] leading-none':'text-[20px]')}>${SCR.title==='FraserFlow'?html`Fraser<span style=${{color:'var(--accent)'}}>Flow</span>`:SCR.title}</h1>
           ${!live.canEdit&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change anything">View only</span>`}
