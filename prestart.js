@@ -506,7 +506,9 @@ function LoginsTab({ctx}){
   const people=data.resources.filter(r=>r.type==='person').sort((a,b)=>a.name.localeCompare(b.name));
   if(!rows)return html`<div class="panel p-6 text-[13px] text-muted">${err||'Loading logins…'}</div>`;
   const linked=new Map(rows.filter(r=>r.staff_id).map(r=>[r.staff_id,r.id]));const ql=q.trim().toLowerCase();
-  const list=rows.filter(r=>!ql||[r.email,showLogin(r.email),(people.find(p=>p.id===r.staff_id)||{}).name,r.role].join(' ').toLowerCase().includes(ql));
+  const rank=r=>{const i=ROLES.findIndex(([k])=>k===r.role);return i<0?99:i};   /* by role (admin first), then username */
+  const list=rows.filter(r=>!ql||[r.email,showLogin(r.email),(people.find(p=>p.id===r.staff_id)||{}).name,r.role,(ROLES.find(([k])=>k===r.role)||[])[1]].join(' ').toLowerCase().includes(ql))
+    .sort((a,b)=>rank(a)-rank(b)||showLogin(a.email).localeCompare(showLogin(b.email)));
   return html`<section class="panel flex flex-col min-h-0">
     <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
       <input id="lg-search" class="field" style=${{...fs,width:220}} placeholder="Search username, name, role" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search logins"/>
