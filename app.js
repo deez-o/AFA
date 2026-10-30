@@ -1311,7 +1311,7 @@ function AsphaltShifts({f,set,data}){
                 onClick=${()=>othersFilled?setSplitAsk(true):splitFirst()}>Split Shift 1 evenly across ${splitTo.length} shifts</button>`)}
           ${first&&empties.length>0&&!splitAsk&&html`<button type="button" class="font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${copyFirst}>Copy Shift ${tot.dates.indexOf(first)+1} to ${empties.length} empty shift${empties.length===1?'':'s'}</button>`}</div>`}
         <div id="ed-qty" tabindex="-1" class="border border-line rounded-lg overflow-hidden">
-          <div class="max-h-[340px] overflow-y-auto">
+          <div class="max-h-[55vh] overflow-y-auto">
             <div class="hidden sm:grid grid-cols-[118px_1fr] gap-2 px-2.5 py-1.5 bg-sunken border-b border-line sticky top-0 z-[1]">
               <span class="label">Shift</span>
               <div class=${'grid gap-2 '+CO}><span class="label">${seal?'Seal type':'Asphalt type'}</span><span class="label">Binder</span>${seal&&html`<span class="label">Stone</span>`}${!seal&&html`<span class="label">Tonnes</span>`}<span class="label">Area m²</span>${!seal&&html`<span class="label">Depth mm</span>`}${seal&&html`<span class="label" title="Bitumen spray rate, litres per m²">Spray L/m²</span><span class="label" title="Stone spread rate, m² per m³">Spread m²/m³</span>`}<span></span></div>
@@ -1629,7 +1629,7 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify}){
   const resName=res?res.name:'';
   const wide=f.kind==='job';
   return html`<div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
-    <form class=${'panel pop w-full flex flex-col max-h-full overflow-hidden '+(wide?'max-w-[840px]':'max-w-[500px]')} onSubmit=${submit} role="dialog" aria-modal="true" aria-labelledby="ed-title">
+    <form class=${'panel pop w-full flex flex-col max-h-full overflow-hidden '+(wide?'max-w-[1280px] sm:h-[92vh]':'max-w-[500px]')} onSubmit=${submit} role="dialog" aria-modal="true" aria-labelledby="ed-title">
       <div class="px-5 pt-5 border-b border-line">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
