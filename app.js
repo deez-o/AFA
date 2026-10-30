@@ -2748,10 +2748,11 @@ window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=
 window.addEventListener('appinstalled',()=>{installEvt=null;installSubs.forEach(f=>f())});
 const isStandalone=()=>(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;
 const isIOS=()=>/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const isMobile=()=>isIOS()||/android|mobi|tablet/i.test(navigator.userAgent);
 function useInstall(){
   const [,tick]=useState(0);
   useEffect(()=>{const s=()=>tick(x=>x+1);installSubs.add(s);return()=>{installSubs.delete(s)}},[]);
-  if(isStandalone())return null;
+  if(isStandalone()||!isMobile())return null;   /* offered on phones and tablets only, not on computers */
   if(installEvt)return {kind:'prompt',go:async()=>{const e=installEvt;installEvt=null;try{e.prompt();await e.userChoice}catch(x){}installSubs.forEach(g=>g())}};
   if(isIOS())return {kind:'ios',steps:'In Safari, tap the Share button, then “Add to Home Screen”.'};
   return null;
