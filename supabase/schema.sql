@@ -115,9 +115,13 @@ begin
 end $$;
 
 -- 4. Ideas board and suggestions ---------------------------------------------
---    Everyone signed in (viewers too) can send a suggestion. Suggestions and the
---    Ideas board are encrypted in the browser, and only administrators can change
---    or remove the Ideas board, its key, or suggestions.
+--    Only administrators can read or change the Ideas board (kind 'idea') and
+--    suggestions. Everyone signed in (viewers too) can send a suggestion.
+drop policy if exists "signed-in people read the roster" on public.items;
+create policy "signed-in people read the roster" on public.items
+  for select to authenticated
+  using (kind not in ('idea','suggestion') or public.my_role() = 'admin');
+
 drop policy if exists "everyone suggests" on public.items;
 create policy "everyone suggests" on public.items
   for insert to authenticated
@@ -126,19 +130,16 @@ create policy "everyone suggests" on public.items
 drop policy if exists "planners add" on public.items;
 create policy "planners add" on public.items
   for insert to authenticated
-  with check (public.my_role() in ('admin','planner')
-    and (public.my_role() = 'admin' or not (kind = 'setting' and id in ('ideasVault','ideasPub'))));
+  with check (public.my_role() = 'admin'
+    or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));
 
 drop policy if exists "planners change" on public.items;
 create policy "planners change" on public.items
   for update to authenticated
-  using (public.my_role() in ('admin','planner')
-    and (public.my_role() = 'admin' or not ((kind = 'setting' and id in ('ideasVault','ideasPub')) or kind = 'suggestion')))
-  with check (public.my_role() in ('admin','planner')
-    and (public.my_role() = 'admin' or not ((kind = 'setting' and id in ('ideasVault','ideasPub')) or kind = 'suggestion')));
+  using (public.my_role() = 'admin' or (public.my_role() = 'planner' and kind not in ('idea','suggestion')))
+  with check (public.my_role() = 'admin' or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));
 
 drop policy if exists "planners delete" on public.items;
 create policy "planners delete" on public.items
   for delete to authenticated
-  using (public.my_role() in ('admin','planner')
-    and (public.my_role() = 'admin' or not ((kind = 'setting' and id in ('ideasVault','ideasPub')) or kind = 'suggestion')));
+  using (public.my_role() = 'admin' or (public.my_role() = 'planner' and kind not in ('idea','suggestion')));

@@ -2254,143 +2254,88 @@ function ChangeLogDialog({data,onClose,onOpen}){
 }
 
 /* =====================================================================
-   Ideas: an admin-only board for planning what to add to FraserFlow.
-   Locked with its own password. The board is encrypted in the browser
-   (AES-GCM, key from the password with PBKDF2) and only the encrypted
-   copy is saved, so it can't be read without the password, even from
-   the database. The password can't be recovered.
+   Ideas: an admin-only board for planning what to add to FraserFlow,
+   plus suggestions anyone can send in. Ideas and suggestions are only
+   readable by administrators (database rule); everyone can add a suggestion.
    ===================================================================== */
-const VAULT_ITER=250000;
-const vB64=u=>{const a=new Uint8Array(u);let s='';for(let i=0;i<a.length;i+=0x8000)s+=String.fromCharCode.apply(null,a.subarray(i,i+0x8000));return btoa(s)};
+/* --- only used once, to move a board made with the old password lock --- */
 const vBytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 async function vaultKey(pw,salt){
   const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
-  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:VAULT_ITER,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:250000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
 }
-async function vaultSeal(key,salt,obj){const iv=crypto.getRandomValues(new Uint8Array(12));
-  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(JSON.stringify(obj)));
-  return {v:1,salt:vB64(salt),iv:vB64(iv),ct:vB64(ct)}}
 async function vaultOpen(key,vault){const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:vBytes(vault.iv)},key,vBytes(vault.ct));return JSON.parse(new TextDecoder().decode(pt))}
-
-/* suggestions from anyone: sealed with the board's public key (RSA-OAEP + AES-GCM), opened only with
-   the private key that lives inside the encrypted board */
-const RSA_ALG={name:'RSA-OAEP',hash:'SHA-256'};
-async function sealSuggestion(pubJwk,obj){
-  const pub=await crypto.subtle.importKey('jwk',pubJwk,RSA_ALG,false,['encrypt']);
-  const k=await crypto.subtle.generateKey({name:'AES-GCM',length:256},true,['encrypt']);const raw=await crypto.subtle.exportKey('raw',k);
-  const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},k,new TextEncoder().encode(JSON.stringify(obj)));
-  return {k:vB64(await crypto.subtle.encrypt({name:'RSA-OAEP'},pub,raw)),iv:vB64(iv),ct:vB64(ct)}}
-async function openSuggestion(priv,enc){
+async function openSuggestion(privJwk,enc){
+  const priv=await crypto.subtle.importKey('jwk',privJwk,{name:'RSA-OAEP',hash:'SHA-256'},false,['decrypt']);
   const raw=await crypto.subtle.decrypt({name:'RSA-OAEP'},priv,vBytes(enc.k));const k=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['decrypt']);
   return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:vBytes(enc.iv)},k,vBytes(enc.ct))))}
-const pubOfPriv=j=>({kty:j.kty,n:j.n,e:j.e,alg:j.alg,ext:true,key_ops:['encrypt']});
 
-/* anyone can suggest an idea (it lands in the Ideas inbox) */
-function SuggestDialog({data,setData,onClose,notify}){
-  const [text,setText]=useState('');const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+/* anyone can suggest an idea (it lands in the Ideas inbox, which only administrators can read) */
+function SuggestDialog({setData,onClose,notify}){
+  const [text,setText]=useState('');
   useEffect(()=>{const h=e=>{if(e.key==='Escape'){e.stopPropagation();onClose()}};window.addEventListener('keydown',h,true);return()=>window.removeEventListener('keydown',h,true)},[]);
-  const pub=data.ideasPub&&data.ideasPub.n?data.ideasPub:null;
-  const send=async e=>{e.preventDefault();const t=text.trim();if(!t)return;setBusy(true);setErr('');
-    try{const enc=await sealSuggestion(pub,{text:t,by:window.__rosterMe||'',at:Date.now()});
-      setData(d=>({...d,suggestions:[...(d.suggestions||[]),{id:'s'+uid(),at:Date.now(),enc}]}));notify&&notify('Thanks! Your suggestion was sent');onClose()}
-    catch(x){setErr('The suggestion could not be sent.')}finally{setBusy(false)}};
+  const send=e=>{e.preventDefault();const t=text.trim();if(!t)return;const now=Date.now();
+    setData(d=>({...d,suggestions:[...(d.suggestions||[]),{id:'s'+uid(),at:now,text:t,by:window.__rosterMe||''}]}));notify&&notify('Thanks! Your suggestion was sent');onClose()};
   return html`<div class="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
     <form class="panel pop w-full max-w-[480px] p-5 grid gap-3" role="dialog" aria-modal="true" aria-labelledby="sg-t" onSubmit=${send}>
       <div class="flex items-start gap-3"><div class="min-w-0 flex-1"><div id="sg-t" class="font-display text-[18px] font-semibold">Suggest an idea</div>
         <div class="text-[12.5px] text-muted">Something FraserFlow should do, or do better? Only administrators can read suggestions.</div></div>
         <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button></div>
-      ${pub?html`<textarea id="sg-text" class="field" style=${{height:'auto',minHeight:120,padding:'8px 10px',resize:'vertical',fontSize:13.5}} rows="5" autoFocus=${true}
-            placeholder="e.g. Text each crew tomorrow’s start time at 3pm" value=${text} onInput=${e=>setText(e.target.value)}></textarea>
-          ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
-          <div class="flex justify-end gap-2"><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="sg-send" type="submit" class="btn btn-primary" disabled=${busy||!text.trim()}>${busy?'Sending…':'Send suggestion'}</button></div>`
-        :html`<p class="text-[13px] text-muted">Suggestions aren’t switched on yet. An administrator needs to open the Ideas page once.</p>
-          <div class="flex justify-end"><button type="button" class="btn" onClick=${onClose}>Close</button></div>`}
+      <textarea id="sg-text" class="field" style=${{height:'auto',minHeight:120,padding:'8px 10px',resize:'vertical',fontSize:13.5}} rows="5" autoFocus=${true}
+        placeholder="e.g. Text each crew tomorrow’s start time at 3pm" value=${text} onInput=${e=>setText(e.target.value)}></textarea>
+      <div class="flex justify-end gap-2"><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="sg-send" type="submit" class="btn btn-primary" disabled=${!text.trim()}>Send suggestion</button></div>
     </form></div>`;
 }
 
 const IDEA_COLS=[['idea','Ideas','Things worth doing one day'],['planned','Planned','Decided, not started'],['doing','In progress','Being built now'],['done','Done','Shipped']];
 const IDEA_PRI={high:['High','hsl(352 70% var(--blk-l))','hsl(352 60% var(--blk-fg-l))'],med:['Medium','hsl(38 85% var(--blk-l))','hsl(30 60% var(--blk-fg-l))'],low:['Low','var(--sunken)','var(--muted)']};
-const IDEA_LOCK_MS=15*60*1000;   /* locks itself after 15 minutes without changes */
 
 function IdeasScreen({data,setData,notify}){
-  const vault=data.ideasVault&&data.ideasVault.ct?data.ideasVault:null;
-  const [key,setKey]=useState(null);const saltRef=useRef(null);const lastCt=useRef(null);
-  const [items,setItems]=useState([]);const [pw,setPw]=useState('');const [pw2,setPw2]=useState('');
-  const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
-  const [q,setQ]=useState('');const [open,setOpen]=useState(null);const [confirmDel,setConfirmDel]=useState(null);
-  const [draft,setDraft]=useState({title:'',priority:'med'});const [chg,setChg]=useState(null);
-  const dirty=useRef(false);
-  /* the board's key pair for suggestions: private half saved inside the encrypted board, public half for everyone */
-  const privJwk=useRef(null);const [priv,setPriv]=useState(null);const [inbox,setInbox]=useState({});
-  const content=xs=>({items:xs,priv:privJwk.current});
-  const useKeys=async o=>{let j=o&&o.priv;
-    if(!j){const kp=await crypto.subtle.generateKey({...RSA_ALG,modulusLength:2048,publicExponent:new Uint8Array([1,0,1])},true,['encrypt','decrypt']);
-      j=await crypto.subtle.exportKey('jwk',kp.privateKey);dirty.current=true}
-    privJwk.current=j;setPriv(await crypto.subtle.importKey('jwk',j,RSA_ALG,false,['decrypt']));
-    const pub=pubOfPriv(j);setData(d=>d.ideasPub&&d.ideasPub.n===pub.n?d:{...d,ideasPub:pub})};
-  /* read the suggestions waiting in the inbox */
-  const sugg=(data.suggestions||[]).slice().sort((a,b)=>(a.at||0)-(b.at||0));
-  useEffect(()=>{if(!priv)return;let gone=false;
-    Promise.all(sugg.map(s=>inbox[s.id]?Promise.resolve([s.id,inbox[s.id]]):openSuggestion(priv,s.enc).then(o=>[s.id,o]).catch(()=>[s.id,{bad:true}])))
-      .then(r=>{if(!gone)setInbox(Object.fromEntries(r))});return()=>{gone=true}},[priv,sugg.map(s=>s.id).join(',')]);
-  const dropSugg=id=>setData(d=>({...d,suggestions:(d.suggestions||[]).filter(x=>x.id!==id)}));
-  const takeSugg=(s,o)=>{const t=(o.text||'').trim();const first=t.split('\n')[0];const now=Date.now();
-    upd(xs=>[{id:'i'+uid(),title:first.length>90?first.slice(0,87)+'…':first,notes:`${first.length>90?t:t.split('\n').slice(1).join('\n').trim()}${first.length>90||t.includes('\n')?'\n\n':''}Suggested by ${o.by||'someone'} on ${new Date(o.at||s.at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})}`,status:'idea',priority:'med',created:now,updated:now},...xs]);
-    dropSugg(s.id);notify&&notify('Added to Ideas')};
-  const lock=msg=>{setKey(null);setItems([]);setPriv(null);privJwk.current=null;setInbox({});saltRef.current=null;lastCt.current=null;setOpen(null);setPw('');setPw2('');setChg(null);if(msg)setErr(msg)};
-  /* save (encrypted) a moment after the last change */
-  useEffect(()=>{if(!key||!dirty.current)return;const t=setTimeout(async()=>{dirty.current=false;
-      try{const v=await vaultSeal(key,saltRef.current,content(items));lastCt.current=v.ct;setData(d=>({...d,ideasVault:v}))}catch(e){notify&&notify('The ideas board could not be saved.')}},500);
-    return()=>clearTimeout(t)},[items,key]);
-  /* lock after a while with no changes */
-  useEffect(()=>{if(!key)return;const t=setTimeout(()=>lock('Locked after 15 minutes without changes.'),IDEA_LOCK_MS);return()=>clearTimeout(t)},[items,key]);
-  /* changed by another administrator: open the new copy (or lock if the password was changed) */
-  useEffect(()=>{if(!key||!vault||vault.ct===lastCt.current||dirty.current)return;
-    vaultOpen(key,vault).then(o=>{lastCt.current=vault.ct;saltRef.current=vBytes(vault.salt);if(o&&o.priv)privJwk.current=o.priv;setItems((o&&o.items)||[])}).catch(()=>lock('The password was changed. Enter the new one.'))},[vault&&vault.ct]);
-  const upd=fn=>{dirty.current=true;setItems(fn)};
-
-  const create=async e=>{e.preventDefault();setErr('');
-    if(pw.length<8){setErr('Use at least 8 characters.');return}if(pw!==pw2){setErr('The two passwords don’t match.');return}
-    setBusy(true);try{const salt=crypto.getRandomValues(new Uint8Array(16));const k=await vaultKey(pw,salt);await useKeys(null);dirty.current=false;const v=await vaultSeal(k,salt,content([]));
-      saltRef.current=salt;lastCt.current=v.ct;setData(d=>({...d,ideasVault:v}));setItems([]);setKey(k);setPw('');setPw2('');notify&&notify('Ideas board created and locked with your password')}
-    catch(x){setErr('This browser can’t encrypt the board. Open FraserFlow over https in an up-to-date browser.')}finally{setBusy(false)}};
-  const unlock=async e=>{e.preventDefault();setErr('');if(!pw)return;setBusy(true);
-    try{const salt=vBytes(vault.salt);const k=await vaultKey(pw,salt);const o=await vaultOpen(k,vault);saltRef.current=salt;lastCt.current=vault.ct;await useKeys(o);setItems((o&&o.items)||[]);setKey(k);setPw('')}
-    catch(x){setErr('That password is wrong.')}finally{setBusy(false)}};
-  const changePw=async e=>{e.preventDefault();setErr('');const a=chg.a||'',b=chg.b||'';
-    if(a.length<8){setErr('Use at least 8 characters.');return}if(a!==b){setErr('The two passwords don’t match.');return}
-    setBusy(true);try{const salt=crypto.getRandomValues(new Uint8Array(16));const k=await vaultKey(a,salt);const v=await vaultSeal(k,salt,content(items));
-      saltRef.current=salt;lastCt.current=v.ct;setData(d=>({...d,ideasVault:v}));setKey(k);setChg(null);notify&&notify('Ideas password changed')}
-    catch(x){setErr('The password could not be changed.')}finally{setBusy(false)}};
-
+  const items=data.ideas||[];
+  const [q,setQ]=useState('');const [open,setOpen]=useState(null);const [ed,setEd]=useState(null);const [confirmDel,setConfirmDel]=useState(null);
+  const [draft,setDraft]=useState({title:'',priority:'med'});
+  const setItems=fn=>setData(d=>({...d,ideas:fn(d.ideas||[])}));
+  const patch=(id,p)=>setItems(xs=>xs.map(x=>x.id===id?{...x,...p,updated:Date.now()}:x));
   const add=e=>{e.preventDefault();const t=draft.title.trim();if(!t)return;const now=Date.now();
-    upd(xs=>[{id:'i'+uid(),title:t,notes:'',status:'idea',priority:draft.priority,created:now,updated:now},...xs]);setDraft({...draft,title:''})};
-  const patch=(id,p)=>upd(xs=>xs.map(x=>x.id===id?{...x,...p,updated:Date.now()}:x));
+    setItems(xs=>[{id:'i'+uid(),title:t,notes:'',status:'idea',priority:draft.priority,created:now,updated:now},...xs]);setDraft({...draft,title:''})};
   const move=(it,dir)=>{const i=IDEA_COLS.findIndex(c=>c[0]===it.status);const n=IDEA_COLS[i+dir];if(n)patch(it.id,{status:n[0]})};
+  const startEdit=it=>{setOpen(it.id);setEd({title:it.title,notes:it.notes||''});setConfirmDel(null)};
+  const finishEdit=it=>{if(ed&&(ed.title.trim()!==it.title||ed.notes!==(it.notes||'')))patch(it.id,{title:ed.title.trim()||it.title,notes:ed.notes});setOpen(null);setEd(null);setConfirmDel(null)};
+  /* suggestions inbox */
+  const sugg=(data.suggestions||[]).filter(s=>s.text).slice().sort((a,b)=>(a.at||0)-(b.at||0));
+  const dropSugg=id=>setData(d=>({...d,suggestions:(d.suggestions||[]).filter(x=>x.id!==id)}));
+  const takeSugg=s=>{const t=(s.text||'').trim();const first=t.split('\n')[0];const now=Date.now();const long=first.length>90;
+    setData(d=>({...d,ideas:[{id:'i'+uid(),title:long?first.slice(0,87)+'…':first,
+      notes:`${long?t:t.split('\n').slice(1).join('\n').trim()}${long||t.includes('\n')?'\n\n':''}Suggested by ${s.by||'someone'} on ${new Date(s.at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})}`,
+      status:'idea',priority:'med',created:now,updated:now},...(d.ideas||[])],suggestions:(d.suggestions||[]).filter(x=>x.id!==s.id)}));notify&&notify('Added to Ideas')};
 
-  const lockIcon=svg(html`<rect x="3" y="7" width="10" height="7" rx="1.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2" stroke="currentColor" stroke-width="1.5" fill="none"/>`,15);
-  const gate=(title,sub,onSubmit,fields,btn)=>html`<div class="flex-1 min-h-0 flex items-start justify-center pt-10 px-4">
-    <form class="panel w-full max-w-[400px] p-6 grid gap-3" onSubmit=${onSubmit}>
-      <div class="flex items-center gap-2"><span class="inline-flex w-9 h-9 rounded-lg items-center justify-center" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>${lockIcon}</span>
-        <div class="font-display text-[18px] font-semibold">${title}</div></div>
-      <p class="text-[13px] text-muted">${sub}</p>
-      ${fields}
+  /* a board made with the old password lock: open it once with its password and move it across */
+  const vault=data.ideasVault&&data.ideasVault.ct?data.ideasVault:null;
+  const [pw,setPw]=useState('');const [err,setErr]=useState('');const [busy,setBusy]=useState(false);const [discard,setDiscard]=useState(false);
+  const migrate=async e=>{e.preventDefault();setErr('');if(!pw)return;setBusy(true);
+    try{const o=await vaultOpen(await vaultKey(pw,vBytes(vault.salt)),vault);
+      const old=await Promise.all((data.suggestions||[]).filter(s=>s.enc).map(s=>o.priv?openSuggestion(o.priv,s.enc).then(x=>({id:s.id,at:x.at||s.at,text:x.text,by:x.by||''})).catch(()=>null):null));
+      setData(d=>({...d,ideas:[...(o.items||[]),...(d.ideas||[])],suggestions:[...(d.suggestions||[]).filter(s=>!s.enc),...old.filter(Boolean)],ideasVault:null,ideasPub:null}));
+      notify&&notify('Ideas board moved. No password needed from now on')}
+    catch(x){setErr('That password is wrong.')}finally{setBusy(false)}};
+  if(vault)return html`<div class="flex-1 min-h-0 flex items-start justify-center pt-10 px-4">
+    <form class="panel w-full max-w-[420px] p-6 grid gap-3" onSubmit=${migrate}>
+      <div class="font-display text-[18px] font-semibold">Move your Ideas board</div>
+      <p class="text-[13px] text-muted">Ideas no longer needs its own password: administrators can open it straight away. Enter the old password once to bring your existing board across.</p>
+      <label class="grid gap-1"><span class="label">Old Ideas password</span><input id="ideas-pw" type="password" autocomplete="current-password" class="field" value=${pw} onInput=${e=>setPw(e.target.value)} autoFocus=${true}/></label>
       ${err&&html`<div id="ideas-err" role="alert" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
-      <button id="ideas-go" type="submit" class="btn btn-primary justify-center" disabled=${busy}>${busy?'Working…':btn}</button>
+      <button id="ideas-go" type="submit" class="btn btn-primary justify-center" disabled=${busy}>${busy?'Moving…':'Move my board'}</button>
+      <div class="text-[12.5px] text-muted">Forgotten it? ${discard
+        ?html`<span>This deletes the old board for good. <button type="button" class="font-semibold underline" style=${{color:'var(--bad)'}} onClick=${()=>{setData(d=>({...d,ideasVault:null,ideasPub:null,suggestions:(d.suggestions||[]).filter(s=>!s.enc)}));setDiscard(false)}}>Delete it</button> · <button type="button" class="underline" onClick=${()=>setDiscard(false)}>Keep</button></span>`
+        :html`<button type="button" class="underline hover:text-ink" onClick=${()=>setDiscard(true)}>Start a new board instead</button>`}</div>
     </form></div>`;
-
-  if(!vault&&!key)return gate('Set up the Ideas board','Only administrators see this page. Choose a password for it: the board is encrypted with it, so nobody can read it without the password. Keep it somewhere safe, because it can’t be recovered.',create,
-    html`<label class="grid gap-1"><span class="label">Password</span><input id="ideas-pw" type="password" autocomplete="new-password" class="field" value=${pw} onInput=${e=>setPw(e.target.value)} autoFocus=${true}/></label>
-      <label class="grid gap-1"><span class="label">Password again</span><input id="ideas-pw2" type="password" autocomplete="new-password" class="field" value=${pw2} onInput=${e=>setPw2(e.target.value)}/></label>`,'Create the board');
-  if(!key)return gate('Ideas board is locked','Enter the Ideas password to open it.',unlock,
-    html`<label class="grid gap-1"><span class="label">Password</span><input id="ideas-pw" type="password" autocomplete="current-password" class="field" value=${pw} onInput=${e=>setPw(e.target.value)} autoFocus=${true}/></label>`,'Unlock');
 
   const ql=q.trim().toLowerCase();
   const shown=items.filter(x=>!ql||(x.title+' '+(x.notes||'')).toLowerCase().includes(ql));
   const pri={high:0,med:1,low:2};
   return html`<div class="flex-1 min-h-0 flex flex-col gap-3">
     <section class="panel px-4 py-3 flex flex-wrap items-center gap-3">
-      <span class="inline-flex items-center gap-1.5 text-[12.5px] text-muted" title="Encrypted with the Ideas password">${lockIcon} Only administrators · encrypted</span>
+      <span class="text-[12.5px] text-muted">Only administrators can see this page</span>
       <form class="flex flex-1 min-w-[300px] items-center gap-2" onSubmit=${add}>
         <input id="idea-new" class="field flex-1 min-w-0" placeholder="Add an idea for FraserFlow…" value=${draft.title} onInput=${e=>setDraft({...draft,title:e.target.value})} aria-label="New idea"/>
         <select id="idea-new-pri" class="field shrink-0" style=${{width:110}} value=${draft.priority} onChange=${e=>setDraft({...draft,priority:e.target.value})} aria-label="Priority">
@@ -2398,45 +2343,36 @@ function IdeasScreen({data,setData,notify}){
         <button id="idea-add" class="btn btn-primary shrink-0" type="submit" disabled=${!draft.title.trim()}>${Icon.plus} Add</button>
       </form>
       <input id="idea-search" class="field shrink-0" style=${{width:200}} placeholder="Search ideas" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search ideas"/>
-      <button id="idea-chpw" type="button" class="btn" onClick=${()=>{setErr('');setChg(chg?null:{a:'',b:''})}}>${Icon.key} Password</button>
-      <button id="idea-lock" type="button" class="btn" onClick=${()=>lock('')}>${lockIcon} Lock</button>
     </section>
-    ${chg&&html`<form class="panel px-4 py-3 flex flex-wrap items-end gap-3" onSubmit=${changePw}>
-      <label class="grid gap-1"><span class="label">New password</span><input id="idea-npw" type="password" autocomplete="new-password" class="field" value=${chg.a} onInput=${e=>setChg({...chg,a:e.target.value})}/></label>
-      <label class="grid gap-1"><span class="label">New password again</span><input id="idea-npw2" type="password" autocomplete="new-password" class="field" value=${chg.b} onInput=${e=>setChg({...chg,b:e.target.value})}/></label>
-      <button type="submit" class="btn btn-primary" disabled=${busy}>Change password</button><button type="button" class="btn btn-ghost" onClick=${()=>setChg(null)}>Cancel</button>
-      ${err&&html`<span class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}
-      <span class="w-full text-[12px] text-muted">Other administrators will need the new password. It can’t be recovered if it’s lost.</span></form>`}
     ${sugg.length>0&&html`<section id="ideas-inbox" class="panel px-4 py-3 grid gap-2" aria-label="Suggestions">
       <div class="flex items-baseline gap-2"><span class="font-display text-[15px] font-semibold">Suggestions</span><span class="mono text-[12px] text-faint">${sugg.length}</span>
         <span class="text-[12px] text-muted">Sent in by people using FraserFlow. Add the good ones to the board.</span></div>
       <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-        ${sugg.map(s=>{const o=inbox[s.id];return html`<article key=${s.id} class="rounded-lg border border-line bg-surface p-2.5 grid gap-1.5">
-          ${!o?html`<span class="text-[12.5px] text-faint">Opening…</span>`:o.bad?html`<span class="text-[12.5px] text-muted">This suggestion can’t be opened (it was sealed with an older key).</span>`
-            :html`<span class="text-[13px] whitespace-pre-line">${o.text}</span><span class="text-[11.5px] text-faint">${o.by||'Someone'} · ${new Date(o.at||s.at).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</span>`}
-          <div class="flex items-center gap-2">${o&&!o.bad&&html`<button type="button" class="btn btn-primary" style=${{height:28,fontSize:12.5}} onClick=${()=>takeSugg(s,o)}>${Icon.plus} Add to Ideas</button>`}
-            <button type="button" class="btn btn-ghost" style=${{height:28,fontSize:12.5}} onClick=${()=>dropSugg(s.id)}>Dismiss</button></div></article>`})}
+        ${sugg.map(s=>html`<article key=${s.id} class="rounded-lg border border-line bg-surface p-2.5 grid gap-1.5">
+          <span class="text-[13px] whitespace-pre-line">${s.text}</span><span class="text-[11.5px] text-faint">${s.by||'Someone'} · ${new Date(s.at).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</span>
+          <div class="flex items-center gap-2"><button type="button" class="btn btn-primary" style=${{height:28,fontSize:12.5}} onClick=${()=>takeSugg(s)}>${Icon.plus} Add to Ideas</button>
+            <button type="button" class="btn btn-ghost" style=${{height:28,fontSize:12.5}} onClick=${()=>dropSugg(s.id)}>Dismiss</button></div></article>`)}
       </div></section>`}
     <div class="flex-1 min-h-0 overflow-auto">
       <div class="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4 min-h-full items-start">
-        ${IDEA_COLS.map(([st,label,hint],ci)=>{const col=shown.filter(x=>x.status===st).sort((a,b)=>(pri[a.priority]??1)-(pri[b.priority]??1)||b.updated-a.updated);
+        ${IDEA_COLS.map(([st,label,hint],ci)=>{const col=shown.filter(x=>x.status===st).sort((a,b)=>(pri[a.priority]??1)-(pri[b.priority]??1)||(b.updated||0)-(a.updated||0));
           return html`<section key=${st} id=${'ideas-col-'+st} class="panel p-3 grid gap-2 content-start" aria-label=${label}>
             <div class="flex items-baseline gap-2 px-1"><span class="font-display text-[15px] font-semibold">${label}</span><span class="mono text-[12px] text-faint">${col.length}</span>
               <span class="flex-1"></span><span class="text-[11.5px] text-faint">${hint}</span></div>
             ${col.length===0&&html`<div class="text-[12.5px] text-faint px-1 py-3">${ql?'Nothing matches.':st==='idea'?'Add your first idea above.':'Nothing here yet.'}</div>`}
-            ${col.map(it=>{const P=IDEA_PRI[it.priority]||IDEA_PRI.med;const ed=open===it.id;
-              return html`<article key=${it.id} class="rounded-lg border border-line bg-surface p-2.5 grid gap-1.5" style=${ed?{boxShadow:'0 0 0 1.5px var(--accent)'}:null}>
-                ${ed?html`<input class="field field-sm font-semibold" aria-label="Title" value=${it.title} onInput=${e=>patch(it.id,{title:e.target.value})}/>
-                    <textarea class="field" style=${{height:'auto',minHeight:90,padding:'8px 10px',resize:'vertical',fontSize:13}} rows="4" placeholder="Details, why it matters, how it should work…" aria-label="Notes" value=${it.notes||''} onInput=${e=>patch(it.id,{notes:e.target.value})}></textarea>
+            ${col.map(it=>{const P=IDEA_PRI[it.priority]||IDEA_PRI.med;const isEd=open===it.id&&ed;
+              return html`<article key=${it.id} class="rounded-lg border border-line bg-surface p-2.5 grid gap-1.5" style=${isEd?{boxShadow:'0 0 0 1.5px var(--accent)'}:null}>
+                ${isEd?html`<input class="field field-sm font-semibold" aria-label="Title" value=${ed.title} onInput=${e=>setEd({...ed,title:e.target.value})}/>
+                    <textarea class="field" style=${{height:'auto',minHeight:90,padding:'8px 10px',resize:'vertical',fontSize:13}} rows="4" placeholder="Details, why it matters, how it should work…" aria-label="Notes" value=${ed.notes} onInput=${e=>setEd({...ed,notes:e.target.value})}></textarea>
                     <div class="flex flex-wrap items-center gap-2">
                       <select class="field field-sm w-auto" aria-label="Status" value=${it.status} onChange=${e=>patch(it.id,{status:e.target.value})}>${IDEA_COLS.map(c=>html`<option key=${c[0]} value=${c[0]}>${c[1]}</option>`)}</select>
                       <select class="field field-sm w-auto" aria-label="Priority" value=${it.priority} onChange=${e=>patch(it.id,{priority:e.target.value})}>${Object.entries(IDEA_PRI).map(([k,v])=>html`<option key=${k} value=${k}>${v[0]} priority</option>`)}</select>
                       <span class="flex-1"></span>
                       ${confirmDel===it.id
-                        ?html`<button type="button" class="text-[12px] font-semibold" style=${{color:'var(--bad)'}} onClick=${()=>{upd(xs=>xs.filter(x=>x.id!==it.id));setConfirmDel(null);setOpen(null)}}>Delete</button><button type="button" class="text-[12px] text-muted" onClick=${()=>setConfirmDel(null)}>Keep</button>`
+                        ?html`<button type="button" class="text-[12px] font-semibold" style=${{color:'var(--bad)'}} onClick=${()=>{setItems(xs=>xs.filter(x=>x.id!==it.id));setConfirmDel(null);setOpen(null);setEd(null)}}>Delete</button><button type="button" class="text-[12px] text-muted" onClick=${()=>setConfirmDel(null)}>Keep</button>`
                         :html`<button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>setConfirmDel(it.id)}>Delete</button>`}
-                      <button type="button" class="btn btn-primary" style=${{height:28}} onClick=${()=>{setOpen(null);setConfirmDel(null)}}>Done</button></div>`
-                  :html`<button type="button" class="text-left grid gap-1" onClick=${()=>{setOpen(it.id);setConfirmDel(null)}} title="Edit">
+                      <button type="button" class="btn btn-primary" style=${{height:28}} onClick=${()=>finishEdit(it)}>Done</button></div>`
+                  :html`<button type="button" class="text-left grid gap-1" onClick=${()=>{const cur=items.find(x=>x.id===open);if(cur)finishEdit(cur);startEdit(it)}} title="Edit">
                       <span class="font-medium text-[13.5px] leading-snug">${it.title}</span>
                       ${it.notes&&html`<span class="text-[12.5px] text-muted whitespace-pre-line" style=${{display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical',overflow:'hidden'}}>${it.notes}</span>`}</button>
                     <div class="flex items-center gap-1.5">
@@ -2457,7 +2393,7 @@ const SCREENS={
   schedule:{label:'Schedule',title:'FraserFlow',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
-  ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',admin:true},   /* administrators only, password locked */
+  ideas:{label:'Ideas',title:'Ideas for FraserFlow',only:[],legend:[],head:'',admin:true},   /* administrators only (button hidden for everyone else) */
 };
 const NAV_ICON={
   ideas:svg(html`<path d="M8 1.8a4.4 4.4 0 00-2.6 7.9c.5.4.8 1 .8 1.6v.4h3.6v-.4c0-.6.3-1.2.8-1.6A4.4 4.4 0 008 1.8z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M6.4 13.6h3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,20),
@@ -3800,7 +3736,7 @@ function App({boot,live}){
     ${machImport&&html`<${MachineImport} data=${data} setData=${setData} onClose=${()=>setMachImport(false)} notify=${setToast}/>`}
     ${logOpen&&html`<${ChangeLogDialog} data=${data} onClose=${()=>setLogOpen(false)} onOpen=${b=>setEditing(b)}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
-    ${suggest&&html`<${SuggestDialog} data=${data} setData=${setData} notify=${setToast} onClose=${()=>setSuggest(false)}/>`}
+    ${suggest&&html`<${SuggestDialog} setData=${setData} notify=${setToast} onClose=${()=>setSuggest(false)}/>`}
     ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)}/>`}
     ${toast&&html`<div class="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-[13px] font-medium pop" role="status"
        style=${{bottom:'calc(20px + env(safe-area-inset-bottom, 0px))',background:'var(--ink)',color:'var(--surface)'}}>${toast}</div>`}
@@ -3815,7 +3751,7 @@ function App({boot,live}){
    Per-person choices stay in this browser: hidden rows, section order,
    view length, dark mode and notification settings.
    ===================================================================== */
-const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion']];
+const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion'],['ideas','idea']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
 const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault','ideasPub'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
@@ -3828,7 +3764,7 @@ const storedForm=(coll,item,i)=>{const {visible,pos,...rest}=item;return ORDERED
 /* rows from Supabase -> the app's data object */
 function rowsToData(rows){
   const hidden=new Set(readLocal(LOCAL_HIDDEN,[]));
-  const d={resources:[],jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[]};
+  const d={resources:[],jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[],ideas:[]};
   rows.forEach(r=>{
     if(r.kind==='setting'){if(SETTINGS.includes(r.id))d[r.id]=r.data&&r.data.value;return}
     const c=COLLECTIONS.find(([,k])=>k===r.kind);if(!c)return;
@@ -3882,6 +3818,9 @@ async function fetchAllRows(sb){
   return all;
 }
 async function pushRows(sb,{upserts,deletes}){
+  /* suggestions are only added (anyone may add one, but only administrators can read them back), so they go in as plain inserts */
+  const sug=upserts.filter(x=>x.kind==='suggestion');upserts=upserts.filter(x=>x.kind!=='suggestion');
+  if(sug.length){const {error}=await sb.from('items').insert(sug);if(error&&error.code!=='23505')throw error}
   for(let i=0;i<upserts.length;i+=500){const {error}=await sb.from('items').upsert(upserts.slice(i,i+500));if(error)throw error}
   const byKind={};deletes.forEach(x=>{(byKind[x.kind]=byKind[x.kind]||[]).push(x.id)});
   for(const [kind,ids] of Object.entries(byKind)){const {error}=await sb.from('items').delete().eq('kind',kind).in('id',ids);if(error)throw error}
@@ -3890,7 +3829,7 @@ async function pushRows(sb,{upserts,deletes}){
 /* data for a brand-new, empty roster */
 function emptyRoster(){
   return {resources:[{id:'a'+uid(),type:'aplant',name:'Asphalt plant',sub:'Main plant',hue:8,visible:true}],
-    jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},programLocs:[...PROGRAM_LOCATIONS],locColors:{...DEFAULT_LOC_COLORS},
+    jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[],ideas:[],mixTypes:[...ASPHALT_TYPES],binders:[...BINDERS],mixRap:{},mixBinder:{...DEFAULT_MIX_BINDER},sealTypes:[...SEAL_TYPES],sealBinder:{},sealBinders:[...SEAL_BINDERS],truckCos:[...DEFAULT_TRUCKS],subCos:[...DEFAULT_SUBS],subServices:{...DEFAULT_SUB_SERVICES},programLocs:[...PROGRAM_LOCATIONS],locColors:{...DEFAULT_LOC_COLORS},
     sectionOrder:[...DEFAULT_ORDER],orderV:2};
 }
 
