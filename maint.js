@@ -469,19 +469,18 @@ function Dashboard({ctx,open}){
         <span class="hidden lg:inline-flex items-center gap-3 text-[11.5px] text-muted">${Object.entries(ST).map(([k,v])=>html`<span key=${k} class="inline-flex items-center gap-1">${stDot(k,8)} ${v[0]}</span>`)}</span>
       </div>
       <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="fl-table">
-        <thead><tr class="text-left">${['','Machine','Category','Rego','Crew','Meters','Avg / year','Next service','Work orders & defects',...(ctx.db.p3?['Last prestart']:[])].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+        <thead><tr class="text-left">${['','Machine','Category','Rego','Meters','Avg / year','Next service','Work orders & defects',...(ctx.db.p3?['Last prestart']:[])].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
         <tbody>${list.map(a=>html`<tr key=${a.m.id} class="border-t border-line cursor-pointer hover:bg-sunken" tabindex="0" onClick=${()=>open({k:'asset',id:a.m.id})} onKeyDown=${e=>{if(e.key==='Enter')open({k:'asset',id:a.m.id})}}>
             <td class="py-2 pl-3 pr-1">${stDot(a.status)}</td>
             <td class="py-2 px-3"><div class="font-medium">${a.m.name}</div><div class="text-[11.5px] text-muted truncate max-w-[240px]">${a.m.sub||''}${a.p&&(a.p.make||a.p.model)?' · '+[a.p.make,a.p.model].filter(Boolean).join(' '):''}</div></td>
             <td class="py-2 px-3 whitespace-nowrap">${machCatOf(a.m)||html`<span class="text-faint">–</span>`}</td>
             <td class="py-2 px-3 mono whitespace-nowrap">${a.m.rego||html`<span class="text-faint">–</span>`}</td>
-            <td class="py-2 px-3 whitespace-nowrap">${a.crew?a.crew.name:html`<span class="text-faint">–</span>`}</td>
             <td class="py-2 px-3 mono tnum whitespace-nowrap">${meterTxt(a)}</td>
             <td class="py-2 px-3 tnum whitespace-nowrap fl-use" title=${(['hours','km'].map(k=>a.use[k]&&`${k==='hours'?'Hours':'Km'}: ${fmtN(+a.use[k].from.value)} → ${fmtN(+a.use[k].to.value)} over ${Math.round(a.use[k].days)} days (${a.use[k].n} readings)`).filter(Boolean).join('\n'))||'Needs two readings at least 30 days apart'}>${(a.use.hours||a.use.km)?useTxt(a):html`<span class="text-faint">–</span>`}</td>
             <td class="py-2 px-3">${a.next?html`<div class="whitespace-nowrap">${a.next.plan.name} ${planChip(a.next.state)}</div><div class="text-[11.5px] text-muted whitespace-nowrap">${a.next.first.dueTxt} · ${a.next.first.leftTxt}</div>`:html`<span class="text-faint">${a.plans.length?'Last service not set':'No plan'}</span>`}</td>
             <td class="py-2 px-3 whitespace-nowrap">${a.open.length?html`<span class="font-medium">${a.open.length} open</span>`:html`<span class="text-faint">–</span>`}${a.restr.length?html` <span class="text-[10.5px] font-bold uppercase tracking-wide px-1 rounded" style=${{background:'hsl(0 72% 47%)',color:'#fff'}} title="Restricted: must not be used">Restricted</span>`:a.defects.length?html` <span class="text-[11.5px] text-muted">· ${a.defects.length} defect${a.defects.length===1?'':'s'}</span>`:''}</td>
             ${ctx.db.p3&&html`<td class="py-2 px-3 whitespace-nowrap">${a.ps?html`<span class="inline-flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full" style=${{background:window.FFP?window.FFP.RES[a.ps.result][1]:'var(--muted)'}}></span>${localDay(a.ps.submitted_at)===M.today?new Date(a.ps.submitted_at).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'}):fmtShort(new Date(a.ps.submitted_at))}${a.ps.result!=='pass'?html` <span class="text-[11px] font-semibold" style=${{color:window.FFP?window.FFP.RES[a.ps.result][1]:''}}>${a.ps.result==='unsafe'?'do not operate':a.ps.failed+' failed'}</span>`:''}</span>`:html`<span class="text-faint">–</span>`}</td>`}</tr>`)}
-          ${!list.length&&html`<tr><td colspan="10" class="px-3 py-6 text-center text-muted">No machines match.</td></tr>`}</tbody></table></div>
+          ${!list.length&&html`<tr><td colspan="9" class="px-3 py-6 text-center text-muted">No machines match.</td></tr>`}</tbody></table></div>
     </section>
   </div>`;
 }

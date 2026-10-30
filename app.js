@@ -2715,8 +2715,25 @@ function NavRail({screen,go,isAdmin,role,data,badge={}}){
   </nav>`;
 }
 /* ---------- settings menu: dark mode, notifications and (live) account ---------- */
-function SwitchRow({id,label,desc,on,onChange}){
-  return html`<label class="flex items-start gap-3 px-2 py-2 rounded-lg hover:bg-sunken cursor-pointer">
+/* notifications bundled in groups: one switch for the whole group (shows how many are on), opened to pick them one by one */
+function NotifGroup({id,label,types,prefs,setPrefs}){
+  const [open,setOpen]=useState(false);const n=types.filter(t=>prefs[t.id]).length;const all=n===types.length;
+  const setAll=v=>{const p={...prefs};types.forEach(t=>p[t.id]=v);setPrefs(p)};
+  return html`<div class="rounded-lg" id=${'ng-'+id}>
+    <div class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-sunken">
+      <button type="button" class="min-w-0 flex-1 flex items-center gap-1.5 text-left ng-open" aria-expanded=${open} onClick=${()=>setOpen(!open)}>
+        <span class="text-muted inline-flex transition-transform" style=${{transform:open?'rotate(0deg)':'rotate(-90deg)'}}>${Icon.chevD}</span>
+        <span class="min-w-0"><span class="block text-[13px] font-medium">${label}</span><span class="block text-[12px] text-muted ng-count">${n===0?'All off':all?'All on':`${n} of ${types.length} on`}</span></span></button>
+      <span class="relative inline-flex shrink-0" title=${all?'Turn all off':'Turn all on'}>
+        <input id=${'ng-all-'+id} type="checkbox" role="switch" aria-label=${label+' notifications'} class="peer sr-only" checked=${n>0} onChange=${()=>setAll(!all)}/>
+        <span class="w-9 h-5 rounded-full transition-colors cursor-pointer" style=${{background:all?'var(--accent)':n?'color-mix(in srgb, var(--accent) 45%, var(--line-strong))':'var(--line-strong)'}} onClick=${()=>setAll(!all)}></span>
+        <span class="absolute top-0.5 w-4 h-4 rounded-full transition-all pointer-events-none" style=${{left:all?18:n?10:2,background:'var(--surface)',boxShadow:'0 1px 2px rgba(0,0,0,.2)'}}></span></span>
+    </div>
+    ${open&&html`<div class="ml-5 border-l border-line pl-1">${types.map(t=>html`<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} title=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}</div>`}
+  </div>`;
+}
+function SwitchRow({id,label,desc,title,on,onChange}){
+  return html`<label class="flex items-start gap-3 px-2 py-2 rounded-lg hover:bg-sunken cursor-pointer" title=${title||''}>
     <span class="min-w-0 flex-1"><span class="block text-[13px] font-medium">${label}</span>${desc&&html`<span class="block text-[12px] text-muted">${desc}</span>`}</span>
     <span class="relative inline-flex shrink-0 mt-0.5">
       <input id=${id} type="checkbox" role="switch" class="peer sr-only" checked=${!!on} onChange=${e=>onChange(e.target.checked)}/>
@@ -2767,7 +2784,8 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,ma
           ${inst.kind==='prompt'?html`<button id="set-install" class="w-full flex items-start gap-2 px-2 py-2 rounded-lg hover:bg-sunken text-left" onClick=${()=>{setOpen(false);inst.go()}}>${Icon.download}<span><span class="block text-[13px] font-medium">Install FraserFlow as an app</span><span class="block text-[12px] text-muted">Opens from its own icon, full screen</span></span></button>`
             :html`<div class="px-2 py-2 flex items-start gap-2">${Icon.download}<span><span class="block text-[13px] font-medium">Add FraserFlow to your home screen</span><span class="block text-[12px] text-muted">${inst.steps}</span></span></div>`}`}
         ${!simple&&sectionLabel('Notifications')}
-        ${!simple&&NOTIF_TYPES.filter(t=>maint||!t.maint).map((t,i,all)=>html`${t.maint&&!all[i-1].maint&&html`<div key=${'mh'+i} class="label px-2 pt-2 pb-1" style=${{color:'var(--muted)'}}>Maintenance</div>`}<${SwitchRow} key=${t.id} id=${'np-'+t.id} label=${t.label} desc=${t.desc} on=${!!prefs[t.id]} onChange=${v=>setPrefs({...prefs,[t.id]:v})}/>`)}
+        ${!simple&&html`<${NotifGroup} id="schedule" label="Schedule" types=${NOTIF_TYPES.filter(t=>!t.maint)} prefs=${prefs} setPrefs=${setPrefs}/>`}
+        ${!simple&&maint&&html`<${NotifGroup} id="maint" label="Fleet & Maintenance" types=${NOTIF_TYPES.filter(t=>t.maint)} prefs=${prefs} setPrefs=${setPrefs}/>`}
         ${preview&&html`${sectionLabel('Features in progress')}
           <div class="px-2 pb-1 text-[12px] text-muted">Only you see these until you release them. Then everyone whose role allows it sees them.</div>
           ${Object.entries(SCREENS).filter(([,s])=>s.preview).map(([k,s])=>html`<${SwitchRow} key=${k} id=${'pv-'+k} label=${'Release '+s.title} desc=${preview.list.includes(k)?'In progress: only you can see it':'Released to everyone with access'}
