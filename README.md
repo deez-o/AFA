@@ -93,7 +93,7 @@ Servicing, meter readings, work orders and breakdowns for the machines on the ro
 | `planner` | Edit | View |
 | `supervisor` | View | Record work, verify & close work orders |
 | `mechanic` | View | Record services, readings and work order progress |
-| `operator` | Prestarts only (once Prestarts is released; until then, View) | Prestarts |
+| `operator` (shown as **Prestart**) | Prestarts only (once Prestarts is released; until then, View) | Prestarts |
 | `viewer` | View | None |
 
 **Ideas** is for the `admin` only, never superusers.

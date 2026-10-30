@@ -469,7 +469,7 @@ function ChecklistsTab({ctx,open}){
 }
 
 /* ---------- Fleet › Logins: roles and Staff links ---------- */
-const ROLES=[['admin','Admin'],['superuser','Superuser'],['planner','Planner'],['supervisor','Supervisor'],['mechanic','Mechanic'],['operator','Operator'],['viewer','Viewer']];
+const ROLES=[['admin','Admin'],['superuser','Superuser'],['planner','Planner'],['supervisor','Supervisor'],['mechanic','Mechanic'],['operator','Prestart'],['viewer','Viewer']];
 /* a temporary password that's easy to read out: two words and a number */
 const TEMP_WORDS=['Asphalt','Roller','Paver','Bitumen','Gravel','Kerb','Tipper','Grader','Screed','Binder','Stone','Bobcat','Broom','Drum','Spray','Road'];
 const tempPw=()=>{const r=n=>{const a=new Uint32Array(1);crypto.getRandomValues(a);return a[0]%n};return TEMP_WORDS[r(16)]+'-'+TEMP_WORDS[r(16)]+'-'+(100+r(900))};
