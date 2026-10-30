@@ -4911,7 +4911,7 @@ function App({boot,live}){
   const [anchor,setAnchor]=useState(()=>mondayOf(TODAY));
   const [editing,setEditing]=useState(null);
   const [drawer,setDrawer]=useState(false);
-  const [panel,setPanel]=useState(()=>{try{return localStorage.getItem(KEY+':panel')!=='hidden'}catch(e){return true}});
+  const [panel,setPanel]=useState(false);   /* the Settings panel starts closed every time FraserFlow opens */
   useEffect(()=>{try{localStorage.setItem(KEY+':panel',panel?'shown':'hidden')}catch(e){}},[panel]);
   const [tab,setTab]=useState('crew');
   /* the side panel shows either Settings (crews, mixes, trucks…) or Jobs; each header button opens its own view and closes it when pressed again */
