@@ -1169,6 +1169,11 @@ const sealIsTwoCoat=(d,type)=>{const m=sealTwoCoatOf(d);const t=String(type||'')
 const sealBinderOf=d=>d&&d.sealBinder&&typeof d.sealBinder==='object'?d.sealBinder:{};
 /* Pavetech jobs are booked as a 6 man or 9 man crew */
 const isPavetech=r=>!!r&&r.type==='crew'&&/pavetech/i.test(r.name||'');
+/* the phone number last used for a supervisor, so it fills in by itself */
+const superPhoneOf=(d,name)=>{const n=(name||'').trim().toLowerCase();if(!n)return '';
+  const hit=[...(d.blocks||[]),...(d.plans||[])].filter(x=>(x.supervisor||'').trim().toLowerCase()===n&&(x.supervisorPhone||'').trim()).pop();return hit?hit.supervisorPhone.trim():''};
+/* when the supervisor changes, swap in their phone unless one was typed in by hand */
+const nextSuperPhone=(d,oldName,phone,newName)=>!(phone||'').trim()||phone===superPhoneOf(d,oldName)?(superPhoneOf(d,newName)||''):phone;
 const isSealCrew=r=>!!r&&r.type==='crew'&&workKey(r.sub).includes('seal');
 const binderForProduct=(d,crew,type)=>{if(!isSealCrew(crew))return binderForMix(d,type);
   const m=sealBinderOf(d);const t=(type||'').trim();const k=Object.keys(m).find(x=>x.toLowerCase()===t.toLowerCase());return k?m[k]:''};
@@ -1479,13 +1484,11 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
             <label class="grid gap-1"><span class="label">Project number</span>
               <input id="ed-project" class="field mono" placeholder="e.g. 402313" value=${f.projectNo??(data.jobs.find(j=>j.id===f.jobId)?.projectNo||'')} onInput=${e=>set({projectNo:e.target.value})}/></label>
           </div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label class="grid gap-1"><span class="label">Supervisor</span>
-              <${Combo} id="ed-super" className="field" label="Supervisor" placeholder="Name" value=${f.supervisor||''} onChange=${v=>set({supervisor:v})} options=${data.resources.filter(r=>r.type==='person').map(p=>p.name)}/></label>
-            <label class="grid gap-1"><span class="label">Site contact</span>
-              <input id="ed-contact" class="field" placeholder="Name" value=${f.siteContact||''} onInput=${e=>set({siteContact:e.target.value})}/></label>
-            <label class="grid gap-1"><span class="label">Contact phone</span>
-              <input id="ed-phone" class="field mono" type="tel" placeholder="04xx xxx xxx" value=${f.sitePhone||''} onInput=${e=>set({sitePhone:e.target.value})}/></label>
+              <${Combo} id="ed-super" className="field" label="Supervisor" placeholder="Name" value=${f.supervisor||''} onChange=${v=>set({supervisor:v,supervisorPhone:nextSuperPhone(data,f.supervisor,f.supervisorPhone,v)})} options=${data.resources.filter(r=>r.type==='person').map(p=>p.name)}/></label>
+            <label class="grid gap-1"><span class="label">Supervisor phone</span>
+              <input id="ed-phone" class="field mono" type="tel" placeholder="04xx xxx xxx" value=${f.supervisorPhone||''} onInput=${e=>set({supervisorPhone:e.target.value})}/></label>
 
           </div>
           <label class="grid gap-1"><span class="label">Site address</span>
@@ -1587,7 +1590,7 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify}){
     else{out.jobId=out.jobId||data.jobs[0]?.id||'__new';out.shift=out.shift||'day';out.plantIds=out.plantIds||[];out.address=(out.address||'').trim();out.quoteNo=(out.quoteNo||'').trim();if(!out.quoteNo)delete out.quoteNo;
       if(out.projectNo===undefined){const pj=data.jobs.find(j=>j.id===out.jobId)?.projectNo;if(pj)out.projectNo=pj}
       out.projectNo=(out.projectNo||'').trim();if(!out.projectNo)delete out.projectNo;out.notes=(out.notes||'').trim();if(!out.notes)delete out.notes;
-      ['supervisor','siteContact','sitePhone'].forEach(k=>{out[k]=(out[k]||'').trim();if(!out[k])delete out[k]})}
+      ['supervisor','supervisorPhone'].forEach(k=>{out[k]=(out[k]||'').trim();if(!out[k])delete out[k]});delete out.siteContact;delete out.sitePhone}
     /* keep every shift's figures (including dates now outside the range); drop only fully empty rows */
     /* only mixes typed under "Other…" join the company list; removed mixes stay removed */
     const sealSave=out.kind==='job'&&isSealCrew(data.resources.find(r=>r.id===out.resourceId));
@@ -2129,7 +2132,7 @@ function bookingDiff(a,b,p,x,rname,jname,when){
   if((p.crewSize||'')!==(x.crewSize||''))ch('Crew size',p.crewSize?p.crewSize+' man':'',x.crewSize?x.crewSize+' man':'');
   if(!!p.sapEntered!==!!x.sapEntered)ch('Entered into SAP',p.sapEntered?'Yes':'No',x.sapEntered?'Yes':'No');
   if(!!p.creditIssue!==!!x.creditIssue)ch('Credit issue',p.creditIssue?'Yes':'No',x.creditIssue?'Yes':'No');
-  [['address','Site address'],['projectNo','Project number'],['quoteNo','Quote number'],['supervisor','Supervisor'],['siteContact','Site contact'],['sitePhone','Contact phone'],['title','Label'],['maintShift','Maintenance shift'],['notes','Notes']]
+  [['address','Site address'],['projectNo','Project number'],['quoteNo','Quote number'],['supervisor','Supervisor'],['supervisorPhone','Supervisor phone'],['title','Label'],['maintShift','Maintenance shift'],['notes','Notes']]
     .forEach(([f,l])=>{if((p[f]||'')!==(x[f]||''))ch(l,cut(p[f]),cut(x[f]))});
   const pa=p.plantIds||[],pb=x.plantIds||[];
   const add=pb.filter(i=>!pa.includes(i)).map(i=>rname(b,i)),rem=pa.filter(i=>!pb.includes(i)).map(i=>rname(a,i));
@@ -2874,7 +2877,7 @@ function drawProgram(doc,data,{b,k,crewId}){
   cell(140,5,60,6,longD,{fill:AFA_DARK,color:[255,255,255],bold:true,size:7.5,border:false});
   const rh=5.4;let ry=11.5;
   [['SHIFT :',b.shift==='night'?'NIGHT':'DAY',{bold:true}],['SHIFT No :',idx>=0?`${idx+1} OF ${dates.length}`:'',{bold:true}],
-   ['PROJECT No :',b.projectNo||job.projectNo||'',{bold:true,color:AFA_RED}],['SITE CONTACT :',(b.siteContact||'').trim(),{bold:true}],['',(b.sitePhone||'').trim(),{bold:true}]]
+   ['PROJECT No :',b.projectNo||job.projectNo||'',{bold:true,color:AFA_RED}],['SUPERVISOR PH :',(()=>{const nm=pick('supervisor');return (b.supervisor||'').trim()?(b.supervisorPhone||'').trim()||superPhoneOf(data,nm):(sib.find(x=>(x.supervisor||'').trim()===nm&&(x.supervisorPhone||'').trim())||{}).supervisorPhone||superPhoneOf(data,nm)})(),{bold:true}]]
     .forEach(([l,v,o])=>{cell(140,ry,22,rh,l,{border:false,align:'right',size:6.8,color:[70,70,70]});cell(162,ry,38,rh,v,o);ry+=rh});
   let my=16;
   [['CLIENT:',job.customer||''],['PROJECT LOCATION:',b.address||job.address||job.name],['JOB:',job.name],['SUPERVISOR:',pick('supervisor')],['QUOTE No:',b.quoteNo||'']]
@@ -3217,6 +3220,9 @@ const spTruck=(p,sp)=>(sp&&sp.trucking)||(p&&p.trucking)||{};
 const spRounds=(p,sp)=>{const tr=spTruck(p,sp);const pr=num(tr.perRound);const st=((sp&&sp.lines)||[]).reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);return pr&&st?Math.ceil(st/pr*10)/10:0};
 /* pictures for a shift: stored on their own (planImgs), shrunk to keep the roster light */
 const planImgsOf=d=>(d&&d.planImgs)||[];
+/* keep the plan where it is while a picture is being added (the file picker and the save would otherwise jump it) */
+const holdPlanScroll=()=>{const el=document.getElementById('pl-scroll');const top=el?el.scrollTop:0,wy=window.scrollY;let n=0;
+  const tick=()=>{const e=document.getElementById('pl-scroll');if(e&&Math.abs(e.scrollTop-top)>2)e.scrollTop=top;if(Math.abs(window.scrollY-wy)>2)window.scrollTo(0,wy);if(++n<30)requestAnimationFrame(tick)};requestAnimationFrame(tick)};
 /* seal crew per shift: {on, onSite, area, type, binder} (older plans had one "product" box, read as the seal type); booked for the seal section's AFA crew unless another is picked */
 const spSeal=sp=>!!(sp&&sp.seal&&sp.seal.on);
 const sealCrewsOf=d=>d.resources.filter(isSealCrew);
@@ -3300,7 +3306,7 @@ function applyPlan(d,p){
     const subs=[...(p.jobSubs||[]),...(sp.subs||[])].filter(subHas).map(s=>({name:(s.name||'').trim(),info:(s.info||'').trim(),time:s.time||p.crewOnSite||''}));
     sd[k]={...q,lines:lines.length?lines:linesOnly(q),...(subs.length?{subs}:{}),...(p.crewOnSite?{start:p.crewOnSite}:{})}});
   const b={...old,plantIds:[...(p.machineIds||[])],shiftData:sd,planId:p.id,...((p.address||'').trim()?{address:p.address.trim()}:{})};
-  [['quoteNo',p.quoteNo],['projectNo',p.projectNo],['supervisor',p.supervisor],['siteContact',p.siteContact],['sitePhone',p.sitePhone]].forEach(([k,v])=>{v=(v||'').trim();if(v)b[k]=v});
+  [['quoteNo',p.quoteNo],['projectNo',p.projectNo],['supervisor',p.supervisor],['supervisorPhone',p.supervisorPhone]].forEach(([k,v])=>{v=(v||'').trim();if(v)b[k]=v});
   let blocks=d.blocks.map(x=>x.id===old.id?b:x);
   /* seal crew shifts: a one-shift booking for each shift that needs the seal crew (updated, not duplicated, when sent again) */
   const sp0=sealPlanOf(d,p);const sc=sp0.crew;let sealN=0,sealKept=0;
@@ -3313,7 +3319,7 @@ function applyPlan(d,p){
       blocks=blocks.map(x=>x.id===ex.id?{...x,shiftData:{...(x.shiftData||{}),[k]:nq}}:x);sealKept++;return}
     const nb={...(ex||{id:uid(),kind:'job',title:'',plantIds:[]}),resourceId:sc.id,jobId:old.jobId,start:k,end:k,shift:old.shift||'day',planSealOf:p.id,planId:p.id,
       weekendShifts:true,satShift:true,sunShift:true,friShift:true,shiftData:{[k]:{...q,...(line?{lines:line}:{}),...(sl.onSite?{start:sl.onSite}:{})}}};
-    ['address','quoteNo','projectNo','supervisor','siteContact','sitePhone'].forEach(f=>{if(b[f])nb[f]=b[f]});
+    ['address','quoteNo','projectNo','supervisor','supervisorPhone'].forEach(f=>{if(b[f])nb[f]=b[f]});
     if(ex)blocks=blocks.map(x=>x.id===ex.id?nb:x);else blocks=[...blocks,nb];sealN++});
   const plans=plansOf(d).map(x=>x.id===p.id?{...p,jobId:old.jobId,status:'scheduled',appliedAt:Date.now()}:x);
   return {data:{...d,blocks,plans},bookingId:b.id,created:false,sealN,sealKept,sealCrew:sc&&sc.name};
@@ -3436,7 +3442,7 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
   const bLabel=b=>{const j=data.jobs.find(x=>x.id===b.jobId);const c=data.resources.find(r=>r.id===b.resourceId);return `${j?jobLabel(j):'Job'} · ${c?c.name:''} · ${fmtShort(parse(b.start))}${b.end!==b.start?'–'+fmtShort(parse(b.end)):''}${b.shift==='night'?' (night)':''}`};
   const pickBooking=id=>{const b=data.blocks.find(x=>x.id===id);if(!b){set({bookingId:''});return}const j=data.jobs.find(x=>x.id===b.jobId)||{};
     set(x=>({bookingId:b.id,jobId:b.jobId,crewId:b.resourceId,title:x.title||j.name||'',jobName:j.name||'',customer:j.customer||'',address:x.address||b.address||j.address||'',
-      quoteNo:x.quoteNo||b.quoteNo||'',projectNo:x.projectNo||b.projectNo||j.projectNo||'',supervisor:x.supervisor||b.supervisor||'',siteContact:x.siteContact||b.siteContact||'',sitePhone:x.sitePhone||b.sitePhone||'',
+      quoteNo:x.quoteNo||b.quoteNo||'',projectNo:x.projectNo||b.projectNo||j.projectNo||'',supervisor:x.supervisor||b.supervisor||'',supervisorPhone:x.supervisorPhone||b.supervisorPhone||superPhoneOf(data,x.supervisor||b.supervisor)||'',
       machineIds:(x.machineIds||[]).length?x.machineIds:[...(b.plantIds||[])]}))};
   const fs={height:32,fontSize:13};const fsm={height:30,fontSize:13};
   /* crew start: the plan's on-site time, else the start time on the booking's first shift */
@@ -3448,7 +3454,7 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
   const totals=new Map();sps.forEach(sp=>(sp.lines||[]).filter(lineHas).forEach(l=>{const k=mixLabel(l);const t=totals.get(k)||{t:0,a:0};t.t+=planTonnes(l);t.a+=num(l.area);totals.set(k,t)}));
   const totalT=[...totals.values()].reduce((a,v)=>a+v.t,0);
   const setTr=(i,patch)=>setSP(i,{trucking:{...spTruck(p,sps[i]),...patch}});
-  const addPics=async(i,files)=>{for(const f of [...(files||[])]){try{const r=await shrinkImage(f);const img={id:'img'+uid(),planId:p.id,name:f.name||'',...r};onAddImg(img);
+  const addPics=async(i,files)=>{for(const f of [...(files||[])]){try{const r=await shrinkImage(f);const img={id:'img'+uid(),planId:p.id,name:f.name||'',...r};holdPlanScroll();onAddImg(img);
       set(x=>{const arr=[...(x.shiftPlans||[])];while(arr.length<=i)arr.push({lines:[{}]});arr[i]={...arr[i],images:[...(arr[i].images||[]),img.id]};return {shiftPlans:arr}})}catch(e){alert(e.message||'Couldn’t add that picture.')}}};
   const toggleIn=(arr,v)=>arr.includes(v)?arr.filter(x=>x!==v):[...arr,v];
   const machines=data.resources.filter(r=>r.type==='machine');const picked=new Set(p.machineIds||[]);
@@ -3513,9 +3519,8 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
       <div class="h-px bg-line"></div>
       <div class="grid gap-3 sm:grid-cols-3">
         <label class="grid gap-1"><span class="label">Supervisor</span>
-          <${Combo} id="pl-super" className="field" style=${fs} label="Supervisor" value=${p.supervisor||''} onChange=${v=>set({supervisor:v})} options=${data.resources.filter(r=>r.type==='person').map(x=>x.name)}/></label>
-        <label class="grid gap-1"><span class="label">Site contact</span><input id="pl-contact" class="field" style=${fs} value=${p.siteContact||''} onInput=${e=>set({siteContact:e.target.value})}/></label>
-        <label class="grid gap-1"><span class="label">Contact phone</span><input id="pl-phone" type="tel" class="field mono" style=${fs} value=${p.sitePhone||''} onInput=${e=>set({sitePhone:e.target.value})}/></label>
+          <${Combo} id="pl-super" className="field" style=${fs} label="Supervisor" value=${p.supervisor||''} onChange=${v=>set(x=>({supervisor:v,supervisorPhone:nextSuperPhone(data,x.supervisor,x.supervisorPhone,v)}))} options=${data.resources.filter(r=>r.type==='person').map(x=>x.name)}/></label>
+        <label class="grid gap-1"><span class="label">Supervisor phone</span><input id="pl-phone" type="tel" class="field mono" style=${fs} placeholder="04xx xxx xxx" value=${p.supervisorPhone||''} onInput=${e=>set({supervisorPhone:e.target.value})}/></label>
         <label class="grid gap-1"><span class="label">Site UHF channel</span><input id="pl-uhf" class="field mono" style=${fs} placeholder="e.g. 12" value=${p.uhf||''} onInput=${e=>set({uhf:e.target.value})}/></label>
         <label class="grid gap-1"><span class="label">Asphalt supplied from</span>
           <select id="pl-supply" class="field" style=${fs} value=${p.supply||'AFA'} onChange=${e=>set({supply:e.target.value})}>
@@ -3598,9 +3603,9 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
                     <img src=${im.data} alt=${im.name||'Shift picture'} class="w-full h-full object-cover"/>
                     <button type="button" class="absolute top-1 right-1 w-6 h-6 inline-flex items-center justify-center rounded bg-surface/90 text-muted hover:text-ink border border-line"
                       onClick=${()=>{setSP(i,{images:(sp.images||[]).filter(x=>x!==id)});onDelImg(id)}} aria-label="Remove picture">${Icon.x}</button></div>`:null})}
-                <label class="w-[120px] h-[90px] rounded-md border-2 border-dashed border-line flex flex-col items-center justify-center gap-1 text-[12px] text-muted cursor-pointer hover:bg-sunken hover:text-ink">
+                <label class="relative w-[120px] h-[90px] rounded-md border-2 border-dashed border-line flex flex-col items-center justify-center gap-1 text-[12px] text-muted cursor-pointer hover:bg-sunken hover:text-ink">
                   ${Icon.plus}<span>Add picture</span>
-                  <input id=${`pl-s${i}-pic`} type="file" accept="image/*" multiple class="sr-only" onChange=${e=>{const fl=[...e.target.files];e.target.value='';addPics(i,fl)}}/></label>
+                  <input id=${`pl-s${i}-pic`} type="file" accept="image/*" multiple class="sr-only" onChange=${e=>{holdPlanScroll();const fl=[...e.target.files];e.target.value='';e.target.blur();addPics(i,fl)}}/></label>
               </div>
               <span class="text-[11.5px] text-faint">Marked-up maps, photos of the site… They go on the plan PDF under this ${night?'night':'shift'}.</span></div>
             <label class="grid gap-1"><span class="label">Method / notes for the crew</span>
@@ -3717,7 +3722,7 @@ function PlanningScreen({data,setData,notify,onOpenBooking}){
             <span class="text-[11px] font-semibold" style=${{color:sc}}>${sl}</span></button></li>`})}
       </ul>
     </aside>
-    <div class="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1">
+    <div id="pl-scroll" class="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1">
       ${!cur?html`<div class="panel p-8 text-center grid gap-3 place-items-center">
           <div class="font-display text-[18px] font-semibold">Job planning</div>
           <p class="text-[13px] text-muted max-w-[520px]">Fill in the site inspection and the method for a job: site details and map pins, asphalt and profiling for each shift, the machines, trucking and subcontractors needed, and the safety checks. Send it to the schedule to create or update the crew’s booking, then print the plan as a PDF for the crew.</p>
@@ -3795,7 +3800,7 @@ async function buildPlanPdf(data,p,opt={}){
   kv([['Job',job?jobLabel(job):[p.customer,p.jobName].filter(Boolean).join(' - ')],['Client',p.customer||(job&&job.customer)],['Job location',p.address],['Access to site',p.access],
       ['Quote / project',[p.quoteNo&&`Quote ${p.quoteNo}`,p.projectNo&&`Project ${p.projectNo}`].filter(Boolean).join(' · ')],
       ['Crew',crew&&crew.name],['Shifts',dates.length?`${dates.length} ${night?'night':'day'} shift${dates.length===1?'':'s'}: ${dates.map(k=>`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`).join(', ')}`:''],
-      ['Crew on site',fmtTime(p.crewOnSite)],['Supervisor',p.supervisor],['Site contact',[p.siteContact,p.sitePhone].filter(Boolean).join(' · ')],['Site UHF channel',p.uhf],
+      ['Crew on site',fmtTime(p.crewOnSite)],['Supervisor',[p.supervisor,p.supervisorPhone].filter(Boolean).join(' · ')],['Site UHF channel',p.uhf],
       ['Site induction',p.induction?'Required':'Not required'],['Asphalt supply',p.supply==='AFA'||!p.supply?'AFA asphalt plant':`${p.supply} (exbin)`],
       ['PPE',[...(p.ppe||[]),p.ppeOther].filter(Boolean).join(', ')]]);
   if((p.pins||[]).length){head('Locations');(p.pins||[]).forEach(pin=>{room(5);font(8.5,true);doc.text(clean(pin.label||pinType(pin.type).label),M,y+3.5);
@@ -3848,8 +3853,8 @@ function PlanViewDialog({data,plan,onClose,onOpenPlan,notify}){
         <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button>
       </div>
       <div class="overflow-y-auto p-5 grid gap-5">
-        <div class="grid gap-1.5">${row('Job location',p.address)}${row('Access to site',p.access)}${row('Crew on site',fmtTime(p.crewOnSite))}${row('Supervisor',p.supervisor)}
-          ${row('Site contact',[p.siteContact,p.sitePhone].filter(Boolean).join(' · '))}${row('UHF channel',p.uhf)}${row('Site induction',p.induction?'Required':'')}${row('PPE',[...(p.ppe||[]),p.ppeOther].filter(Boolean).join(', '))}</div>
+        <div class="grid gap-1.5">${row('Job location',p.address)}${row('Access to site',p.access)}${row('Crew on site',fmtTime(p.crewOnSite))}${row('Supervisor',[p.supervisor,p.supervisorPhone].filter(Boolean).join(' · '))}
+          ${row('UHF channel',p.uhf)}${row('Site induction',p.induction?'Required':'')}${row('PPE',[...(p.ppe||[]),p.ppeOther].filter(Boolean).join(', '))}</div>
         ${(p.pins||[]).length>0&&html`<${PlanMap} pins=${p.pins} readOnly=${true} height=${300} onChange=${()=>{}}/>`}
         <div class="grid gap-2"><div class="font-display text-[15px] font-semibold">Shift by shift</div>
           ${sps.map((sp,i)=>{const st=(sp.lines||[]).reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);const subs=[...(p.jobSubs||[]),...(sp.subs||[])].filter(subHas);
