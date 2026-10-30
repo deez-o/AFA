@@ -34,6 +34,9 @@ drop trigger if exists items_no_restricted_machines on public.items;
 create trigger items_no_restricted_machines before insert or update on public.items
   for each row when (new.kind in ('block','plan')) execute function public.items_no_restricted_machines();
 
+-- a service plan can cover several machine categories (also added by service_intervals.sql)
+alter table public.service_plans add column if not exists categories text[];
+
 -- 2. What the planner should know about each machine ------------------------------------------
 --    service: 'overdue' or 'soon', worked out the same way as the Fleet dashboard
 --    (by hours, km or days from the last service on each plan; whichever comes first)
@@ -55,7 +58,8 @@ with m as (
          case when sp.every_km is not null and c.mt <> 'hours' and l.km is not null and c.kms is not null then l.km + sp.every_km - c.kms end as left_km, sp.warn_km,
          case when sp.every_days is not null then (l.done_on + sp.every_days) - (now() at time zone 'Australia/Brisbane')::date end as left_d, sp.warn_days
     from cur c
-    join public.service_plans sp on sp.active and (sp.asset_id = c.asset_id or (sp.category is not null and lower(btrim(sp.category)) = c.cat))
+    join public.service_plans sp on sp.active and (sp.asset_id = c.asset_id or (sp.category is not null and (lower(btrim(sp.category)) = c.cat
+                                                   or exists (select 1 from unnest(coalesce(sp.categories, '{}'::text[])) x where lower(btrim(x)) = c.cat))))
     cross join lateral (select r.done_on, r.hours, r.km from public.service_records r where r.asset_id = c.asset_id and r.plan_id = sp.id
                         order by r.done_on desc, r.created_at desc limit 1) l
 ), svc as (
