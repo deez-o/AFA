@@ -911,16 +911,16 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
           const span=it.e-it.s+1;
           const compact=(view===30&&span<3)||(view===60&&span<5)||(view===14&&span<2);
           const night=(it.b.kind==='job'||it.b.kind==='onjob')&&it.b.shift==='night';
-          const v=it.b.virtual;
+          const v=it.b.virtual;const pend=!!it.b.pending;
           const vTip=v?(it.b.cover?`Covering a shift for ${data.resources.find(c=>c.id===it.b.crewId)?.name||'another crew'}\n`:`${data.jobs.find(j=>j.id===it.b.jobId)?.name||'Job'} · ${data.resources.find(c=>c.id===it.b.crewId)?.name||''}\n`):'';
           const dragging=preview&&preview.id===it.b.id;
-          return html`<div key=${it.b.id} class=${'blk'+(dragging?' dragging':'')} role="button" tabindex="0" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
+          return html`<div key=${it.b.id} class=${'blk'+(dragging?' dragging':'')+(pend?' blk-pending':'')} role="button" tabindex="0" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
             style=${{...blockStyle(it.b,data),top:10+it.lane*32,left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
               borderTopLeftRadius:it.cutL?0:6,borderBottomLeftRadius:it.cutL?0:6,borderTopRightRadius:it.cutR?0:6,borderBottomRightRadius:it.cutR?0:6,
               justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined}}
             title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.crewSize?`\n${it.b.crewSize} man crew`:''}${it.b.kind==='job'&&it.b.inductionReq?(it.b.inductionDone?'\nSite induction: paperwork sent':'\nSite induction required: paperwork not sent'):''}${it.b.kind==='job'&&!it.b.sapEntered?'\nNot entered into SAP':''}${it.b.kind==='job'&&it.b.creditIssue?'\nCredit issue':''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
-            onPointerDown=${e=>v?e.stopPropagation():startDrag(e,it.b)}
-            onClick=${v?()=>onEdit(it.b.parent):undefined}
+            onPointerDown=${e=>v||pend?e.stopPropagation():startDrag(e,it.b)}
+            onClick=${v?()=>onEdit(it.b.parent):pend?()=>onEdit(it.b):undefined}
             onKeyDown=${e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onEdit(v?it.b.parent:it.b)}
               else if(!v&&e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){e.preventDefault();nudge(it.b,e.key==='ArrowLeft'?-1:1)}}}>
             ${(it.b.kind==='job'||it.b.kind==='onjob')&&days.slice(it.s,it.e+1).map((d,i)=>{const src=it.b.kind==='onjob'?it.b.parent:it.b;
@@ -940,8 +940,8 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
               :html`<span class="t">${title}</span>`}
             ${!compact&&span>=2&&view===7&&html`<span class="ml-auto mono text-[10.5px] opacity-70 shrink-0">${span}d</span>`}
             ${it.cutR&&html`<span aria-hidden="true" class=${compact?'':'ml-auto'}>›</span>`}
-            ${!v&&!it.cutL&&html`<span class="blk-edge blk-edge-l" aria-hidden="true" title="Drag to change the start date" onPointerDown=${e=>startDrag(e,it.b,'start')} onClick=${e=>e.stopPropagation()}></span>`}
-            ${!v&&!it.cutR&&html`<span class="blk-edge blk-edge-r" aria-hidden="true" title="Drag to extend or shorten" onPointerDown=${e=>startDrag(e,it.b,'end')} onClick=${e=>e.stopPropagation()}></span>`}
+            ${!v&&!pend&&!readOnly&&!it.cutL&&html`<span class="blk-edge blk-edge-l" aria-hidden="true" title="Drag to change the start date" onPointerDown=${e=>startDrag(e,it.b,'start')} onClick=${e=>e.stopPropagation()}></span>`}
+            ${!v&&!pend&&!readOnly&&!it.cutR&&html`<span class="blk-edge blk-edge-r" aria-hidden="true" title="Drag to extend or shorten" onPointerDown=${e=>startDrag(e,it.b,'end')} onClick=${e=>e.stopPropagation()}></span>`}
           </div>`;})}
         ${clashes.map(c=>html`<div key=${'c'+c.i} class="absolute top-1 bottom-1 z-[4] rounded-md pointer-events-none"
             style=${{left:`calc(${c.i/N*100}% + 1px)`,width:`calc(${100/N}% - 2px)`,boxShadow:'inset 0 0 0 2px hsl(0 75% var(--blk-edge-l))',
@@ -2683,7 +2683,7 @@ const screenOK0=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=r
   return (!s.admin||admin)&&(!s.roles||s.roles.includes(role))&&(!s.preview||role==='admin'||!previewOf(d).includes(k))};
 /* operators only see Prestarts, once it is released to them */
 const screenOK=(k,role,d)=>screenOK0(k,role,d)&&!(role==='prestart'&&k!=='prestarts'&&k!=='qa'&&screenOK0('prestarts',role,d))
-  &&!(role==='supervisor'&&!['schedule','prestarts','qa'].includes(k))   /* supervisors: the schedule, prestarts and site QA */
+  &&!(role==='supervisor'&&!['schedule','staff','prestarts','qa'].includes(k))   /* supervisors: the schedule, the leave calendar, prestarts and site QA */
   &&k!=='machines';   /* machines are managed and booked in Fleet (Fleet › Machines and Calendar); the old Machines screen is gone */
 /* Fleet's sections; the Calendar is the machines' schedule board */
 const FLEET_TABS=[['dash','Dashboard'],['mc','Machines'],['cal','Calendar'],['wo','Work orders'],['df','Defects'],['plans','Service plans'],['ps','Prestarts'],['cl','Checklists'],['rp','Reports']];
@@ -4759,6 +4759,61 @@ function removeSampleData(d){
    ===================================================================== */
 const LEAVE_KINDS=['leave','sick','rdo','training'];
 /* leave figures for the Staff screen's top bar: away today, away this week (Mon–Sun), starting in the next 4 weeks */
+/* leave requests (supabase/leave_requests.sql): supervisors put leave in; an administrator or superuser approves it onto the calendar */
+const LEAVE_DECIDERS=['admin','superuser'];
+function useLeaveRequests(live,on){
+  const [list,setList]=useState([]);const [ok,setOk]=useState(true);
+  const load=async()=>{if(!on)return;try{const since=new Date(Date.now()-30*864e5).toISOString();
+      const {data:r,error}=await live.sb.from('leave_requests').select('*');if(error)throw error;
+      setList((r||[]).filter(x=>x.status==='pending'||(x.decided_at&&x.decided_at>=since)));setOk(true)}catch(e){setOk(false)}};
+  useEffect(()=>{if(!on)return;load();let ch=null,t=null;try{ch=live.sb.channel('leave-'+uid()).on('postgres_changes',{event:'*',schema:'public',table:'leave_requests'},()=>{clearTimeout(t);t=setTimeout(load,300)});ch.subscribe()}catch(e){}
+    return()=>{clearTimeout(t);try{if(ch)live.sb.removeChannel(ch)}catch(e){}}},[on]);
+  return {list,ok,reload:load};
+}
+function LeaveRequests({LR,data,setData,live,notify,onOpen}){
+  const decider=LEAVE_DECIDERS.includes(live.role);const me=live.user.id;
+  const name=id=>(data.resources.find(r=>r.id===id)||{}).name||'Someone';
+  const pend=LR.list.filter(r=>r.status==='pending').sort((a,b)=>a.start_date.localeCompare(b.start_date));
+  const mine=decider?[]:LR.list.filter(r=>r.requested_by===me&&r.status!=='pending').sort((a,b)=>String(b.decided_at).localeCompare(String(a.decided_at))).slice(0,5);
+  if(!LR.ok)return decider?null:html`<section class="panel px-4 py-3 text-[12.5px]" style=${{color:'var(--bad)'}}>Leave requests aren’t set up yet: an administrator needs to run <span class="mono">supabase/leave_requests.sql</span>.</section>`;
+  if(!pend.length&&!mine.length)return null;
+  const range=r=>`${fmtShort(parse(r.start_date))}${r.end_date!==r.start_date?' – '+fmtShort(parse(r.end_date)):''}`;
+  return html`<section class="panel px-4 py-3 grid gap-2" id="leave-requests">
+    <div class="flex items-baseline gap-2"><h3 class="font-display text-[15px] font-semibold">${decider?'Leave waiting for approval':'Your leave requests'}</h3><span class="text-[12px] text-muted">${pend.length} waiting</span></div>
+    ${pend.map(r=>html`<div key=${r.id} class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-dashed px-3 py-2 lr-row" style=${{borderColor:'var(--line-strong)'}} data-person=${name(r.person_id)}>
+      <span class="min-w-0 flex-1 text-[13px]"><span class="font-medium">${name(r.person_id)}</span> · ${KINDS[r.kind].label} · ${range(r)}${r.note?html` <span class="text-muted">· ${r.note}</span>`:''}
+        <span class="block text-[11.5px] text-muted">Put in by ${r.requested_name||'a supervisor'} · ${new Date(r.requested_at).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</span></span>
+      <button type="button" class=${'btn '+(decider?'btn-primary':'')+' lr-open'} style=${{height:32}} onClick=${()=>onOpen(r)}>${decider?'Approve or decline':'Open'}</button></div>`)}
+    ${mine.map(r=>html`<div key=${r.id} class="text-[12.5px] lr-mine"><span class="font-medium">${name(r.person_id)}</span> · ${KINDS[r.kind].label} ${range(r)}: <span style=${{color:r.status==='approved'?'hsl(145 55% 32%)':'var(--bad)'}}>${r.status==='approved'?'approved':'declined'}</span>${r.decline_reason?` (${r.decline_reason})`:''}</div>`)}
+  </section>`;
+}
+function LeaveRequestDialog({r,LR,data,setData,live,notify,onClose}){
+  const decider=LEAVE_DECIDERS.includes(live.role);const mineReq=r.requested_by===live.user.id;const [reason,setReason]=useState('');const [busy,setBusy]=useState(false);const [err,setErr]=useState('');const [declining,setDeclining]=useState(false);
+  const p=data.resources.find(x=>x.id===r.person_id);
+  const clash=data.blocks.find(b=>b.resourceId===r.person_id&&LEAVE_KINDS.includes(b.kind)&&b.start<=r.end_date&&b.end>=r.start_date);
+  const decide=async status=>{setBusy(true);setErr('');const bid=status==='approved'?uid():null;
+    const {error}=await live.sb.from('leave_requests').update({status,block_id:bid,decline_reason:status==='declined'?(reason.trim()||null):null}).eq('id',r.id);
+    if(error){setBusy(false);setErr(error.message);return}
+    if(bid)setData(d=>({...d,blocks:[...d.blocks,{id:bid,resourceId:r.person_id,kind:r.kind,start:r.start_date,end:r.end_date,title:r.note||'',fromRequest:r.id}]}));
+    notify(status==='approved'?`${KINDS[r.kind].label} approved for ${p?p.name:'them'}`:'Leave request declined');LR.reload();onClose()};
+  const withdraw=async()=>{setBusy(true);const {error}=await live.sb.from('leave_requests').delete().eq('id',r.id);if(error){setBusy(false);setErr(error.message);return}notify('Leave request withdrawn');LR.reload();onClose()};
+  return html`<${SDialog} title="Leave waiting for approval" sub=${`Put in by ${r.requested_name||'a supervisor'}`} onClose=${onClose}
+    foot=${html`${err&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span>
+      ${!decider&&mineReq&&r.status==='pending'&&html`<button id="lr-withdraw" type="button" class="btn" disabled=${busy} onClick=${withdraw}>Withdraw request</button>`}
+      ${decider&&r.status==='pending'&&(declining
+        ?html`<button type="button" class="btn" onClick=${()=>setDeclining(false)}>Back</button><button id="lr-decline-go" type="button" class="btn" disabled=${busy} style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${()=>decide('declined')}>Decline</button>`
+        :html`<button id="lr-decline" type="button" class="btn" disabled=${busy} onClick=${()=>setDeclining(true)}>Decline…</button><button id="lr-approve" type="button" class="btn btn-primary" disabled=${busy} onClick=${()=>decide('approved')}>Approve</button>`)}
+      ${!(decider&&r.status==='pending')&&html`<button type="button" class="btn" onClick=${onClose}>Close</button>`}`}>
+    <div class="grid gap-2 text-[13.5px]">
+      <div><span class="text-muted">Who:</span> <span class="font-medium">${p?p.name:'Someone no longer on staff'}</span></div>
+      <div><span class="text-muted">What:</span> ${KINDS[r.kind].label}</div>
+      <div><span class="text-muted">When:</span> ${fmtShort(parse(r.start_date))} ${parse(r.start_date).getFullYear()}${r.end_date!==r.start_date?` – ${fmtShort(parse(r.end_date))} ${parse(r.end_date).getFullYear()}`:''} (${diffDays(parse(r.start_date),parse(r.end_date))+1} day${r.end_date===r.start_date?'':'s'})</div>
+      ${r.note&&html`<div><span class="text-muted">Note:</span> ${r.note}</div>`}
+      ${clash&&html`<div class="rounded-lg px-3 py-2 text-[12.5px]" style=${{background:'hsl(38 90% var(--blk-l))'}}>${p?p.name:'They'} already ${clash.start>iso(TODAY)?'have':'had'} ${KINDS[clash.kind].label.toLowerCase()} booked ${fmtShort(parse(clash.start))}${clash.end!==clash.start?' – '+fmtShort(parse(clash.end)):''}.</div>`}
+      ${declining&&html`<label class="grid gap-1"><span class="label">Reason (optional)</span><input id="lr-reason" class="field" value=${reason} onInput=${e=>setReason(e.target.value)} placeholder="e.g. Too many away that week"/></label>`}
+      ${!decider&&html`<div class="text-[12.5px] text-muted">An administrator or superuser approves it. Until then it shows dashed on the leave calendar and isn’t counted as away.</div>`}
+    </div><//>`;
+}
 function leaveStats(data){
   const today=iso(TODAY),mon=mondayOf(TODAY),wk=[...Array(7)].map((_,i)=>iso(addDays(mon,i))),until=iso(addDays(TODAY,28));
   const people=new Map(data.resources.filter(r=>r.type==='person').map(p=>[p.id,p]));
@@ -4784,17 +4839,19 @@ function SDialog({title,sub,onClose,children,foot,width=520}){
 const SFld=({label,children})=>html`<label class="grid gap-1 min-w-0"><span class="label">${label}</span>${children}</label>`;
 
 /* add leave: who, what kind, when */
-function LeaveDialog({data,setData,onClose,notify,personId}){
+function LeaveDialog({data,setData,onClose,notify,personId,request}){
   const people=data.resources.filter(r=>r.type==='person').sort((a,b)=>a.name.localeCompare(b.name));
-  const [f,setF]=useState({resourceId:personId||'',kind:'leave',start:iso(TODAY),end:iso(TODAY),title:''});const [err,setErr]=useState('');
+  const [f,setF]=useState({resourceId:personId||'',kind:'leave',start:iso(TODAY),end:iso(TODAY),title:''});const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
   const save=()=>{if(!f.resourceId){setErr('Pick who is away.');return}if(!f.start||!f.end||f.end<f.start){setErr('Check the dates.');return}
     const clash=data.blocks.find(b=>b.resourceId===f.resourceId&&LEAVE_KINDS.includes(b.kind)&&b.start<=f.end&&b.end>=f.start);
     if(clash&&err!=='clash'){setErr('clash');return}
+    if(request){setBusy(true);request({person_id:f.resourceId,kind:f.kind,start_date:f.start,end_date:f.end,note:f.title.trim()||null}).then(e=>{setBusy(false);if(e){setErr(e);return}
+      const p=people.find(x=>x.id===f.resourceId);notify&&notify(`${KINDS[f.kind].label} for ${p?p.name:'them'} sent for approval`);onClose()});return}
     setData(d=>({...d,blocks:[...d.blocks,{id:uid(),resourceId:f.resourceId,kind:f.kind,start:f.start,end:f.end,title:f.title.trim()}]}));
     const p=people.find(x=>x.id===f.resourceId);notify&&notify(`${KINDS[f.kind].label} added for ${p?p.name:'them'}`);onClose()};
   const clashB=err==='clash'&&data.blocks.find(b=>b.resourceId===f.resourceId&&LEAVE_KINDS.includes(b.kind)&&b.start<=f.end&&b.end>=f.start);
-  return html`<${SDialog} title="Add leave" sub="Shows on the leave calendar, and on the schedule as staff away" onClose=${onClose}
-    foot=${html`${err&&err!=='clash'&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="lv-save" type="button" class="btn btn-primary" onClick=${save}>${clashB?'Add anyway':'Add leave'}</button>`}>
+  return html`<${SDialog} title="Add leave" sub=${request?'An administrator or superuser approves it before it’s on the calendar':'Shows on the leave calendar, and on the schedule as staff away'} onClose=${onClose}
+    foot=${html`${err&&err!=='clash'&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="lv-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${request?(clashB?'Send anyway':'Send for approval'):clashB?'Add anyway':'Add leave'}</button>`}>
     <div class="grid sm:grid-cols-2 gap-3">
       <div class="sm:col-span-2"><${SFld} label="Who"><select id="lv-person" class="field" value=${f.resourceId} onChange=${e=>{setF(x=>({...x,resourceId:e.target.value}));setErr('')}}><option value="">Choose…</option>${people.map(p=>html`<option key=${p.id} value=${p.id}>${p.name}${p.sub?' · '+p.sub:''}</option>`)}</select><//></div>
       <div class="sm:col-span-2 grid gap-1 min-w-0"><span class="label">Type</span><div class="seg w-max flex-wrap" role="group" aria-label="Type">${LEAVE_KINDS.map(k=>html`<button key=${k} id=${'lv-k-'+k} type="button" aria-pressed=${f.kind===k} onClick=${()=>setF(x=>({...x,kind:k}))}>${KINDS[k].label}</button>`)}</div></div>
@@ -5015,7 +5072,9 @@ function App({boot,live}){
   const [staffView,setStaffView0]=useState(()=>{try{return localStorage.getItem(KEY+':staff-view')==='people'?'people':'leave'}catch(e){return 'leave'}});
   const setStaffView=v=>{setStaffView0(v);try{localStorage.setItem(KEY+':staff-view',v)}catch(e){}};
   const [leaveDlg,setLeaveDlg]=useState(null);   /* {personId} while adding leave */
-  const peopleView=screen==='staff'&&staffView==='people';
+  const LR=useLeaveRequests(live,['admin','superuser','supervisor'].includes(live.role));const [leaveReq,setLeaveReq]=useState(null);
+  const sendLeave=async row=>{const {error}=await live.sb.from('leave_requests').insert(row);if(error)return /leave_requests/.test(error.message||'')&&/exist|schema/i.test(error.message||'')?'Leave requests aren’t set up yet: an administrator needs to run supabase/leave_requests.sql.':error.message;LR.reload();return null};
+  const peopleView=screen==='staff'&&staffView==='people'&&live.role!=='supervisor';   /* supervisors: the leave calendar only */
   /* Fleet's section (remembered); its Calendar is the machine board */
   const [fleetTab,setFleetTab0]=useState(()=>{try{const v=localStorage.getItem(KEY+':fleet-tab');return FLEET_TABS.some(t=>t[0]===v)?v:'dash'}catch(e){return 'dash'}});
   const setFleetTab=v=>{setFleetTab0(v);try{localStorage.setItem(KEY+':fleet-tab',v)}catch(e){}};
@@ -5149,7 +5208,7 @@ function App({boot,live}){
   const legend=[['Crews',['job','standby','crewtraining']],['Asphalt plant',['plantmaint','plantreduced']],['Machines',['onjob','service','repair','inspection']],['Staff',['leave','sick','rdo','training']]];
 
   return html`<div class="shell h-full flex gap-2 sm:gap-4">
-    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} data=${data} badge=${{ideas:(data.suggestions||[]).length}}/>
+    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} data=${data} badge=${{ideas:(data.suggestions||[]).length,staff:LEAVE_DECIDERS.includes(live.role)?LR.list.filter(r=>r.status==='pending').length:0}}/>
     <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='staff'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onMaint=${openFleetAsset} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
@@ -5185,18 +5244,20 @@ function App({boot,live}){
         </div>`}
         ${live.role!=='prestart'&&!sup&&html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
         ${live.role!=='prestart'&&!sup&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} onMaint=${openFleetAsset} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
-        ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary" disabled=${!live.canEdit} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Add leave</button>`}
+        ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary" disabled=${!live.canEdit&&live.role!=='supervisor'} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Add leave</button>`}
         ${boardScreen&&screen!=='staff'&&!sup&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'||screen==='fleet'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&!sup&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
         <${SettingsMenu} simple=${live.role==='prestart'} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
       </header>
 
       ${live.offline&&html`<${OfflineBar} at=${live.offline.at}/>`}
-      ${screen==='staff'&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg" role="tablist" aria-label="Staff sections">
+      ${screen==='staff'&&live.role!=='supervisor'&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg" role="tablist" aria-label="Staff sections">
         <button id="sv-leave" type="button" role="tab" aria-selected=${!peopleView} aria-pressed=${!peopleView} onClick=${()=>setStaffView('leave')}>Leave calendar</button>
         <button id="sv-people" type="button" role="tab" aria-selected=${peopleView} aria-pressed=${peopleView} onClick=${()=>setStaffView('people')}>People</button></div></div>`}
       ${screen==='fleet'&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg flex-wrap" role="tablist" aria-label="Fleet sections">${FLEET_TABS.map(([k,l])=>html`<button key=${k} id=${'fl-tab-'+k} type="button" role="tab" aria-selected=${fleetTab===k} aria-pressed=${fleetTab===k} onClick=${()=>setFleetTab(k)}>${l}${k==='wo'&&fleetCounts.wo!=null?html` <span class="mono text-[11px] text-faint">${fleetCounts.wo}</span>`:k==='df'&&fleetCounts.df!=null?html` <span class="mono text-[11px] text-faint">${fleetCounts.df}</span>`:''}</button>`)}</div></div>`}
-      ${leaveDlg&&html`<${LeaveDialog} data=${data} setData=${setData} notify=${setToast} personId=${leaveDlg.personId} onClose=${()=>setLeaveDlg(null)}/>`}
+      ${leaveDlg&&html`<${LeaveDialog} data=${data} setData=${setData} notify=${setToast} personId=${leaveDlg.personId} request=${!live.canEdit&&live.role==='supervisor'?sendLeave:null} onClose=${()=>setLeaveDlg(null)}/>`}
+      ${leaveReq&&html`<${LeaveRequestDialog} r=${leaveReq} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onClose=${()=>setLeaveReq(null)}/>`}
+      ${screen==='staff'&&!peopleView&&html`<${LeaveRequests} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onOpen=${setLeaveReq}/>`}
       ${peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:(screen==='fleet'&&!fleetCal)||screen==='prestarts'||screen==='qa'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':screen==='qa'?'QaScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast} setData=${setData} tab=${fleetTab} onCounts=${setFleetCounts} assetReq=${fleetAsset} onImportMachines=${()=>setMachImport(true)}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
       ${screen==='staff'?(()=>{const L=leaveStats(data);return html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3" id="leave-stats">
         <${Stat} k="Away today" v=${L.today.length} sub=${L.today.length?L.today.map(x=>`${x.p.name.split(' ')[0]} (back ${fmtShort(addDays(parse(x.b.end),1))})`).join(', '):'everyone in'} tone=${L.today.length?'var(--warn)':null}/>
@@ -5217,7 +5278,7 @@ function App({boot,live}){
       </section>`}
 
       <section class="panel flex-1 min-h-[320px] flex flex-col overflow-hidden">
-        <${Board} data=${data} days=${days} view=${view} narrow=${narrow} readOnly=${!live.canEdit} onCreate=${onCreate} onEdit=${b=>setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
+        <${Board} data=${screen==='staff'&&LR.list.some(r=>r.status==='pending')?{...data,blocks:[...data.blocks,...LR.list.filter(r=>r.status==='pending'&&data.resources.some(x=>x.id===r.person_id)).map(r=>({id:'lr-'+r.id,resourceId:r.person_id,kind:r.kind,start:r.start_date,end:r.end_date,title:'Waiting for approval'+(r.note?' · '+r.note:''),pending:true,req:r}))]}:data} days=${days} view=${view} narrow=${narrow} readOnly=${!live.canEdit} onCreate=${onCreate} onEdit=${b=>b.pending?setLeaveReq(b.req):setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
           collapsed=${collapsed} toggleSection=${t=>setCollapsed(c=>({...c,[t]:!c[t]}))}/>
         <div class="border-t border-line px-4 py-2.5 hidden sm:flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
           ${legend.filter(([g])=>SCR.legend.includes(g)).map(([g,ks])=>html`<span key=${g} class="inline-flex flex-wrap items-center gap-x-3 gap-y-1">

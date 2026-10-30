@@ -105,12 +105,17 @@ Fleet's sections sit in a bar below the header: **Dashboard · Machines · Calen
 | `admin` | Everything | Everything: service plans, verify & close, meter corrections. Also sees features still in progress |
 | `superuser` | Everything | Everything an admin can do, except features the admin hasn't released yet |
 | `planner` | Edit | View |
-| `supervisor` | View, plus **Prestarts** and **Site QA** (fills in QA packs). No other screens | None on screen (Fleet isn't in their menu) |
+| `supervisor` | View (a simpler, crews-only schedule), the **leave calendar** (puts leave in for approval), **Prestarts** and **Site QA** (fills in QA packs). No other screens | None on screen (Fleet isn't in their menu) |
 | `mechanic` | View | Record services, readings and work order progress |
 | `prestart` | Prestarts and Site QA (signing) only, once released; until then, View | Prestarts |
 | `viewer` | View | None |
 
 **Ideas** is for the `admin` only, never superusers.
+
+### Leave requests (supervisors)
+Run `supabase/leave_requests.sql` once in Supabase → SQL Editor (then `tests/leave_requests_test.sql` to check it).
+
+Supervisors see **Staff** with the leave calendar only (not People). **+ Add leave** sends it **for approval**: it shows dashed on the leave calendar ("waiting for approval") and isn't counted as away yet. Administrators and superusers see a number on **Staff** and a **Leave waiting for approval** list at the top of the leave calendar: **Approve** puts it on the calendar and the schedule; **Decline** (with an optional reason) doesn't. Supervisors see what was approved or declined, and can withdraw a request while it waits. Planners and administrators still add leave straight onto the calendar.
 
 ### Site QA (JSA and toolbox meetings)
 Run `supabase/qa.sql` once in Supabase → SQL Editor (then `tests/qa_test.sql` to check it). Then release **Site QA** in the Settings menu (*Features in progress*).

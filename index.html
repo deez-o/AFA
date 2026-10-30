@@ -111,6 +111,7 @@ body.is-dragging,body.is-dragging *{cursor:grabbing!important;user-select:none}
 .reo-line{position:absolute;left:0;right:0;height:3px;background:var(--accent);z-index:25;pointer-events:none;border-radius:2px}
 .blk:hover{transform:translateY(-1px);box-shadow:0 3px 10px rgba(0,0,0,.12);z-index:3}
 .blk .t{overflow:hidden;text-overflow:ellipsis}
+.blk-pending{opacity:.72;outline:2px dashed currentColor;outline-offset:-2px;cursor:pointer!important}
 .blk-edge{position:absolute;top:0;bottom:0;width:9px;z-index:3;cursor:ew-resize;touch-action:none}
 .blk-edge-l{left:-2px}.blk-edge-r{right:-2px}
 .blk-edge::after{content:"";position:absolute;top:22%;bottom:22%;width:3px;border-radius:2px;background:currentColor;opacity:0;transition:opacity .12s}
@@ -141,7 +142,7 @@ tailwind.config={theme:{extend:{colors:{
 </head>
 <body>
 <div id="root"></div>
-<script src="/app.js?v=202610310654"></script>
+<script src="/app.js?v=202610310702"></script>
 <script>/* installable app: the service worker (sw.js) */
 if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));</script>
 </body>
