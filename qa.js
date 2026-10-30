@@ -222,6 +222,41 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
   /* a pack started before the forms were required gets them now */
   useEffect(()=>{if(!canEdit||!FF)return;const need=FF.FORMS.filter(f=>f.required&&!(p.forms||{})[f.id]);if(!need.length&&(p.forms||{}).lot)return;
     upd(x=>{const fs0={...(x.forms||{})};if(!fs0.lot)fs0.lot=FF.newLot(data,e,x);need.forEach(f=>{if(!fs0[f.id])fs0[f.id]=f.make(data,e,x,ctx)});return {...x,forms:fs0}})},[p.id,canEdit]);
+  /* the crew (operators): a short read-only overview of the JSA, and their sign-off. Nothing here can be changed. */
+  if(!canFill){
+    const fact=(k,v)=>v&&String(v).trim()?html`<div class="min-w-0"><div class="label">${k}</div><div class="text-[13.5px] truncate">${v}</div></div>`:null;
+    const ctl=JSA_SECTIONS.map(sc=>({sc,items:sc.hazards.map(h=>({h,cs:h.controls.filter((c,i)=>ticks[tickKey(sc.id,h,i)])})).filter(x=>x.cs.length)})).filter(x=>x.items.length);
+    const ex=(J.extra||[]).filter(x=>String(x.hazard||'').trim());const chk=CHECKS.filter(([k])=>(J.checks||{})[k]);
+    const dlgEl=dlg&&dlg.k==='sign'&&html`<${SignDialog} key=${dlg.form+':me'} title=${dlg.form==='toolbox'?'Sign the toolbox meeting':'Sign the JSA'} mine=${true} myName=${myName} note="" onClose=${()=>setDlg(null)}
+      onSave=${s=>{save({t:'sig',row:{id:newId(),pack_id:p.id,form:dlg.form,user_id:ctx.me,name:s.name,company:s.company,signature:s.signature,signed_at:new Date().toISOString()}});setDlg(null)}}/>`;
+    return html`<div class="grid grid-cols-[minmax(0,1fr)] gap-3 pb-4" id="qa-pack" data-view="summary">
+      <div class="panel px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+        ${!inModal&&html`<button type="button" class="btn px-2" onClick=${onBack} aria-label="Back">${Icon.chevL}</button>`}
+        <div class="min-w-0 flex-1"><div class="font-display text-[17px] font-semibold leading-tight truncate">${jobLabel(jobOf(data,e.b))}</div>
+          <div class="text-[12.5px] text-muted">${crewName(data,e.crewId)} · ${WD[parse(e.k).getDay()]} ${fmtShort(parse(e.k))}${e.b.shift==='night'?' · night':''}</div></div>
+        ${chip(statusOf(p,sigs))}</div>
+      <section class="panel p-4 grid gap-3" id="qa-summary">
+        <div class="font-display text-[15.5px] font-semibold">Job specific assessment <span class="text-[12px] font-normal text-muted">· ${J.type==='seal'?'Spray seal':'Asphalt'}</span></div>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-2">${fact('Location',head.location)}${fact('Supervisor',head.supervisor)}${fact('Foreman',head.foreman)}${fact('Truck controller',head.truck_controller)}${fact('UHF channel',head.uhf)}${fact('First aid',head.first_aid)}</div>
+        <div class="grid gap-2"><div class="label">Controls in place</div>
+          ${ctl.length?ctl.map(x=>html`<div key=${x.sc.id} class="grid gap-1"><div class="text-[12px] font-semibold" style=${{color:'var(--accent)'}}>${x.sc.label}</div>
+            ${x.items.map(it=>html`<div key=${it.h.key} class="text-[13px] leading-snug"><span class="font-medium">${it.h.hazard}:</span> <span class="text-muted">${it.cs.join(' · ')}</span></div>`)}</div>`)
+            :html`<div class="text-[12.5px] text-muted">None ticked yet.</div>`}</div>
+        ${ex.length>0&&html`<div class="grid gap-1.5"><div class="label">Site hazards</div>${ex.map((x,i)=>html`<div key=${i} class="text-[13px] leading-snug rounded-lg border border-line px-3 py-2">
+          <span class="font-medium">${x.hazard}</span>${x.risk?html` <span class="text-[11.5px] font-semibold" style=${{color:RISK_COL[x.risk]}}>(${x.risk})</span>`:''}${x.controls?html`<div class="text-muted">${x.controls}${x.residual?` · residual ${x.residual.toLowerCase()}`:''}</div>`:''}</div>`)}</div>`}
+        ${chk.length>0&&html`<div class="flex flex-wrap gap-1.5">${chk.map(([k,l])=>html`<span key=${k} class="text-[12px] px-2 py-0.5 rounded-full" style=${{background:'hsl(145 50% var(--blk-l))'}}>✓ ${l}</span>`)}</div>`}
+      </section>
+      <section class="panel p-4 grid gap-2" id="qa-sign"><div class="font-display text-[15.5px] font-semibold">Sign-off</div>
+        <p class="text-[12px] text-muted">${AGREE}</p>
+        <${SignOff} form="jsa" pack=${p} sigs=${sigs} ctx=${ctx} canEdit=${false} open=${setDlg} other=${null}/></section>
+      ${T&&html`<section class="panel p-4 grid gap-2" id="qa-toolbox"><div class="font-display text-[15.5px] font-semibold">Toolbox meeting</div>
+        ${(T.topics||[]).filter(x=>String(x.topic||'').trim()).map((x,i)=>html`<div key=${i} class="text-[13px]"><span class="font-medium">${x.topic}</span>${x.action?html`<span class="text-muted"> · ${x.action}</span>`:''}</div>`)}
+        ${T.training&&html`<div class="text-[13px]"><span class="text-muted">Training covered:</span> ${T.training}</div>`}
+        ${T.meeting_point&&html`<div class="text-[13px]"><span class="text-muted">Emergency meeting point:</span> <span class="font-medium">${T.meeting_point}</span></div>`}
+        <${SignOff} form="toolbox" pack=${p} sigs=${sigs} ctx=${ctx} canEdit=${false} open=${setDlg} other=${null}/></section>`}
+      ${dlgEl}
+    </div>`;
+  }
   const body=html`<div class="grid grid-cols-[minmax(0,1fr)] gap-3 pb-4" id="qa-pack">
     <div class="panel px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1">
       ${!inModal&&html`<button type="button" class="btn px-2" onClick=${onBack} aria-label="Back">${Icon.chevL}</button>`}

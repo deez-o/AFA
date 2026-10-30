@@ -78,10 +78,69 @@ const HOLD={id:'hold',label:'Hold point release',short:'Hold point',
 /* ---------- field site diagram ---------- */
 function shrinkPhoto(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const sc=Math.min(1,1280/Math.max(im.width,im.height));
   const c=document.createElement('canvas');c.width=Math.round(im.width*sc);c.height=Math.round(im.height*sc);c.getContext('2d').drawImage(im,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',.7))};im.onerror=rej;im.src=r.result};r.onerror=rej;r.readAsDataURL(file)})}
-function SketchDialog({onSave,onClose}){const pad=useRef(null);const [ink,setInk]=useState(false);
-  return html`<${Modal} wide=${true} title="Draw the site diagram" sub="All patchwork must be clearly measured and marked on the map with chainages" onClose=${onClose}
-    foot=${html`${ink&&html`<button type="button" class="btn" onClick=${()=>pad.current.clear()}>Clear</button>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="qa-sketch-save" type="button" class="btn btn-primary" disabled=${!ink} onClick=${()=>onSave(pad.current.png())}>Save drawing</button>`}>
-    <div class="qa-sketch"><${SignPad} padRef=${pad} onInk=${setInk}/></div><//>`}
+/* the site diagram: a full-screen drawing with a pen, straight lines, arrows, boxes, text labels and colours.
+   Shapes are kept (as fractions of the page, 4:3) so the drawing can be changed later; a picture is saved for the PDF. */
+const DG_COLOURS=['#111111','#d11a2a','#1f5fd6','#178a3e','#e07b00','#8a2be2'];
+const DG_TOOLS=[['pen','Pen'],['line','Line'],['arrow','Arrow'],['box','Box'],['text','Text']];
+function drawShapes(g,W,H,shapes,grid){
+  g.fillStyle='#fff';g.fillRect(0,0,W,H);
+  if(grid){g.strokeStyle='#eef0f3';g.lineWidth=1;for(let i=1;i<20;i++){const x=Math.round(W*i/20)+.5,y=Math.round(H*i/20)+.5;g.beginPath();g.moveTo(x,0);g.lineTo(x,H);g.stroke();g.beginPath();g.moveTo(0,y);g.lineTo(W,y);g.stroke()}}
+  const P=([x,y])=>[x*W,y*H];g.lineCap='round';g.lineJoin='round';
+  shapes.forEach(s=>{g.strokeStyle=s.c;g.fillStyle=s.c;g.lineWidth=s.w*W/1000;
+    if(s.t==='pen'){g.beginPath();s.pts.forEach((p,i)=>{const [x,y]=P(p);i?g.lineTo(x,y):g.moveTo(x,y)});if(s.pts.length===1){const [x,y]=P(s.pts[0]);g.lineTo(x+.1,y+.1)}g.stroke()}
+    else if(s.t==='line'||s.t==='arrow'){const [x1,y1]=P(s.a),[x2,y2]=P(s.b);g.beginPath();g.moveTo(x1,y1);g.lineTo(x2,y2);g.stroke();
+      if(s.t==='arrow'){const a=Math.atan2(y2-y1,x2-x1),L=Math.max(10,g.lineWidth*4);g.beginPath();g.moveTo(x2,y2);g.lineTo(x2-L*Math.cos(a-.45),y2-L*Math.sin(a-.45));g.lineTo(x2-L*Math.cos(a+.45),y2-L*Math.sin(a+.45));g.closePath();g.fill()}}
+    else if(s.t==='box'){const [x1,y1]=P(s.a),[x2,y2]=P(s.b);g.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1))}
+    else if(s.t==='text'){const [x,y]=P(s.p);g.font=`600 ${Math.round(s.size*W)}px "IBM Plex Sans",system-ui,sans-serif`;g.textBaseline='middle';g.fillText(s.s,x,y)}})}
+function SketchDialog({initial,aspect:a0,onSave,onClose}){
+  /* the page's shape: kept from the first drawing; a new one is portrait on an upright phone, landscape otherwise */
+  const [AR]=useState(()=>a0||(window.innerHeight>window.innerWidth*1.15?3/4:4/3));
+  const cv=useRef(null),box=useRef(null);const [hist,setHist]=useState(()=>[initial||[]]);const shapes=hist[hist.length-1];
+  const [tool,setTool]=useState('pen');const [col,setCol]=useState(DG_COLOURS[0]);const [thick,setThick]=useState(false);
+  const cur=useRef(null);const [,tick]=useState(0);const [txt,setTxt]=useState(null);const [sz,setSz]=useState({w:600,h:450});
+  const push=n=>setHist(h=>[...h,n]);
+  useEffect(()=>{const fit=()=>{const r=box.current&&box.current.getBoundingClientRect();if(!r)return;let w=r.width,h=w/AR;if(h>r.height){h=r.height;w=h*AR}setSz({w:Math.floor(w),h:Math.floor(h)})};
+    fit();window.addEventListener('resize',fit);return()=>window.removeEventListener('resize',fit)},[]);
+  useEffect(()=>{const c=cv.current;if(!c)return;const dpr=Math.min(2,window.devicePixelRatio||1);c.width=Math.round(sz.w*dpr);c.height=Math.round(sz.h*dpr);
+    const g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);drawShapes(g,sz.w,sz.h,cur.current?[...shapes,cur.current]:shapes,true)});
+  const pt=e=>{const r=cv.current.getBoundingClientRect();return [Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))]};
+  const S=useRef({});S.current={tool,col,thick,shapes};   /* what's chosen right now, for the pointer handlers */
+  const down=e=>{e.preventDefault();const p=pt(e);const {tool,col,thick}=S.current;const w=thick?7:3;
+    if(tool==='text'){setTxt({p,value:''});return}
+    try{cv.current.setPointerCapture(e.pointerId)}catch(x){}
+    cur.current=tool==='pen'?{t:'pen',pts:[p],c:col,w}:{t:tool,a:p,b:p,c:col,w};tick(x=>x+1)};
+  const move=e=>{if(!cur.current)return;e.preventDefault();const p=pt(e);if(cur.current.t==='pen')cur.current.pts.push(p);else cur.current.b=p;tick(x=>x+1)};
+  const up=()=>{const s=cur.current;if(!s)return;cur.current=null;
+    if(s.t!=='pen'&&Math.hypot(s.a[0]-s.b[0],s.a[1]-s.b[1])<.004){tick(x=>x+1);return}   /* a tap, not a line */
+    if(s.t==='pen')s.pts=s.pts.map(([x,y])=>[Math.round(x*10000)/10000,Math.round(y*10000)/10000]);setHist(h=>[...h,[...h[h.length-1],s]])};
+  const addText=()=>{const v=(txt&&txt.value||'').trim();const {col,thick}=S.current;if(v){const t={t:'text',p:txt.p,s:v,c:col,size:thick?.036:.026};setHist(h=>[...h,[...h[h.length-1],t]])}setTxt(null)};
+  const save=()=>{const W=AR>=1?1600:1200,H=AR>=1?1200:1600;const c=document.createElement('canvas');c.width=W;c.height=H;drawShapes(c.getContext('2d'),W,H,shapes,false);onSave({png:c.toDataURL('image/png'),shapes,aspect:AR})};
+  const tb='inline-flex items-center justify-center h-9 px-2.5 rounded-lg border text-[12.5px] font-medium shrink-0';
+  return html`<div class="fixed inset-0 z-[70] flex flex-col" style=${{background:'var(--bg)'}} role="dialog" aria-modal="true" aria-label="Draw the site diagram" id="qa-sketch">
+    <div class="flex items-center gap-1.5 px-2 py-2 overflow-x-auto border-b border-line" style=${{background:'var(--surface)'}}>
+      ${DG_TOOLS.map(([k,l])=>html`<button key=${k} type="button" id=${'dg-tool-'+k} class=${tb} aria-pressed=${tool===k} style=${{borderColor:tool===k?'var(--accent)':'var(--line)',background:tool===k?'var(--accent-soft)':'var(--surface)'}} onClick=${()=>{setTool(k);setTxt(null)}}>${l}</button>`)}
+      <span class="w-px h-6 bg-line mx-1 shrink-0"></span>
+      ${DG_COLOURS.map(c=>html`<button key=${c} type="button" class="w-8 h-8 rounded-full shrink-0 dg-colour" aria-label=${'Colour '+c} aria-pressed=${col===c} style=${{background:c,boxShadow:col===c?'0 0 0 2px var(--surface),0 0 0 4px var(--ink)':'none'}} onClick=${()=>setCol(c)}></button>`)}
+      <span class="w-px h-6 bg-line mx-1 shrink-0"></span>
+      <button type="button" id="dg-thick" class=${tb} style=${{borderColor:'var(--line)'}} onClick=${()=>setThick(!thick)} title="Line thickness and text size">${thick?'Thick':'Thin'}</button>
+      <button type="button" id="dg-undo" class=${tb} style=${{borderColor:'var(--line)'}} disabled=${hist.length<2} onClick=${()=>setHist(h=>h.length>1?h.slice(0,-1):h)}>Undo</button>
+      <button type="button" id="dg-clear" class=${tb} style=${{borderColor:'var(--line)'}} disabled=${!shapes.length} onClick=${()=>push([])}>Clear</button>
+    </div>
+    <div class="px-3 pt-2 text-[12px] text-muted">${tool==='text'?'Tap where the label goes, type it, then Add.':tool==='pen'?'Draw freehand.':'Drag from one point to another.'} All patchwork must be clearly measured and marked with chainages. On a phone, turn it sideways for more room.</div>
+    <div ref=${box} class="flex-1 min-h-0 p-3 flex items-center justify-center">
+      <div class="relative" style=${{width:sz.w,height:sz.h}}>
+        <canvas ref=${cv} id="dg-canvas" class="block rounded-lg border border-line" style=${{width:sz.w,height:sz.h,touchAction:'none',cursor:tool==='text'?'text':'crosshair',background:'#fff'}}
+          onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}></canvas>
+        ${txt&&html`<div class="absolute flex items-center gap-1 rounded-lg p-1 shadow" style=${{left:Math.min(txt.p[0]*sz.w,sz.w-230),top:Math.max(0,txt.p[1]*sz.h-20),background:'var(--surface)',border:'1px solid var(--line)',zIndex:2}}>
+          <input id="dg-text" class="field" style=${{height:32,width:150,fontSize:13}} placeholder="Label" autoFocus=${true} value=${txt.value} onInput=${e=>{const v=e.target.value;setTxt(t=>({...t,value:v}))}} onKeyDown=${e=>{if(e.key==='Enter')addText();if(e.key==='Escape')setTxt(null)}}/>
+          <button id="dg-text-add" type="button" class="btn btn-primary" style=${{height:32}} onClick=${addText}>Add</button></div>`}
+      </div>
+    </div>
+    <div class="flex items-center gap-2 px-3 py-2 border-t border-line" style=${{background:'var(--surface)',paddingBottom:'max(8px, env(safe-area-inset-bottom, 0px))'}}>
+      <span class="text-[12px] text-muted flex-1">${shapes.length} mark${shapes.length===1?'':'s'}</span>
+      <button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="qa-sketch-save" type="button" class="btn btn-primary" disabled=${!shapes.length} onClick=${save}>Save drawing</button>
+    </div></div>`;
+}
 const DIAGRAM={id:'diagram',label:'Field site diagram',short:'Site diagram',
   make:(data,e,p,ctx)=>{const ls=linesOn(e.b,e.k);return {layer:'',depth:ls[0]&&ls[0].depth?`${ls[0].depth} mm`:'',mix:[...new Set(ls.map(l=>l.type).filter(Boolean))].join(', '),prepared_by:ctx.myName||'',sketch:null,photos:[]}},
   Editor:({f})=>{const d=f.pack.forms.diagram;const set=p=>f.set('diagram',x=>({...x,...p}));const [draw,setDraw]=useState(false);const [busy,setBusy]=useState(false);
@@ -94,9 +153,9 @@ const DIAGRAM={id:'diagram',label:'Field site diagram',short:'Site diagram',
       ${(d.photos||[]).length>0&&html`<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">${d.photos.map((ph,i)=>html`<div key=${i} class="relative"><img src=${ph} alt=${'Site photo '+(i+1)} class="w-full h-28 object-cover rounded-lg border border-line qa-dg-photo"/>
         ${f.canEdit&&html`<button type="button" class="absolute top-1 right-1 btn px-1.5" style=${{height:26}} aria-label="Remove photo" onClick=${()=>set({photos:d.photos.filter((x,k)=>k!==i)})}>${Icon.x}</button>`}</div>`)}</div>`}
       ${f.canEdit&&html`<div class="flex flex-wrap gap-2"><button id="qa-dg-draw" type="button" class="btn" onClick=${()=>setDraw(true)}>${Icon.pencil} ${d.sketch?'Redraw':'Draw the diagram'}</button>
-        ${d.sketch&&html`<button type="button" class="btn" onClick=${()=>set({sketch:null})}>Remove drawing</button>`}
+        ${d.sketch&&html`<button type="button" class="btn" onClick=${()=>set({sketch:null,shapes:null})}>Remove drawing</button>`}
         ${(d.photos||[]).length<4&&html`<label class="btn cursor-pointer">${Icon.plus} ${busy?'Adding…':'Photo of a hand-drawn map'}<input id="qa-dg-photo" type="file" accept="image/*" capture="environment" multiple class="sr-only" onChange=${e=>{addPhotos(e.target.files);e.target.value=''}}/></label>`}</div>`}
-      ${draw&&html`<${SketchDialog} onClose=${()=>setDraw(false)} onSave=${png=>{set({sketch:png});setDraw(false)}}/>`}<//>`},
+      ${draw&&html`<${SketchDialog} initial=${d.shapes||null} aspect=${d.shapes&&d.shapes.length?d.aspect||4/3:null} onClose=${()=>setDraw(false)} onSave=${r=>{set({sketch:r.png,shapes:r.shapes,aspect:r.aspect});setDraw(false)}}/>`}<//>`},
   pdf:o=>{const d=o.p.forms.diagram;const doc=o.doc;o.newPage('p');o.page('FIELD SITE DIAGRAM');let y=24;
     y=kvGrid(o,y,[['Job location',o.lot.location],['Customer',o.lot.client],['Date',dateTxt(o.lot.date)],['Lot number',o.lot.lot_no],['Job number',o.lot.job_no],['Start chainage',o.lot.start_ch],['End chainage',o.lot.end_ch],['Layer',d.layer],['Nominal depth',d.depth],['Mix type',d.mix],['Map prepared by',d.prepared_by]]);
     doc.setFont('helvetica','italic');doc.setFontSize(8.5);doc.setTextColor(94,99,110);o.txt('All patchwork must be clearly measured and marked on the map with chainages',o.M,y+4);y+=7;
@@ -130,7 +189,7 @@ const LAYING={id:'laying',label:'Asphalt laying record',short:'Laying record',
 
 /* ---------- operations site environmental checklist ---------- */
 const ENV_ITEMS=[['residents','Residents notified'],['kerb','Kerb and channel clean'],['gully','Gully pits clean'],['profiling','Profiling required'],['swept','Pave section swept and clean'],['linemarking','Temporary line marking / stick ’n’ stomps'],['prime','Prime / bitumen on kerb, crossovers'],
-  ['noise','Noise and dust suppression kept to minimum'],['profilings','Profilings removed from site'],['pits','Gully pits / inspection pipes protected'],['stormwater','Stormwater outlets protected'],['excess','Excess noise generated'],['spills','Fuel, bitumen, oil, emulsion spills contained'],
+  ['noise','Noise and dust suppression kept to minimum'],['profilings','Profilings removed from site'],['pits','Gully pits / inspection pipes protected'],['excess','Excess noise generated'],['spills','Fuel, bitumen, oil, emulsion spills contained'],
   ['animals','Nesting and territorial animals, including birds, dogs, bees / wasps (discuss controls with customer)'],['trees','Overhanging trees / branches, other flora (discuss controls with customer)']];
 const YNA=[['yes','Yes'],['no','No'],['na','N/A']];
 const Ynb=({v,on,dis,id})=>html`<div class="seg w-max" id=${id}>${YNA.map(([k,l])=>html`<button key=${k} type="button" disabled=${dis} aria-pressed=${v===k} onClick=${()=>on(v===k?'':k)}>${l}</button>`)}</div>`;
