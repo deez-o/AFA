@@ -429,8 +429,6 @@ function JobsManager({data,setData,onImport,onMerge}){
         <button type="button" class="flex-1" aria-pressed=${view==='active'} onClick=${()=>{setView('active');setEdit(null);setConfirm(null)}}>Active <span class="mono text-[11px] text-faint">${nActive}</span></button>
         <button type="button" class="flex-1" aria-pressed=${view==='completed'} onClick=${()=>{setView('completed');setEdit(null);setConfirm(null)}}>Completed <span class="mono text-[11px] text-faint">${nDone}</span></button>
       </div>
-      ${onImport&&html`<button type="button" class="btn w-full justify-center" onClick=${onImport}>${Icon.download} Import from TeamCal</button>`}
-      ${onMerge&&html`<button type="button" class="btn w-full justify-center" onClick=${onMerge}>Merge split bookings</button>`}
       <label for="job-search" class="sr-only">Search jobs</label>
       <input id="job-search" class="field" placeholder="Search job, customer or address" value=${q} onInput=${e=>setQ(e.target.value)}/>
     </div>
@@ -556,9 +554,9 @@ function Sidebar({data,setData,days,tab,setTab,onClose,renameId,setRenameId,onIm
 
   const placeholders={crew:['Crew name, e.g. Crew 5','Type of work, e.g. Paving, Seal'],person:['Full name','Role, e.g. Roller operator'],machine:['Machine #, e.g. PV010','Description, e.g. Vogele Paver (2003)'],aplant:['Plant name, e.g. Asphalt plant 2','Location, e.g. Narangba']};
 
-  const tabsBar=html`<div class="seg w-full !grid grid-cols-3 gap-0.5" role="tablist" aria-label="Resource type">
+  const tabsBar=html`<div class="seg w-full !flex flex-wrap gap-0.5" role="tablist" aria-label="Settings sections">
         ${[...orderOf(data).filter(t=>TYPES[t]).map(t=>[t,TYPES[t].tab||TYPES[t].label,data.resources.filter(r=>r.type===t).length]),['mixes','Mixes',mixTypesOf(data).length],['seal','Seal',sealTypesOf(data).length],['trucks','Trucks',truckCosOf(data).length],['subs','Subcontractors',subCosOf(data).length]].filter(([t])=>tabOK(t))
-          .map(([t,label,n])=>html`<button key=${t} role="tab" class="flex-1 !px-1 !text-[12.5px]" aria-pressed=${tab===t} aria-selected=${tab===t} title=${`${label} (${n})`} onClick=${()=>{setTab(t);setConfirmId(null)}}>${label}</button>`)}
+          .map(([t,label,n])=>html`<button key=${t} role="tab" class="flex-auto !px-2 !text-[12.5px] whitespace-nowrap" aria-pressed=${tab===t} aria-selected=${tab===t} title=${`${label} (${n})`} onClick=${()=>{setTab(t);setConfirmId(null)}}>${label}</button>`)}
       </div>`;
   const headTop=html`<div class="flex items-center justify-between gap-2">
         <div class="font-display text-[17px] font-semibold leading-tight">${tab==='jobs'?'Jobs':'Settings'}</div>
@@ -3747,7 +3745,7 @@ function FirstRun({canEdit,onStart}){
     ${canEdit
       ?html`<div class="flex flex-col gap-3">
           <div class="font-semibold">Set up your roster</div>
-          <p class="text-[13px] text-muted">The roster is empty. Start it, then add your crews, staff and machines in Settings, or bring in your jobs with Import from TeamCal under Jobs.</p>
+          <p class="text-[13px] text-muted">The roster is empty. Start it, then add your crews, staff and machines in Settings, and your jobs under Jobs.</p>
           <button class="btn btn-primary justify-center" disabled=${busy} onClick=${async()=>{setBusy(true);await onStart(emptyRoster())}}>Start the roster</button>
         </div>`
       :html`<p class="text-[13px] text-muted">The roster hasn’t been set up yet. A planner needs to sign in first.</p>`}
