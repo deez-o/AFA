@@ -67,6 +67,8 @@ Files: `manifest.json`, `sw.js` (service worker), `icons/`.
 
 Drag the middle of a bar to move the whole booking (to other days, or to another crew/machine). Drag its **right end** to extend or shorten it, or its **left end** to change the start date. Moving the start (earlier or later) moves every shift with it, so shift 1's figures are always on the first day, shift 2's on the next, and so on. Extending the end just adds empty shifts. Shifts that no longer fit after shortening are kept out of sight and come back, in order, when the booking is stretched again. Clicking a bar still opens it. (Planners and administrators; viewers can't change bookings.)
 
+When a job is **completed**, its bars on the schedule are greyed out. When an open job's bookings have all finished, the bell asks whether it's complete (**Complete** marks it done; planners and administrators; on by default, *Jobs to complete* in Settings).
+
 ## What is shared and what is personal
 Shared by everyone: crews, staff, machines, asphalt plants, jobs, bookings, quantities, mixes, binders and quote-change history.
 Personal to each person's browser: hidden rows, section order, view length, dark mode and notification settings.

@@ -914,7 +914,8 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
           const v=it.b.virtual;const pend=!!it.b.pending;
           const vTip=v?(it.b.cover?`Covering a shift for ${data.resources.find(c=>c.id===it.b.crewId)?.name||'another crew'}\n`:`${data.jobs.find(j=>j.id===it.b.jobId)?.name||'Job'} · ${data.resources.find(c=>c.id===it.b.crewId)?.name||''}\n`):'';
           const dragging=preview&&preview.id===it.b.id;
-          return html`<div key=${it.b.id} class=${'blk'+(dragging?' dragging':'')+(pend?' blk-pending':'')} role="button" tabindex="0" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
+          const jobDone=(it.b.kind==='job'||it.b.kind==='onjob'||v)&&!!(data.jobs.find(j=>j.id===it.b.jobId)||{}).completed;
+          return html`<div key=${it.b.id} class=${'blk'+(dragging?' dragging':'')+(pend?' blk-pending':'')+(jobDone?' blk-done':'')} data-done=${jobDone?'1':null} role="button" tabindex="0" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
             style=${{...blockStyle(it.b,data),top:10+it.lane*32,left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
               borderTopLeftRadius:it.cutL?0:6,borderBottomLeftRadius:it.cutL?0:6,borderTopRightRadius:it.cutR?0:6,borderBottomRightRadius:it.cutR?0:6,
               justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined}}
@@ -2176,6 +2177,7 @@ const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking
   {id:'job',label:'Jobs',desc:'Jobs added, changed, completed or deleted.'},
   {id:'resource',label:'Crews, staff, machines & plants',desc:'Added, renamed or removed.'},
   {id:'lists',label:'Mixes & seal lists',desc:'Mix, seal and binder lists edited.'},
+  {id:'jobdone',label:'Jobs to complete',desc:'An open job whose bookings have all finished: mark it complete?'},
   /* maintenance (shown to people with Fleet & Maintenance) */
   {id:'mcritical',maint:true,label:'Critical defects & restrictions',desc:'A machine is restricted: do not use.'},
   {id:'mbooking',maint:true,label:'Restricted machines on bookings',desc:'A booking from today on has a machine that must not be used.'},
@@ -2185,10 +2187,16 @@ const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking
   {id:'mwo',maint:true,label:'Work orders',desc:'New work orders, and work orders completed and waiting for verification.'},
   {id:'mservice',maint:true,label:'Services due',desc:'Services overdue or due soon (once a day).'}];
 const NOTIF_KEY=KEY+':notif-prefs';
-const NOTIF_DEFAULT={quote:false,booking:false,job:false,resource:false,lists:false,   /* roster changes: off until a person turns them on */
+const NOTIF_DEFAULT={quote:false,booking:false,job:false,resource:false,lists:false,jobdone:true,   /* roster changes: off until a person turns them on */
   mcritical:false,mbooking:false,mbreak:false,mprestart:false,mreturn:false,mwo:false,mservice:false};   /* maintenance: off too until switched on in Settings */
 const MAINT_ROLES=['admin','superuser','planner','supervisor','mechanic'];
 /* maintenance notifications: events from the database feed, plus things true right now (services due, missing prestarts, restricted machines on bookings) */
+/* open jobs with bookings that have all finished: ask whether the job is complete */
+function jobDoneNotifs(data,prefs){if(!prefs.jobdone)return [];const today=iso(TODAY),out=[];
+  data.jobs.forEach(j=>{if(j.completed)return;const bs=data.blocks.filter(b=>b.jobId===j.id&&(b.kind==='job'||b.kind==='onjob'));if(!bs.length||bs.some(b=>b.end>=today))return;
+    const last=bs.reduce((m,b)=>b.end>m?b.end:m,'');const at=parse(last);at.setDate(at.getDate()+1);at.setHours(6,0,0,0);
+    out.push({id:`j-done-${j.id}-${last}`,at:Math.min(at.getTime(),Date.now()),text:`${jobLabel(j)} has no more bookings`,sub:`Last booking ended ${fmtShort(parse(last))}. Is the job complete?`,jobId:j.id})});
+  return out}
 function maintNotifs(data,prefs){
   const out=[],now=Date.now(),today=iso(TODAY),A=data.alerts||{};
   const name=id=>(data.resources.find(r=>r.id===id)||{}).name||(A[id]&&A[id].name)||id;
@@ -2862,7 +2870,7 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,ma
   </div>`;
 }
 
-function Notifications({data,onOpen,prefs,setPrefs,maint,onMaint}){
+function Notifications({data,onOpen,prefs,setPrefs,maint,onMaint,onCompleteJob}){
   const SEEN=KEY+':quote-seen';
   /* deleting a notification only hides it for this person (in this browser); others still see it */
   const GONE=KEY+':notif-dismissed';
@@ -2878,7 +2886,7 @@ function Notifications({data,onOpen,prefs,setPrefs,maint,onMaint}){
     const out=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};const esc=e=>{if(e.key==='Escape')setOpen(false)};
     document.addEventListener('pointerdown',out);window.addEventListener('keydown',esc);
     return()=>{document.removeEventListener('pointerdown',out);window.removeEventListener('keydown',esc)}},[open]);
-  const list=[...(prefs.quote?recentQuoteChanges(data).map(c=>({...c,_q:true})):[]),...recentChanges(data,prefs),...(maint?maintNotifs(data,prefs):[])].filter(c=>!gone[c.id]).sort((a,b)=>b.at-a.at).slice(0,150);
+  const list=[...(prefs.quote?recentQuoteChanges(data).map(c=>({...c,_q:true})):[]),...recentChanges(data,prefs),...(maint?maintNotifs(data,prefs):[]),...(onCompleteJob?jobDoneNotifs(data,prefs):[])].filter(c=>!gone[c.id]).sort((a,b)=>b.at-a.at).slice(0,150);
   const me=window.__rosterMe||'';
   const allOff=NOTIF_TYPES.filter(t=>maint||!t.maint).every(t=>!prefs[t.id]);
   const unseen=list.filter(c=>c.at>seen).length;
@@ -2909,6 +2917,7 @@ function Notifications({data,onOpen,prefs,setPrefs,maint,onMaint}){
               <div class="text-[11.5px] text-faint">${agoText(c.at)}${c.by?` · ${c.by===me?'you':showLogin(c.by)}`:''}</div>
             </div>
             ${b&&html`<button class="btn shrink-0" style=${{height:28}} onClick=${()=>{setOpen(false);onOpen(b)}}>Open</button>`}
+            ${c.jobId&&onCompleteJob&&html`<button class="btn btn-primary shrink-0 nt-complete-job" style=${{height:28}} onClick=${()=>onCompleteJob(c.jobId)}>Complete</button>`}
             ${!b&&c.assetId&&onMaint&&html`<button class="btn shrink-0 nt-open-asset" style=${{height:28}} onClick=${()=>{setOpen(false);onMaint(c.assetId)}}>Open</button>`}
             <button class="w-7 h-7 shrink-0 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>dismiss(c.id)} aria-label="Delete this notification" title="Delete">${Icon.x}</button>
           </li>`}
@@ -5337,7 +5346,7 @@ function App({boot,live}){
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>`}
         ${live.role!=='prestart'&&!sup&&html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
-        ${live.role!=='prestart'&&!sup&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} onMaint=${openFleetAsset} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
+        ${live.role!=='prestart'&&!sup&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} onMaint=${openFleetAsset} onCompleteJob=${live.canEdit?(id=>{setData(d=>({...d,jobs:d.jobs.map(j=>j.id===id?{...j,completed:true,completedAt:iso(TODAY)}:j)}));const j=data.jobs.find(x=>x.id===id);setToast(`${j?jobLabel(j):'Job'} marked complete`)}):null} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
         ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary" disabled=${!live.canEdit&&live.role!=='supervisor'} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Add leave</button>`}
         ${boardScreen&&screen!=='staff'&&!sup&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'||screen==='fleet'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&!sup&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
