@@ -7,6 +7,7 @@
 // POST /api/users  (Authorization: Bearer <the signed-in person's access token>)
 //   { action: 'create', login: 'jsmith' | 'name@company.com', password: '<temporary>', role: 'prestart', staff_id: '...' }
 //   { action: 'reset', id: '<login id>', password: '<temporary>' }
+//   { action: 'rename', id: '<login id>', login: 'newname' }   (their password stays the same)
 //   { action: 'delete', id: '<login id>' }   (their profile goes with it; prestarts they signed keep their name)
 // A temporary password: the person chooses their own the first time they sign in.
 
@@ -48,7 +49,7 @@ async function handler(req, res, env = process.env, http = fetch) {
   let b;
   try { b = await readBody(req); } catch (e) { return send(res, 400, { error: 'Bad request' }); }
   const password = String(b.password || '');
-  if (b.action !== 'delete' && password.length < 8) return send(res, 400, { error: 'The temporary password needs at least 8 characters.' });
+  if (b.action !== 'delete' && b.action !== 'rename' && password.length < 8) return send(res, 400, { error: 'The temporary password needs at least 8 characters.' });
 
   if (b.action === 'create') {
     const login = String(b.login || '').trim();
@@ -87,6 +88,23 @@ async function handler(req, res, env = process.env, http = fetch) {
     const r = await http(`${url}/auth/v1/admin/users/${id}`, { method: 'PUT', headers: admin, body: JSON.stringify({ password, user_metadata: { password_set: false } }) });
     if (!r.ok) { const j = await r.json().catch(() => ({})); return send(res, 400, { error: String(j.msg || j.message || 'Supabase didn’t reset the password.') }); }
     return send(res, 200, { id });
+  }
+
+  if (b.action === 'rename') {
+    const id = String(b.id || '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return send(res, 400, { error: 'Bad request' });
+    const login = String(b.login || '').trim();
+    if (!login.includes('@') && !/^[a-z0-9][a-z0-9._-]{1,39}$/i.test(login)) return send(res, 400, { error: 'Usernames use letters, numbers, dots, dashes or underscores (2–40 characters).' });
+    const tr = await http(`${url}/rest/v1/profiles?id=eq.${id}&select=role`, { headers: admin });
+    const target = tr.ok ? (await tr.json())[0] : null;
+    if (!target) return send(res, 404, { error: 'No such login.' });
+    if (target.role === 'admin' && myRole !== 'admin' ) return send(res, 403, { error: 'Only the administrator can change an admin’s username.' });
+    const email = toEmail(login);
+    const r = await http(`${url}/auth/v1/admin/users/${id}`, { method: 'PUT', headers: admin, body: JSON.stringify({ email, email_confirm: true }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { const msg = String(j.msg || j.message || j.error_description || ''); return send(res, /already|exists|registered/i.test(msg) ? 409 : 400, { error: /already|exists|registered/i.test(msg) ? 'That username is already taken.' : (msg || 'Supabase didn’t change the username.') }); }
+    await http(`${url}/rest/v1/profiles?id=eq.${id}`, { method: 'PATCH', headers: { ...admin, Prefer: 'return=minimal' }, body: JSON.stringify({ email }) });
+    return send(res, 200, { id, email });
   }
 
   if (b.action === 'delete') {

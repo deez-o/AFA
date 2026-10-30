@@ -2682,7 +2682,8 @@ const previewOf=d=>{if(!d||!Array.isArray(d.previewOnly))return PREVIEW_DEFAULT;
 const screenOK0=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=role==='admin'||role==='superuser';
   return (!s.admin||admin)&&(!s.roles||s.roles.includes(role))&&(!s.preview||role==='admin'||!previewOf(d).includes(k))};
 /* operators only see Prestarts, once it is released to them */
-const screenOK=(k,role,d)=>screenOK0(k,role,d)&&!(role==='prestart'&&k!=='prestarts'&&k!=='qa'&&screenOK0('prestarts',role,d))
+const screenOK=(k,role,d)=>screenOK0(k,role,d)&&!(role==='prestart'&&k!=='prestarts'&&k!=='qa'&&k!=='staff'&&screenOK0('prestarts',role,d))
+  &&!(role==='prestart'&&k==='staff'&&!screenOK0('prestarts',role,d))   /* operators: Leave (their own leave form) once Prestarts is released to them */
   &&!(role==='supervisor'&&!['schedule','staff','prestarts','qa'].includes(k))   /* supervisors: the schedule, the leave calendar, prestarts and site QA */
   &&k!=='machines';   /* machines are managed and booked in Fleet (Fleet › Machines and Calendar); the old Machines screen is gone */
 /* Fleet's sections; the Calendar is the machines' schedule board */
@@ -2713,8 +2714,8 @@ const NAV_ICON={
 function NavRail({screen,go,isAdmin,role,data,badge={}}){
   const btn=([k,s])=>{const on=screen===k;
     return html`<button key=${k} class=${'flex flex-col items-center gap-0.5 sm:gap-1 rounded-lg py-2 sm:py-2.5 text-[9.5px] sm:text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
-      style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${s.label}>
-      <span class="relative inline-flex">${NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${s.label}</span>${role==='admin'&&s.preview&&previewOf(data).includes(k)&&html`<span class="-mt-0.5 text-[8.5px] font-bold uppercase tracking-wide px-1 rounded leading-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}} title="Only you can see this while it is in progress">Preview</span>`}</button>`};
+      style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${k==='staff'&&role==='prestart'?'Leave':s.label}>
+      <span class="relative inline-flex">${k==='staff'&&role==='prestart'?NAV_ICON.schedule:NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${k==='staff'&&role==='prestart'?'Leave':s.label}</span>${role==='admin'&&s.preview&&previewOf(data).includes(k)&&html`<span class="-mt-0.5 text-[8.5px] font-bold uppercase tracking-wide px-1 rounded leading-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}} title="Only you can see this while it is in progress">Preview</span>`}</button>`};
   const all=Object.entries(SCREENS).filter(([k])=>screenOK(k,role,data));
   if(all.length<2)return null;   /* one screen (operators: Prestarts): no menu needed */
   /* bottom of the bar: features still in progress (admin only, until released), then Ideas */
@@ -4765,7 +4766,7 @@ function useLeaveRequests(live,on){
   const [list,setList]=useState([]);const [ok,setOk]=useState(true);
   const load=async()=>{if(!on)return;try{const since=new Date(Date.now()-30*864e5).toISOString();
       const {data:r,error}=await live.sb.from('leave_requests').select('*');if(error)throw error;
-      setList((r||[]).filter(x=>x.status==='pending'||(x.decided_at&&x.decided_at>=since)));setOk(true)}catch(e){setOk(false)}};
+      setList((r||[]).filter(x=>x.status==='pending'||(x.status==='draft'&&x.requested_by===live.user.id)||(x.decided_at&&x.decided_at>=since)));setOk(true)}catch(e){setOk(false)}};
   useEffect(()=>{if(!on)return;load();let ch=null,t=null;try{ch=live.sb.channel('leave-'+uid()).on('postgres_changes',{event:'*',schema:'public',table:'leave_requests'},()=>{clearTimeout(t);t=setTimeout(load,300)});ch.subscribe()}catch(e){}
     return()=>{clearTimeout(t);try{if(ch)live.sb.removeChannel(ch)}catch(e){}}},[on]);
   return {list,ok,reload:load};
@@ -4774,7 +4775,7 @@ function LeaveRequests({LR,data,setData,live,notify,onOpen}){
   const decider=LEAVE_DECIDERS.includes(live.role);const me=live.user.id;
   const name=id=>(data.resources.find(r=>r.id===id)||{}).name||'Someone';
   const pend=LR.list.filter(r=>r.status==='pending').sort((a,b)=>a.start_date.localeCompare(b.start_date));
-  const mine=decider?[]:LR.list.filter(r=>r.requested_by===me&&r.status!=='pending').sort((a,b)=>String(b.decided_at).localeCompare(String(a.decided_at))).slice(0,5);
+  const mine=decider?[]:LR.list.filter(r=>r.requested_by===me&&(r.status==='approved'||r.status==='declined')).sort((a,b)=>String(b.decided_at).localeCompare(String(a.decided_at))).slice(0,5);
   if(!LR.ok)return decider?null:html`<section class="panel px-4 py-3 text-[12.5px]" style=${{color:'var(--bad)'}}>Leave requests aren’t set up yet: an administrator needs to run <span class="mono">supabase/leave_requests.sql</span>.</section>`;
   if(!pend.length&&!mine.length)return null;
   const range=r=>`${fmtShort(parse(r.start_date))}${r.end_date!==r.start_date?' – '+fmtShort(parse(r.end_date)):''}`;
@@ -4786,6 +4787,55 @@ function LeaveRequests({LR,data,setData,live,notify,onOpen}){
       <button type="button" class=${'btn '+(decider?'btn-primary':'')+' lr-open'} style=${{height:32}} onClick=${()=>onOpen(r)}>${decider?'Approve or decline':'Open'}</button></div>`)}
     ${mine.map(r=>html`<div key=${r.id} class="text-[12.5px] lr-mine"><span class="font-medium">${name(r.person_id)}</span> · ${KINDS[r.kind].label} ${range(r)}: <span style=${{color:r.status==='approved'?'hsl(145 55% 32%)':'var(--bad)'}}>${r.status==='approved'?'approved':'declined'}</span>${r.decline_reason?` (${r.decline_reason})`:''}</div>`)}
   </section>`;
+}
+/* operators: put in their own leave (save a draft, then submit it), and see where each request is up to */
+const LR_STATUS={draft:['Draft','var(--muted)'],pending:['Submitted · waiting for approval','hsl(38 90% 38%)'],approved:['Approved','hsl(145 55% 32%)'],declined:['Declined','var(--bad)']};
+function MyLeave({live,data,LR,notify}){
+  const sb=live.sb;const me=live.user.id;
+  const [prof,setProf]=useState(()=>{try{return JSON.parse(localStorage.getItem('ff:prof:'+me)||'null')}catch(e){return null}});
+  useEffect(()=>{sb.from('profiles').select('*').eq('id',me).maybeSingle().then(({data:p})=>{if(p){setProf(p);try{localStorage.setItem('ff:prof:'+me,JSON.stringify(p))}catch(e){}}}).catch(()=>{})},[]);
+  const staff=prof&&prof.staff_id?data.resources.find(r=>r.id===prof.staff_id):null;
+  const blankF=()=>({id:null,kind:'leave',start:iso(TODAY),end:iso(TODAY),note:''});
+  const [f,setF]=useState(blankF);const [busy,setBusy]=useState(false);const [err,setErr]=useState('');const [del,setDel]=useState(null);
+  const mine=LR.list.filter(r=>r.requested_by===me||(staff&&r.person_id===staff.id)).sort((a,b)=>String(b.requested_at).localeCompare(String(a.requested_at)));
+  const save=async status=>{setErr('');if(!f.start||!f.end||f.end<f.start){setErr('Check the dates: the last day can’t be before the first.');return}setBusy(true);
+    const row={kind:f.kind,start_date:f.start,end_date:f.end,note:f.note.trim()||null,status};
+    const {error}=f.id?await sb.from('leave_requests').update(row).eq('id',f.id):await sb.from('leave_requests').insert({...row,person_id:staff.id});
+    setBusy(false);if(error){setErr(/leave_requests/.test(error.message)?'Leave requests aren’t set up yet. Ask the office.':error.message);return}
+    notify(status==='draft'?'Draft saved':'Leave submitted for approval');setF(blankF());LR.reload()};
+  const act=async(r,what)=>{setErr('');const {error}=what==='submit'?await sb.from('leave_requests').update({status:'pending'}).eq('id',r.id):await sb.from('leave_requests').delete().eq('id',r.id);
+    if(error){setErr(error.message);return}setDel(null);notify(what==='submit'?'Leave submitted for approval':r.status==='draft'?'Draft deleted':'Request withdrawn');if(f.id===r.id)setF(blankF());LR.reload()};
+  const range=r=>`${fmtShort(parse(r.start_date))}${r.end_date!==r.start_date?' – '+fmtShort(parse(r.end_date)):''} ${parse(r.end_date).getFullYear()}`;
+  const days=f.start&&f.end&&f.end>=f.start?diffDays(parse(f.start),parse(f.end))+1:0;
+  if(!staff)return html`<div class="flex-1 min-h-0 overflow-y-auto"><div class="panel p-5 text-[13.5px] max-w-[560px]" id="my-leave">${prof?'Your login isn’t linked to your Staff record yet, so leave can’t be put in under your name. Ask the office to link it (Staff › People).':'Loading…'}</div></div>`;
+  return html`<div class="flex-1 min-h-0 overflow-y-auto grid grid-cols-[minmax(0,1fr)] gap-3 content-start pb-4" id="my-leave">
+    <section class="panel p-4 grid gap-3 max-w-[620px] w-full">
+      <div><div class="font-display text-[17px] font-semibold">${f.id?'Change your draft':'Put in leave'}</div><div class="text-[12.5px] text-muted">For ${staff.name}. The office approves it before it’s on the roster.</div></div>
+      <div class="grid gap-1 min-w-0"><span class="label">Type</span><div class="seg w-max flex-wrap" role="group" aria-label="Type">${LEAVE_KINDS.map(k=>html`<button key=${k} id=${'ml-k-'+k} type="button" aria-pressed=${f.kind===k} onClick=${()=>setF(x=>({...x,kind:k}))}>${KINDS[k].label}</button>`)}</div></div>
+      <div class="grid grid-cols-2 gap-3"><label class="grid gap-1"><span class="label">First day</span><input id="ml-from" type="date" class="field" value=${f.start} onChange=${e=>{const v=e.target.value;setF(x=>({...x,start:v,end:x.end<v?v:x.end}))}}/></label>
+        <label class="grid gap-1"><span class="label">Last day</span><input id="ml-to" type="date" class="field" value=${f.end} min=${f.start} onChange=${e=>{const v=e.target.value;setF(x=>({...x,end:v}))}}/></label></div>
+      <label class="grid gap-1"><span class="label">Note (optional)</span><input id="ml-note" class="field" placeholder="e.g. Family holiday" value=${f.note} onInput=${e=>{const v=e.target.value;setF(x=>({...x,note:v}))}}/></label>
+      ${days>0&&html`<div class="text-[12.5px] text-muted">${days} day${days===1?'':'s'}</div>`}
+      ${err&&html`<div id="ml-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+      <div class="flex flex-wrap gap-2"><button id="ml-submit" type="button" class="btn btn-primary" style=${{height:42}} disabled=${busy} onClick=${()=>save('pending')}>Submit for approval</button>
+        <button id="ml-draft" type="button" class="btn" style=${{height:42}} disabled=${busy} onClick=${()=>save('draft')}>Save as draft</button>
+        ${f.id&&html`<button type="button" class="btn" style=${{height:42}} onClick=${()=>setF(blankF())}>Cancel</button>`}</div>
+    </section>
+    <section class="panel p-4 grid gap-2 max-w-[620px] w-full" id="my-leave-list">
+      <div class="font-display text-[15px] font-semibold">Your leave</div>
+      ${!mine.length&&html`<div class="text-[12.5px] text-muted">Nothing put in yet.</div>`}
+      ${mine.map(r=>{const st=LR_STATUS[r.status]||[r.status,'var(--muted)'];return html`<div key=${r.id} class="rounded-lg border border-line px-3 py-2.5 grid gap-1 ml-row" data-status=${r.status}>
+        <div class="flex flex-wrap items-center gap-2"><span class="text-[13.5px] font-medium flex-1 min-w-0">${KINDS[r.kind].label} · ${range(r)}</span>
+          <span class="text-[11.5px] font-semibold px-2 py-0.5 rounded-full ml-status" style=${{color:st[1],background:'var(--sunken)',boxShadow:`inset 0 0 0 1px ${st[1]}`}}>${st[0]}</span></div>
+        ${r.note&&html`<div class="text-[12px] text-muted">${r.note}</div>`}
+        ${r.status==='declined'&&r.decline_reason&&html`<div class="text-[12px]" style=${{color:'var(--bad)'}}>${r.decline_reason}</div>`}
+        ${(r.status==='draft'||r.status==='pending')&&html`<div class="flex flex-wrap gap-2 pt-1">${del===r.id
+          ?html`<span class="text-[12.5px] font-medium" style=${{color:'var(--bad)'}}>${r.status==='draft'?'Delete this draft?':'Withdraw this request?'}</span><button type="button" class="btn" style=${{height:32}} onClick=${()=>setDel(null)}>Keep</button><button type="button" class="btn ml-del-go" style=${{height:32,background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${()=>act(r,'del')}>${r.status==='draft'?'Delete':'Withdraw'}</button>`
+          :html`${r.status==='draft'&&html`<button type="button" class="btn btn-primary ml-send" style=${{height:32}} onClick=${()=>act(r,'submit')}>Submit</button><button type="button" class="btn ml-edit" style=${{height:32}} onClick=${()=>setF({id:r.id,kind:r.kind,start:r.start_date,end:r.end_date,note:r.note||''})}>Change</button>`}
+            <button type="button" class="btn ml-del" style=${{height:32}} onClick=${()=>setDel(r.id)}>${r.status==='draft'?'Delete':'Withdraw'}</button>`}</div>`}
+      </div>`})}
+    </section>
+  </div>`;
 }
 function LeaveRequestDialog({r,LR,data,setData,live,notify,onClose}){
   const decider=LEAVE_DECIDERS.includes(live.role);const mineReq=r.requested_by===live.user.id;const [reason,setReason]=useState('');const [busy,setBusy]=useState(false);const [err,setErr]=useState('');const [declining,setDeclining]=useState(false);
@@ -4839,9 +4889,9 @@ function SDialog({title,sub,onClose,children,foot,width=520}){
 const SFld=({label,children})=>html`<label class="grid gap-1 min-w-0"><span class="label">${label}</span>${children}</label>`;
 
 /* add leave: who, what kind, when */
-function LeaveDialog({data,setData,onClose,notify,personId,request}){
+function LeaveDialog({data,setData,onClose,notify,personId,request,start,end}){
   const people=data.resources.filter(r=>r.type==='person').sort((a,b)=>a.name.localeCompare(b.name));
-  const [f,setF]=useState({resourceId:personId||'',kind:'leave',start:iso(TODAY),end:iso(TODAY),title:''});const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
+  const [f,setF]=useState({resourceId:personId||'',kind:'leave',start:start||iso(TODAY),end:end||start||iso(TODAY),title:''});const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
   const save=()=>{if(!f.resourceId){setErr('Pick who is away.');return}if(!f.start||!f.end||f.end<f.start){setErr('Check the dates.');return}
     const clash=data.blocks.find(b=>b.resourceId===f.resourceId&&LEAVE_KINDS.includes(b.kind)&&b.start<=f.end&&b.end>=f.start);
     if(clash&&err!=='clash'){setErr('clash');return}
@@ -4937,6 +4987,15 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
   const admin=!!live&&(live.role==='admin'||live.role==='superuser');const canEdit=live?live.canEdit:true;const sb=live&&live.sb;const me=live&&live.user.id;const myRole=live&&live.role;
   const [profs,setProfs]=useState(null);const [perr,setPerr]=useState('');const [dlg,setDlg]=useState(null);const [made,setMade]=useState(null);
   const [reset,setReset]=useState(null);const [busy,setBusy]=useState(false);const [q,setQ]=useState('');const [crew,setCrew]=useState('');const [delL,setDelL]=useState(null);
+  const [ren,setRen]=useState(null);   /* {id, value} while changing a username */
+  const doRename=async p=>{const v=(ren.value||'').trim();if(!v||v.toLowerCase()===showLogin(p.email).toLowerCase()){setRen(null);return}setBusy(true);setPerr('');
+    try{await usersApi(sb,{action:'rename',id:p.id,login:v});notify(`Username changed to ${v.toLowerCase()}`);setRen(null);load()}catch(e){setPerr(e.message)}finally{setBusy(false)}};
+  const loginCell=p=>{const lock=roleKey(p.role)==='admin'&&myRole!=='admin';
+    return ren&&ren.id===p.id?html`<span class="inline-flex items-center gap-1.5 lg-rename"><input class="field mono lg-rename-input" style=${{height:30,fontSize:12.5,width:150}} value=${ren.value} autoFocus=${true} autocapitalize="none" spellcheck="false"
+        onInput=${e=>setRen({...ren,value:e.target.value})} onKeyDown=${e=>{if(e.key==='Enter')doRename(p);if(e.key==='Escape')setRen(null)}} aria-label=${'New username for '+showLogin(p.email)}/>
+        <button type="button" class="btn btn-primary lg-rename-save" style=${{height:30}} disabled=${busy} onClick=${()=>doRename(p)}>Save</button><button type="button" class="btn" style=${{height:30}} onClick=${()=>setRen(null)}>Cancel</button></span>`
+      :html`<span class="inline-flex items-center gap-1">${showLogin(p.email)}${p.id===me?html` <span class="text-muted font-sans">(you)</span>`:''}
+        ${!lock&&html`<button type="button" class="p-1 rounded text-muted hover:text-ink lg-rename-btn" title="Change the username" aria-label=${'Change the username '+showLogin(p.email)} onClick=${()=>{setRen({id:p.id,value:showLogin(p.email)});setReset(null);setDelL(null)}}>${Icon.pencil}</button>`}</span>`};
   const doDelLogin=async p=>{setBusy(true);setPerr('');try{await usersApi(sb,{action:'delete',id:p.id});notify(`Login ${showLogin(p.email)} deleted`);setDelL(null);setMade(null);load()}catch(e){setPerr(e.message)}finally{setBusy(false)}};
   const delLoginCtl=p=>p.id===me||(roleKey(p.role)==='admin'&&myRole!=='admin')?null:delL===p.id
     ?html`<span class="inline-flex items-center gap-1.5 lg-del-confirm"><span class="text-[12px] font-medium" style=${{color:'var(--bad)'}}>Delete ${showLogin(p.email)}? They can’t sign in any more.</span><button type="button" class="btn" style=${{height:30}} onClick=${()=>setDelL(null)}>Cancel</button><button type="button" class="btn lg-del-yes" style=${{height:30,background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} disabled=${busy} onClick=${()=>doDelLogin(p)}>${busy?'Deleting…':'Yes, delete'}</button></span>`
@@ -4983,7 +5042,7 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
             <td class="py-2 px-3"><button type="button" class="flex items-center gap-2.5 text-left sp-open" onClick=${()=>setDlg({k:'person',p})}><${Badge} r=${p} size=${28}/><span class="min-w-0"><span class="block font-medium text-[13px] hover:underline">${p.name}</span><span class="block text-[11.5px] text-muted">${p.sub||''}</span></span></button></td>
             <td class="py-2 px-3 whitespace-nowrap">${crewName(p.crewId)||html`<span class="text-faint">–</span>`}</td>
             <td class="py-2 px-3 whitespace-nowrap">${lv?html`<span class="text-[12px]" style=${lv.now?{color:'hsl(28 80% 40%)',fontWeight:600}:{color:'var(--muted)'}}>${lv.now?'Away: ':'Next: '}${lv.t}</span>`:html`<span class="text-faint">–</span>`}</td>
-            ${admin&&(profs==null?html`<td colspan="3" class="py-2 px-3 text-muted">…</td>`:pr?html`<td class="py-2 px-3 mono whitespace-nowrap sp-login">${showLogin(pr.email)}${pr.id===me?html` <span class="text-muted font-sans">(you)</span>`:''}</td><td class="py-2 px-3">${roleSel(pr)}</td><td class="py-2 px-3 text-right whitespace-nowrap">${resetCtl(pr)}</td>`
+            ${admin&&(profs==null?html`<td colspan="3" class="py-2 px-3 text-muted">…</td>`:pr?html`<td class="py-2 px-3 mono whitespace-nowrap sp-login">${loginCell(pr)}</td><td class="py-2 px-3">${roleSel(pr)}</td><td class="py-2 px-3 text-right whitespace-nowrap">${resetCtl(pr)}</td>`
               :html`<td class="py-2 px-3 text-faint">No login</td><td></td><td class="py-2 px-3 text-right"><button type="button" class="btn sp-newlogin" style=${{height:30}} onClick=${()=>{setMade(null);setDlg({k:'login',p})}}>${Icon.plus} Create login</button></td>`)}
             ${canEdit&&admin&&html`<td class="py-2 pl-1 pr-3 text-right w-0"><button type="button" class="sp-del w-8 h-8 inline-flex items-center justify-center rounded-md hover:opacity-70" style=${{color:'var(--bad)'}} title=${'Delete '+p.name} aria-label=${'Delete '+p.name} onClick=${()=>setDlg({k:'person',p,del:true})}>${Icon.trash}</button></td>`}
 </tr>`})}
@@ -4995,7 +5054,7 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
       <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="lg-table">
         <thead><tr class="text-left">${['Username','Role','Staff member',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
         <tbody>${loose.map(p=>html`<tr key=${p.id} class="border-t border-line" data-email=${p.email}>
-          <td class="py-2 px-3 mono whitespace-nowrap">${showLogin(p.email)}${p.id===me?html` <span class="text-muted font-sans">(you)</span>`:''}</td>
+          <td class="py-2 px-3 mono whitespace-nowrap">${loginCell(p)}</td>
           <td class="py-2 px-3">${roleSel(p)}</td>
           <td class="py-2 px-3"><select class="field w-auto lg-staff" style=${{height:30,fontSize:12.5,minWidth:190}} value="" onChange=${e=>e.target.value&&saveProf(p,{staff_id:e.target.value})} aria-label=${'Link '+showLogin(p.email)+' to a staff member'}><option value="">Link to…</option>${people.filter(x=>!linked.has(x.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(x=>html`<option key=${x.id} value=${x.id}>${x.name}</option>`)}</select></td>
           <td class="py-2 px-3 text-right whitespace-nowrap">${delL===p.id?null:resetCtl(p)}${reset&&reset.id===p.id?null:delLoginCtl(p)}</td></tr>`)}
@@ -5072,7 +5131,8 @@ function App({boot,live}){
   const [staffView,setStaffView0]=useState(()=>{try{return localStorage.getItem(KEY+':staff-view')==='people'?'people':'leave'}catch(e){return 'leave'}});
   const setStaffView=v=>{setStaffView0(v);try{localStorage.setItem(KEY+':staff-view',v)}catch(e){}};
   const [leaveDlg,setLeaveDlg]=useState(null);   /* {personId} while adding leave */
-  const LR=useLeaveRequests(live,['admin','superuser','supervisor'].includes(live.role));const [leaveReq,setLeaveReq]=useState(null);
+  const LR=useLeaveRequests(live,['admin','superuser','supervisor','prestart'].includes(live.role));
+  const myLeaveView=screen==='staff'&&live.role==='prestart';   /* operators: their own leave form, not the calendar */const [leaveReq,setLeaveReq]=useState(null);
   const sendLeave=async row=>{const {error}=await live.sb.from('leave_requests').insert(row);if(error)return /leave_requests/.test(error.message||'')&&/exist|schema/i.test(error.message||'')?'Leave requests aren’t set up yet: an administrator needs to run supabase/leave_requests.sql.':error.message;LR.reload();return null};
   const peopleView=screen==='staff'&&staffView==='people'&&live.role!=='supervisor';   /* supervisors: the leave calendar only */
   /* Fleet's section (remembered); its Calendar is the machine board */
@@ -5080,7 +5140,7 @@ function App({boot,live}){
   const setFleetTab=v=>{setFleetTab0(v);try{localStorage.setItem(KEY+':fleet-tab',v)}catch(e){}};
   const [fleetCounts,setFleetCounts]=useState({});const [fleetAsset,setFleetAsset]=useState(null);
   const fleetCal=screen==='fleet'&&fleetTab==='cal';
-  const boardScreen=screen!=='planning'&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&!peopleView;   /* the date controls and + Booking belong to the board screens */
+  const boardScreen=screen!=='planning'&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&!peopleView&&!myLeaveView;   /* the date controls and + Booking belong to the board screens */
   const goScreen=k=>{setScreen(k);try{localStorage.setItem(KEY+':screen',k)}catch(e){}
     const t=SCREENS[k].tab;if(t)setTab(t);else if(tab==='person'||tab==='machine')setTab('crew')};
   useEffect(()=>{const t=SCREENS[screen].tab;if(t&&tab!==t)setTab(t);else if(!t&&(tab==='person'||tab==='machine'))setTab('crew')},[screen,tab]);
@@ -5088,7 +5148,7 @@ function App({boot,live}){
   const openFleetAsset=screenOK('fleet',live.role,data)?id=>{setFleetAsset({id,n:Date.now()});if(fleetTab==='cal')setFleetTab('dash');goScreen('fleet')}:null;
   const sup=live.role==='supervisor';   /* supervisors: the crews' schedule, nothing to change, no extras */
   const SCR0=fleetCal?{...SCREENS.machines,title:SCREENS.fleet.title}:SCREENS[screen];
-  const SCR=sup&&screen==='schedule'?{...SCR0,only:['crew'],legend:['Crews'],head:'Crews'}:SCR0;
+  const SCR=sup&&screen==='schedule'?{...SCR0,only:['crew'],legend:['Crews'],head:'Crews'}:myLeaveView?{...SCR0,title:'Leave'}:SCR0;
   useEffect(()=>{document.title='FraserFlow - '+SCR.title},[screen]);
   const [renameId,setRenameId]=useState(null);
   const [exporting,setExporting]=useState(null);
@@ -5251,14 +5311,14 @@ function App({boot,live}){
       </header>
 
       ${live.offline&&html`<${OfflineBar} at=${live.offline.at}/>`}
-      ${screen==='staff'&&live.role!=='supervisor'&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg" role="tablist" aria-label="Staff sections">
+      ${screen==='staff'&&live.role!=='supervisor'&&!myLeaveView&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg" role="tablist" aria-label="Staff sections">
         <button id="sv-leave" type="button" role="tab" aria-selected=${!peopleView} aria-pressed=${!peopleView} onClick=${()=>setStaffView('leave')}>Leave calendar</button>
         <button id="sv-people" type="button" role="tab" aria-selected=${peopleView} aria-pressed=${peopleView} onClick=${()=>setStaffView('people')}>People</button></div></div>`}
       ${screen==='fleet'&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg flex-wrap" role="tablist" aria-label="Fleet sections">${FLEET_TABS.map(([k,l])=>html`<button key=${k} id=${'fl-tab-'+k} type="button" role="tab" aria-selected=${fleetTab===k} aria-pressed=${fleetTab===k} onClick=${()=>setFleetTab(k)}>${l}${k==='wo'&&fleetCounts.wo!=null?html` <span class="mono text-[11px] text-faint">${fleetCounts.wo}</span>`:k==='df'&&fleetCounts.df!=null?html` <span class="mono text-[11px] text-faint">${fleetCounts.df}</span>`:''}</button>`)}</div></div>`}
-      ${leaveDlg&&html`<${LeaveDialog} data=${data} setData=${setData} notify=${setToast} personId=${leaveDlg.personId} request=${!live.canEdit&&live.role==='supervisor'?sendLeave:null} onClose=${()=>setLeaveDlg(null)}/>`}
-      ${leaveReq&&html`<${LeaveRequestDialog} r=${leaveReq} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onClose=${()=>setLeaveReq(null)}/>`}
-      ${screen==='staff'&&!peopleView&&html`<${LeaveRequests} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onOpen=${setLeaveReq}/>`}
-      ${peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:(screen==='fleet'&&!fleetCal)||screen==='prestarts'||screen==='qa'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':screen==='qa'?'QaScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast} setData=${setData} tab=${fleetTab} onCounts=${setFleetCounts} assetReq=${fleetAsset} onImportMachines=${()=>setMachImport(true)}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
+      ${leaveDlg&&html`<${LeaveDialog} data=${data} setData=${setData} notify=${setToast} personId=${leaveDlg.personId} start=${leaveDlg.start} end=${leaveDlg.end} request=${!live.canEdit&&live.role==='supervisor'?sendLeave:null} onClose=${()=>setLeaveDlg(null)}/>`}
+      ${leaveReq&&html`<${LeaveRequestDialog} key=${leaveReq.id} r=${leaveReq} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onClose=${()=>setLeaveReq(null)}/>`}
+      ${screen==='staff'&&!peopleView&&!myLeaveView&&html`<${LeaveRequests} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onOpen=${setLeaveReq}/>`}
+      ${myLeaveView?html`<${MyLeave} live=${live} data=${data} LR=${LR} notify=${setToast}/>`:peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:(screen==='fleet'&&!fleetCal)||screen==='prestarts'||screen==='qa'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':screen==='qa'?'QaScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast} setData=${setData} tab=${fleetTab} onCounts=${setFleetCounts} assetReq=${fleetAsset} onImportMachines=${()=>setMachImport(true)}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
       ${screen==='staff'?(()=>{const L=leaveStats(data);return html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3" id="leave-stats">
         <${Stat} k="Away today" v=${L.today.length} sub=${L.today.length?L.today.map(x=>`${x.p.name.split(' ')[0]} (back ${fmtShort(addDays(parse(x.b.end),1))})`).join(', '):'everyone in'} tone=${L.today.length?'var(--warn)':null}/>
         <${Stat} k="Away this week" v=${L.week.length} sub=${L.week.length?`${L.weekDays} staff-day${L.weekDays===1?'':'s'} · ${L.week.map(p=>p.name.split(' ')[0]).join(', ')}`:'no leave this week'}/>
@@ -5278,7 +5338,7 @@ function App({boot,live}){
       </section>`}
 
       <section class="panel flex-1 min-h-[320px] flex flex-col overflow-hidden">
-        <${Board} data=${screen==='staff'&&LR.list.some(r=>r.status==='pending')?{...data,blocks:[...data.blocks,...LR.list.filter(r=>r.status==='pending'&&data.resources.some(x=>x.id===r.person_id)).map(r=>({id:'lr-'+r.id,resourceId:r.person_id,kind:r.kind,start:r.start_date,end:r.end_date,title:'Waiting for approval'+(r.note?' · '+r.note:''),pending:true,req:r}))]}:data} days=${days} view=${view} narrow=${narrow} readOnly=${!live.canEdit} onCreate=${onCreate} onEdit=${b=>b.pending?setLeaveReq(b.req):setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
+        <${Board} data=${screen==='staff'&&LR.list.some(r=>r.status==='pending')?{...data,blocks:[...data.blocks,...LR.list.filter(r=>r.status==='pending'&&data.resources.some(x=>x.id===r.person_id)).map(r=>({id:'lr-'+r.id,resourceId:r.person_id,kind:r.kind,start:r.start_date,end:r.end_date,title:'Waiting for approval'+(r.note?' · '+r.note:''),pending:true,req:r}))]}:data} days=${days} view=${view} narrow=${narrow} readOnly=${!live.canEdit} onCreate=${screen==='staff'&&!live.canEdit&&live.role==='supervisor'?b=>setLeaveDlg({personId:b.resourceId,start:b.start,end:b.end}):onCreate} onEdit=${b=>b.pending?setLeaveReq(b.req):setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
           collapsed=${collapsed} toggleSection=${t=>setCollapsed(c=>({...c,[t]:!c[t]}))}/>
         <div class="border-t border-line px-4 py-2.5 hidden sm:flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
           ${legend.filter(([g])=>SCR.legend.includes(g)).map(([g,ks])=>html`<span key=${g} class="inline-flex flex-wrap items-center gap-x-3 gap-y-1">

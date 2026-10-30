@@ -55,6 +55,27 @@ insert into public.leave_requests (id, person_id, kind, start_date, end_date) va
 delete from public.leave_requests where id = '30000000-0000-0000-0000-000000000002';
 select pg_temp.ok(not exists (select 1 from public.leave_requests where id = '30000000-0000-0000-0000-000000000002'), 'a supervisor can withdraw their own request while it waits');
 reset role;
+-- an operator: leave for themselves only, as a draft first
+update public.profiles set staff_id = 't-lv-p1' where id = '00000000-0000-0000-0000-0000000000c3';
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000c3');
+set local role authenticated;
+insert into public.leave_requests (id, person_id, kind, start_date, end_date, status) values ('30000000-0000-0000-0000-000000000003','t-lv-p1','leave','2026-12-21','2026-12-24','draft');
+select pg_temp.ok((select status = 'draft' from public.leave_requests where id = '30000000-0000-0000-0000-000000000003'), 'an operator saves a draft for themselves');
+select pg_temp.refused($$insert into public.leave_requests (person_id, kind, start_date, end_date) values ('t-lv-p2','leave','2026-12-21','2026-12-24')$$, 'an operator putting in leave for someone else');
+update public.leave_requests set end_date = '2026-12-31' where id = '30000000-0000-0000-0000-000000000003';
+select pg_temp.refused($$update public.leave_requests set status = 'approved' where id = '30000000-0000-0000-0000-000000000003'$$, 'an operator approving their own draft');
+select pg_temp.ok((select status = 'draft' and end_date = '2026-12-31' from public.leave_requests where id = '30000000-0000-0000-0000-000000000003'), 'they can change their draft');
+update public.leave_requests set status = 'pending' where id = '30000000-0000-0000-0000-000000000003';
+select pg_temp.ok((select status = 'pending' from public.leave_requests where id = '30000000-0000-0000-0000-000000000003'), 'then submit it');
+update public.leave_requests set end_date = '2027-01-10' where id = '30000000-0000-0000-0000-000000000003';
+select pg_temp.ok((select end_date = '2026-12-31' from public.leave_requests where id = '30000000-0000-0000-0000-000000000003'), 'once submitted they can’t change it');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000c1');
+set local role authenticated;
+update public.leave_requests set status = 'declined', end_date = '2027-01-10' where id = '30000000-0000-0000-0000-000000000003';
+select pg_temp.ok((select status = 'declined' and end_date = '2026-12-31' from public.leave_requests where id = '30000000-0000-0000-0000-000000000003'), 'the administrator declines it (and can’t change what was asked for)');
+reset role;
+
 -- the administrator approves; once decided, it stays decided
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000c1');
 set local role authenticated;

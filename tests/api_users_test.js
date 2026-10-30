@@ -20,7 +20,7 @@ async function http(url, o = {}) {
     made.push(b); return json(200, { id: '00000000-0000-0000-0000-0000000000c1', email: b.email });
   }
   if (url.includes('/auth/v1/admin/users/') && o.method === 'DELETE') { deleted.push(url); return json(200, {}); }
-  if (url.includes('/auth/v1/admin/users/') && o.method === 'PUT') { resets.push({ url, body: JSON.parse(o.body) }); return json(200, {}); }
+  if (url.includes('/auth/v1/admin/users/') && o.method === 'PUT') { const b = JSON.parse(o.body); if (b.email && existing.has(b.email)) return json(422, { msg: 'A user with this email address has already been registered' }); resets.push({ url, body: b }); return json(200, {}); }
   throw new Error('unexpected call ' + url);
 }
 async function call(token, body, env = ENV) {
@@ -52,5 +52,10 @@ const ok = (c, l) => { console.log((c ? 'PASS' : 'FAIL') + ': ' + l); if (!c) fa
   r = await call('tok-admin', { action: 'delete', id: '00000000-0000-0000-0000-0000000000a1' }); ok(r.statusCode === 400 && deleted.length === 0, 'nobody deletes their own login');
   r = await call('tok-super', { action: 'delete', id: '00000000-0000-0000-0000-0000000000a1' }); ok(r.statusCode === 403 && deleted.length === 0, 'a superuser can’t delete the admin’s login');
   r = await call('tok-super', { action: 'delete', id: '00000000-0000-0000-0000-0000000000a7' }); ok(r.statusCode === 200 && /a7$/.test(deleted[0]), 'a superuser deletes a prestart login (no password needed)');
+  resets.length = 0; patched.length = 0;
+  r = await call('tok-super', { action: 'rename', id: '00000000-0000-0000-0000-0000000000a7', login: 'OPete' }); ok(r.statusCode === 200 && resets[0].body.email === 'opete@fraserflow.local' && !resets[0].body.password && patched.some(x => x.body.email === 'opete@fraserflow.local'), 'a superuser renames a login (no password needed; the password stays)');
+  r = await call('tok-super', { action: 'rename', id: '00000000-0000-0000-0000-0000000000a1', login: 'boss' }); ok(r.statusCode === 403, 'a superuser can’t rename the admin');
+  r = await call('tok-admin', { action: 'rename', id: '00000000-0000-0000-0000-0000000000a7', login: 'taken' }); ok(r.statusCode === 409 && /already taken/.test(r.body.error), 'renaming to a username that’s taken: “already taken”');
+  r = await call('tok-planner', { action: 'rename', id: '00000000-0000-0000-0000-0000000000a7', login: 'x1' }); ok(r.statusCode === 403, 'a planner can’t rename logins');
   console.log(fails ? `${fails} FAILED` : 'ALL LOGIN FUNCTION TESTS PASSED'); process.exit(fails ? 1 : 0);
 })();
