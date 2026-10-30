@@ -2616,23 +2616,39 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
 
         <section class="panel p-4 grid gap-2" aria-labelledby="job-bk">
           <div class="flex items-baseline gap-2"><h3 id="job-bk" class="font-display text-[15px] font-semibold">Bookings</h3><span class="text-[12px] text-muted">Click one to open it</span></div>
-          ${!S.bs.length?html`<div class="text-[12.5px] text-muted">No bookings for this job yet. Add one from the Schedule.</div>`:html`<div class="overflow-x-auto"><table class="w-full text-[12.5px]">
-            <thead><tr class="text-left">${['Crew','Dates','Shift','Shifts','Tonnes','Supervisor','Quote','Flags'].map(h=>html`<th key=${h} class="label font-normal py-1.5 pr-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
-            <tbody>${S.bs.map(b=>{const c=data.resources.find(r=>r.id===b.resourceId);const qt=qtyTotals(b);const ds=shiftDates(b);const today=iso(TODAY);const past=b.end<today,live=b.start<=today&&b.end>=today;
-              return html`<tr key=${b.id} class="border-t border-line cursor-pointer hover:bg-sunken" style=${past?{opacity:.6}:null} onClick=${()=>onEditBooking(b)} tabindex="0" onKeyDown=${e=>{if(e.key==='Enter')onEditBooking(b)}}>
-                <td class="py-2 pr-3 whitespace-nowrap"><span class="font-medium">${c?c.name:'Crew'}</span>${c&&c.subbie&&html` <${SubTag}/>`}${b.crewSize?html` <span class="text-muted">· ${b.crewSize} man</span>`:''}</td>
-                <td class="py-2 pr-3 mono whitespace-nowrap">${range(b.start,b.end)}${live?html` <span class="text-[10.5px] font-semibold px-1 rounded" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>Now</span>`:''}</td>
-                <td class="py-2 pr-3 whitespace-nowrap">${b.shift==='night'?html`<span class="inline-flex items-center gap-1">${Icon.moon} Night</span>`:'Day'}</td>
-                <td class="py-2 pr-3 tnum">${ds.length}</td>
-                <td class="py-2 pr-3 tnum mono">${qt.tonnes?fmtN(qt.tonnes):qt.area?fmtN(qt.area)+' m²':'–'}</td>
-                <td class="py-2 pr-3 whitespace-nowrap">${b.supervisor||html`<span class="text-faint">–</span>`}${b.supervisorPhone?html`<div class="text-[11px] text-muted mono">${b.supervisorPhone}</div>`:''}</td>
-                <td class="py-2 pr-3 mono whitespace-nowrap">${b.quoteNo||html`<span class="text-faint">–</span>`}</td>
-                <td class="py-2 pr-3 whitespace-nowrap"><span class="inline-flex flex-wrap gap-1">
-                  ${!b.sapEntered&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded" style=${{background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">SAP</span>`}
-                  ${b.creditIssue&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white" style=${{background:'hsl(0 75% 46%)'}}>Credit</span>`}
-                  ${b.inductionReq&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white" style=${{background:b.inductionDone?'hsl(145 60% 34%)':'hsl(0 75% 46%)'}} title=${b.inductionDone?'Induction paperwork sent':'Induction paperwork not sent'}>Induction</span>`}
-                  ${b.planId&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>Plan</span>`}</span></td>
-              </tr>`})}</tbody></table></div>`}
+          ${!S.bs.length?html`<div class="text-[12.5px] text-muted">No bookings for this job yet. Add one from the Schedule.</div>`:(()=>{
+            /* seal bookings first, then asphalt; each with the quantities that matter for it */
+            const sealOf=b=>isSealCrew(data.resources.find(r=>r.id===b.resourceId));
+            const qtyOf=b=>{const sd=b.shiftData||{};let t=0,a=0,L=0,st=0;const types=new Set();
+              shiftDates(b).forEach(k=>linesOf(sd[k]).filter(lineHas).forEach(l=>{const ar=num(l.area);t+=num(l.tonnes);a+=ar;if(num(l.spray))L+=ar*num(l.spray);if(num(l.spread))st+=ar/num(l.spread);if(l.type)types.add(l.type)}));
+              return {t,a,L,st,types:[...types]}};
+            const n0=v=>v?fmtN(Math.round(v)):html`<span class="text-faint">–</span>`;
+            const flags=b=>html`<span class="inline-flex flex-wrap gap-1">
+              ${!b.sapEntered&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded" style=${{background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">SAP</span>`}
+              ${b.creditIssue&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white" style=${{background:'hsl(0 75% 46%)'}}>Credit</span>`}
+              ${b.inductionReq&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white" style=${{background:b.inductionDone?'hsl(145 60% 34%)':'hsl(0 75% 46%)'}} title=${b.inductionDone?'Induction paperwork sent':'Induction paperwork not sent'}>Induction</span>`}
+              ${b.planId&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>Plan</span>`}</span>`;
+            const group=(seal,bs)=>{if(!bs.length)return null;const Q=bs.map(qtyOf);
+              const tot={t:Q.reduce((x,q)=>x+q.t,0),a:Q.reduce((x,q)=>x+q.a,0),L:Q.reduce((x,q)=>x+q.L,0),st:Q.reduce((x,q)=>x+q.st,0)};
+              const cols=['Crew','Dates','Shift','Shifts',seal?'Seal type':'Mix',...(seal?['Area m²','Binder L','Stone m³']:['Tonnes','Area m²']),'Supervisor','Quote','Flags'];
+              return html`<div class="grid gap-1" id=${seal?'job-bk-seal':'job-bk-asphalt'}>
+                <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5"><span class="text-[13px] font-semibold">${seal?'Seal':'Asphalt'}</span><span class="text-[12px] text-muted">${bs.length} booking${bs.length===1?'':'s'}${seal?` · ${fmtN(Math.round(tot.a))} m²${tot.L?` · ${fmtN(Math.round(tot.L))} L binder`:''}${tot.st?` · ${fmtN(Math.round(tot.st*10)/10)} m³ stone`:''}`:` · ${fmtN(Math.round(tot.t))} t · ${fmtN(Math.round(tot.a))} m²`}</span></div>
+                <div class="overflow-x-auto"><table class="w-full text-[12.5px]">
+                <thead><tr class="text-left">${cols.map(h=>html`<th key=${h} class=${'label font-normal py-1.5 pr-3 whitespace-nowrap'+(/m²|L$|m³|Tonnes/.test(h)?' text-right':'')}>${h}</th>`)}</tr></thead>
+                <tbody>${bs.map((b,i)=>{const c=data.resources.find(r=>r.id===b.resourceId);const q=Q[i];const ds=shiftDates(b);const today=iso(TODAY);const past=b.end<today,live=b.start<=today&&b.end>=today;
+                  return html`<tr key=${b.id} class="border-t border-line cursor-pointer hover:bg-sunken job-bk-row" style=${past?{opacity:.6}:null} onClick=${()=>onEditBooking(b)} tabindex="0" onKeyDown=${e=>{if(e.key==='Enter')onEditBooking(b)}}>
+                    <td class="py-2 pr-3 whitespace-nowrap"><span class="font-medium">${c?c.name:'Crew'}</span>${c&&c.subbie&&html` <${SubTag}/>`}${b.crewSize?html` <span class="text-muted">· ${b.crewSize} man</span>`:''}</td>
+                    <td class="py-2 pr-3 mono whitespace-nowrap">${range(b.start,b.end)}${live?html` <span class="text-[10.5px] font-semibold px-1 rounded" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>Now</span>`:''}</td>
+                    <td class="py-2 pr-3 whitespace-nowrap">${b.shift==='night'?html`<span class="inline-flex items-center gap-1">${Icon.moon} Night</span>`:'Day'}</td>
+                    <td class="py-2 pr-3 tnum">${ds.length}</td>
+                    <td class="py-2 pr-3 whitespace-nowrap">${q.types.join(', ')||html`<span class="text-faint">–</span>`}</td>
+                    ${seal?html`<td class="py-2 pr-3 tnum text-right">${n0(q.a)}</td><td class="py-2 pr-3 tnum text-right">${n0(q.L)}</td><td class="py-2 pr-3 tnum text-right">${q.st?fmtN(Math.round(q.st*10)/10):html`<span class="text-faint">–</span>`}</td>`
+                      :html`<td class="py-2 pr-3 tnum text-right">${n0(q.t)}</td><td class="py-2 pr-3 tnum text-right">${n0(q.a)}</td>`}
+                    <td class="py-2 pr-3 whitespace-nowrap">${b.supervisor||html`<span class="text-faint">–</span>`}${b.supervisorPhone?html`<div class="text-[11px] text-muted mono">${b.supervisorPhone}</div>`:''}</td>
+                    <td class="py-2 pr-3 mono whitespace-nowrap">${b.quoteNo||html`<span class="text-faint">–</span>`}</td>
+                    <td class="py-2 pr-3 whitespace-nowrap">${flags(b)}</td>
+                  </tr>`})}</tbody></table></div></div>`};
+            return html`<div class="grid gap-4">${group(true,S.bs.filter(sealOf))}${group(false,S.bs.filter(b=>!sealOf(b)))}</div>`})()}
         </section>
 
         <div class="grid gap-3 lg:grid-cols-2">

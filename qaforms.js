@@ -62,7 +62,6 @@ const HOLD={id:'hold',label:'Hold point release',short:'Hold point',
   Editor:({f})=>{const d=f.pack.forms.hold;const set=p=>f.set('hold',x=>({...x,...p}));
     return html`<${FormCard} f=${f} id="hold" title="Hold point release" sub=${d.released?'Released: work on this lot may proceed':'Authorisation to proceed'} sigForms=${['hold_afa','hold_client']}>
       <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid gap-3">
-        <${Fld} label="Lot numbers"><textarea id="qa-hold-lots" class="field" rows="2" style=${{height:'auto',padding:'6px 10px',fontSize:13}} value=${d.lot_numbers} onInput=${e=>set({lot_numbers:e.target.value})}></textarea><//>
         <${Fld} label="Comments"><textarea id="qa-hold-comments" class="field" rows="2" style=${{height:'auto',padding:'6px 10px',fontSize:13}} value=${d.comments} onInput=${e=>set({comments:e.target.value})}></textarea><//></fieldset>
       <${Sig} f=${f} form="hold_afa" label="Alex Fraser Asphalt quality representative" other="Someone else signs for AFA"/>
       <div class="label mt-1">Client response</div>
@@ -71,7 +70,7 @@ const HOLD={id:'hold',label:'Hold point release',short:'Hold point',
         <label class="inline-flex items-start gap-2 text-[13.5px] cursor-pointer"><input id="qa-hold-released" type="checkbox" class="w-4 h-4 mt-0.5" checked=${!!d.released} onChange=${e=>set({released:e.target.checked})}/>Release of the hold point is granted. Work on this lot may proceed.</label></fieldset>
       <${Sig} f=${f} form="hold_client" label="Client representative" me=${false} other="Client representative signs"/><//>`},
   pdf:o=>{const d=o.p.forms.hold;const doc=o.doc;o.newPage('p');o.page('HOLD POINT RELEASE FORM · Authorisation to Proceed');let y=24;y=lotGrid(o,y,['client','job_no','location','date','lot_desc','lot_no','start_ch','end_ch']);
-    y=para(o,y+3,'Lot numbers',d.lot_numbers);y=sigBlock(o,y+2,'hold_afa','Alex Fraser Asphalt quality representative');y=para(o,y+3,'Comments',d.comments);
+    y=para(o,y+3,'Comments',d.comments);y=sigBlock(o,y+2,'hold_afa','Alex Fraser Asphalt quality representative');
     doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(153,10,44);o.txt('Client response',o.M,y+6);y+=8;y=para(o,y,'The following requires attention',d.attention);
     doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(22,24,29);o.txt(`${d.released?'[✓]':'[  ]'} Release of the Hold Point described above is hereby granted. Work on this lot may proceed.`.replace('✓','x'),o.M,y+5);y+=9;
     y=sigBlock(o,y,'hold_client','Client representative')}};
@@ -204,7 +203,7 @@ const blank=v=>!String(v==null?'':v).trim();
 const LOT_NEED=[['client','Client / customer'],['job_no','Job number'],['location','Job location'],['date','Date'],['lot_no','Lot number']];
 const lotCheck=o=>{const L=(o.p.forms||{}).lot||{};return LOT_NEED.filter(([k])=>blank(L[k])).map(([,l])=>l)};
 AQR.check=(d,o)=>[...(!(d.rows||[]).some(r=>!blank(r.product)&&claimedOf(r)>0)?['At least one product with its quantity']:[]),...(signedOn(o,'aqr_afa')?[]:['AFA quality rep’s signature']),...(signedOn(o,'aqr_client')?[]:['Client rep’s signature'])];
-HOLD.check=(d,o)=>[...(blank(d.lot_numbers)?['Lot numbers']:[]),...(signedOn(o,'hold_afa')?[]:['AFA quality rep’s signature']),...(!d.released&&blank(d.attention)?['Client response: release it, or say what needs attention']:[]),...(signedOn(o,'hold_client')?[]:['Client rep’s signature'])];
+HOLD.check=(d,o)=>[...(signedOn(o,'hold_afa')?[]:['AFA quality rep’s signature']),...(!d.released&&blank(d.attention)?['Client response: release it, or say what needs attention']:[]),...(signedOn(o,'hold_client')?[]:['Client rep’s signature'])];
 DIAGRAM.check=d=>[...(!d.sketch&&!(d.photos||[]).length?['The diagram (draw it, or add a photo)']:[]),...(blank(d.mix)?['Mix type']:[]),...(blank(d.depth)?['Nominal depth']:[]),...(blank(d.prepared_by)?['Map prepared by']:[])];
 ENV.check=(d,o)=>{const it=d.items||{};const pre=ENV_ITEMS.filter(([k])=>!(it[k]||{}).pre).length,post=ENV_ITEMS.filter(([k])=>!(it[k]||{}).post).length;
   return [...(pre?[`${pre} item${pre===1?'':'s'} not answered before surfacing`]:[]),...(post?[`${post} item${post===1?'':'s'} not answered after surfacing`]:[]),...(blank(d.before)?['Condition of the site before paving']:[]),...(blank(d.after)?['Condition of the site after the job']:[]),...(signedOn(o,'env')?[]:['Signature of whoever prepared it'])]};
