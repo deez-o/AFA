@@ -4147,11 +4147,11 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
     <${PlanCard} id="pl-machines" title="Machines needed" sub=${`${picked.size} selected`}
       right=${machConf>0&&html`<span class="text-[12px] font-semibold" style=${{color:'var(--warn)'}}>${machConf} clash${machConf===1?'':'es'} on these dates</span>`}>
       ${machines.length===0?html`<div class="text-[12.5px] text-muted">No machines yet. Add or import them in Fleet › Machines.</div>`
-        :html`<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">${groupMachines(machines,data).map(g=>html`<div key=${g.key} class="grid gap-1 content-start">
-          <div class="label" style=${{color:'var(--ink)'}}>${g.label}</div>
-          ${g.rows.map(m=>{const c=conf.machines[m.id];const al=machAlert(data,m.id);const blocked=!!(al&&al.block&&!picked.has(m.id));return html`<label key=${m.id} class=${'flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-sunken '+(blocked?'cursor-not-allowed':'cursor-pointer')} title=${[al&&al.text,...(c||[])].filter(Boolean).join('\n')}>
+        :html`<div class="grid gap-x-4 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" id="pl-mach-groups">${groupMachines(machines,data).filter(g=>!/transport|trailer/i.test(g.label)||g.rows.some(m=>picked.has(m.id))).map(g=>html`<div key=${g.key} class="grid gap-0 content-start">
+          <div class="label mb-0.5" style=${{color:'var(--ink)'}}>${g.label}</div>
+          ${g.rows.map(m=>{const c=conf.machines[m.id];const al=machAlert(data,m.id);const blocked=!!(al&&al.block&&!picked.has(m.id));return html`<label key=${m.id} class=${'flex items-start gap-2 rounded-md px-1.5 py-[3px] hover:bg-sunken '+(blocked?'cursor-not-allowed':'cursor-pointer')} title=${[al&&al.text,...(c||[])].filter(Boolean).join('\n')}>
             <input id=${'plm-'+m.id} type="checkbox" class="w-4 h-4 mt-0.5 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} disabled=${blocked} onChange=${()=>{if(!blocked)set({machineIds:toggleIn(p.machineIds||[],m.id)})}}/>
-            <span class="min-w-0"><span class="text-[13px] font-semibold mono">${m.name}</span> <span class="text-[12.5px] text-muted">${m.sub||''}</span>
+            <span class="min-w-0 leading-tight"><span class="text-[12.5px] font-semibold mono">${m.name}</span> <span class="text-[12px] text-muted">${m.sub||''}</span>
               ${al&&html`<span class="block text-[11.5px] font-medium" style=${{color:al.tone}}>${al.text}</span>`}
               ${c&&html`<span class="block text-[11.5px] font-medium" style=${{color:'var(--warn)'}}>${c[0]}${c.length>1?` (+${c.length-1} more)`:''}</span>`}</span></label>`})}
         </div>`)}</div>`}
