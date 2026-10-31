@@ -9,3 +9,6 @@ alter table public.service_plans add constraint service_plans_intervals check (i
 
 -- several machine categories on one plan (category stays the first of them)
 alter table public.service_plans add column if not exists categories text[];
+
+-- make the API see the new columns straight away
+notify pgrst, 'reload schema';

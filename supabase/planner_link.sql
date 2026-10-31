@@ -109,3 +109,6 @@ select 'wc-' || w.id, 'mwo', w.completed_at, w.asset_id, 'WO ' || w.number || ' 
 
 revoke all on public.maintenance_feed from anon;
 grant select on public.maintenance_feed to authenticated;
+
+-- make the API see the new columns straight away
+notify pgrst, 'reload schema';

@@ -109,3 +109,6 @@ begin
     alter publication supabase_realtime add table public.leave_requests;
   end if;
 end $$;
+
+-- make the API see the new columns straight away
+notify pgrst, 'reload schema';

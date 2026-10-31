@@ -77,3 +77,6 @@ begin
     alter publication supabase_realtime add table public.job_photos;
   end if;
 end $$;
+
+-- make the API see the new columns straight away
+notify pgrst, 'reload schema';

@@ -443,3 +443,6 @@ begin
     end loop;
   end if;
 end $$;
+
+-- make the API see the new columns straight away
+notify pgrst, 'reload schema';

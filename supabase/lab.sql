@@ -119,3 +119,6 @@ drop policy if exists "lab marks done" on public.lab_done;
 create policy "lab marks done" on public.lab_done for insert to authenticated with check (public.lab_can_upload());
 drop policy if exists "lab reopens" on public.lab_done;
 create policy "lab reopens" on public.lab_done for delete to authenticated using (public.lab_can_upload());
+
+-- make the API see the new columns straight away
+notify pgrst, 'reload schema';

@@ -25,3 +25,6 @@ drop policy if exists "maintenance staff change" on public.asset_photos;
 create policy "maintenance staff change" on public.asset_photos for update to authenticated using (public.maint_can_work()) with check (public.maint_can_work());
 drop policy if exists "maintenance staff remove" on public.asset_photos;
 create policy "maintenance staff remove" on public.asset_photos for delete to authenticated using (public.maint_can_work());
+
+-- make the API see the new columns straight away
+notify pgrst, 'reload schema';
