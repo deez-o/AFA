@@ -227,4 +227,12 @@ for (const mins of [10, 15, 20]) {
   let wait = 0; R.forEach((r, i) => { if (i) wait += (r.leave - R[i - 1].done) / 6e4 });
   ok(R.length === 2 && wait <= 10 && R[0].depart >= t('2026-11-09 09:00') && R.every(r => !r.curfew), 'back to the yard then out again (' + mins + ' min drives): both from 9am, no wait at the yard (' + R.map(r => r.from.key + '→' + r.to.key + ' ' + hm(r.leave) + '–' + hm(r.done)).join(', ') + ')');
 }
+
+// AFA's curfew rule: no float work at all 7–9am and 4–6pm weekdays (no loading at the yard during it either)
+{
+  const tr = (a, b) => ({ min: a && b && a.key === b.key ? 0 : 40, km: 30 });
+  const R = planFloat([{ id: 'q', moves: [{ m: 'q1', name: 'Q1' }, { m: 'q2', name: 'Q2' }], from: { key: 'yard' }, to: { key: 'S' }, earliest: t('2026-11-10 07:00'), latest: t('2026-11-10 17:00') }], cfgOf({}), tr, {}).runs;
+  const r = R[0];
+  ok(!r.curfew && r.leave >= t('2026-11-10 09:00') && r.pick >= t('2026-11-10 09:00') && r.done <= t('2026-11-10 16:00'), 'two machines from the yard: loading starts 9am, not 8am; all done before 4pm (' + hm(r.pick) + '–' + hm(r.done) + ')');
+}
 console.log(fails ? `${fails} FAILED` : 'ALL FLOAT TESTS PASSED'); process.exit(fails ? 1 : 0);
