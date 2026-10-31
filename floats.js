@@ -17,9 +17,14 @@ const CFG0={yardName:'Yard',yardAddr:'187-193 Potassium St, Narangba QLD',gapDay
   /* what fits on the float together (AFA's float, Oct 2026): machine numbers (the start of the name, or the rego) */
   alone:['PV010'],
   groups:[{name:'Pavers that share',items:['PV008','PV009','PV012']},{name:'Small rollers',items:['SR004','SR005','SR010','SR011','SR013','SR014']},
+    {name:'Big rollers',items:['SR012','SR015']},
     {name:'Small multis',items:['MT006']},{name:'Big multis',items:['1AP7VD','MT007','MT008','MT009']}],
   combos:[]};   /* the loads: made in Floats › Settings */
-const cfgOf=d=>({...CFG0,...((d&&d.floatCfg)||{})});
+const cfgOf=d=>{const c={...CFG0,...((d&&d.floatCfg)||{})};
+  /* groups saved before "Big rollers" was a starting group get it too */
+  if(Array.isArray(c.groups)&&!c.groups.some(g=>/(big|large) rollers/i.test(g.name))&&!(c.groupsSeen||[]).includes('Big rollers')){const i=c.groups.findIndex(g=>/small rollers/i.test(g.name));
+    const g={name:'Big rollers',items:[]};c.groups=i>=0?[...c.groups.slice(0,i+1),g,...c.groups.slice(i+1)]:[...c.groups,g]}
+  return c};
 const floatCats=(d,cfg)=>{const cats=machineCatsOf(d);return cfg.skipCats?cats.filter(c=>!cfg.skipCats.includes(c)):cats.filter(c=>!NO_FLOAT.test(c))};
 const needsFloat=(m,d,cfg)=>{const c=(m.category||'').trim();if(!c)return !NO_FLOAT.test(m.name+' '+(m.sub||''));
   return cfg.skipCats?!cfg.skipCats.some(x=>x.toLowerCase()===c.toLowerCase()):!NO_FLOAT.test(c)};
@@ -82,7 +87,7 @@ function buildMoves(d,opt){
     /* stints: a run of shifts at one place */
     const S=[];A.forEach(a=>{const s=S[S.length-1];if(s&&s.place.key===a.place.key){   /* same place: the machine stays (weekends, breaks) */if(a.end>s.end){s.end=a.end;s.last=a}s.n++;return}
       S.push({place:a.place,start:a.start,end:a.end,first:a,last:a,n:1,kind:a.kind})});
-    const mk=(kind,fromP,toP,earliest,latest,why)=>{if(fromP.key===toP.key)return;moves.push({id:`${m.id}>${toP.key}@${isoLocal(latest)}`,kind,m:m.id,name:m.name,rego:m.rego||'',cat:m.category||'',
+    const mk=(kind,fromP,toP,earliest,latest,why)=>{if(fromP.key===toP.key)return;moves.push({id:`${m.id}>${toP.key}@${isoLocal(latest)}`,kind,m:m.id,name:m.name,rego:m.rego||'',cat:m.category||'',desc:m.sub||'',
       from:fromP,to:toP,earliest,latest,why})};
     const atYard=s=>s.place.key==='yard';
     S.forEach((s,i)=>{const p=S[i-1];
@@ -254,7 +259,9 @@ function FloatsScreen({data,setData,notify}){
         <div class="flex-1"></div>
         <a class="btn" style=${{height:30}} href=${mapsDir(r.from,r.to)} target="_blank" rel="noopener">${Icon.pin} Directions</a>
       </div>
-      <div class="flex flex-wrap gap-1.5">${r.moves.map(m=>html`<span key=${m.id} class="text-[12.5px] font-semibold px-2 py-0.5 rounded-md bg-sunken border border-line">${m.name}${m.rego?html` <span class="mono text-muted font-normal">${m.rego}</span>`:''}</span>`)}</div>
+      <div class="flex flex-wrap gap-2">${r.moves.map(m=>html`<span key=${m.id} class="grid leading-tight px-3 py-1.5 rounded-lg bg-sunken border border-line">
+        <span class="text-[14px] font-semibold">${m.name}${m.rego?html` <span class="mono text-[12px] text-muted font-normal">${m.rego}</span>`:''}</span>
+        ${(m.desc||m.cat)&&html`<span class="text-[12px] text-muted">${[m.desc,m.cat].filter(Boolean).join(' · ')}</span>`}</span>`)}</div>
       <div class="grid sm:grid-cols-2 gap-2 text-[13px]">
         <div class="grid gap-0.5"><span class="label">Pick up</span><span class="font-semibold">${r.from.job}${r.from.crew?html` <span class="text-muted font-normal">· ${r.from.crew}</span>`:''}</span>
           <span class="text-muted text-[12.5px]">${r.from.addr||'No address'}</span><span class="text-[12px]" style=${{color:'hsl(145 45% 30%)'}}>Free from ${whenTxt(r.earliest,dayOf(r.pick))} · ${r.moves[0].why.from}</span></div>
@@ -318,11 +325,26 @@ function FloatsScreen({data,setData,notify}){
       ${F.skipped.filter(t=>dayOf(t.latest)===day||dayOf(t.earliest)===day).map(t=>html`<div key=${t.id} class="text-[12.5px] text-muted flex items-center gap-2">Not moving: ${t.moves.map(m=>m.name).join(' + ')} (${t.from.job} → ${t.to.job})${canEdit&&html`<button class="underline" onClick=${()=>setPlan(t.id,{skip:null})}>Move it after all</button>`}</div>`)}
     `}
 
-    ${tab==='week'&&html`<div class="grid gap-2" id="fl-week">${soon.map(k=>{const rs=runsOn(k);return html`<button key=${k} type="button" class="panel p-3 text-left flex items-center gap-3 hover:bg-sunken" onClick=${()=>{setDay(k);setTab('day')}}>
-        <span class="w-[86px] shrink-0"><span class="block text-[12px] text-muted">${k===today?'Today':WD[parse(k).getDay()]}</span><span class="font-semibold">${fmtShort(parse(k))}</span></span>
-        <span class="flex-1 min-w-0 text-[13px]">${rs.length?rs.map(r=>`${hm(r.pick)} ${names(r)} → ${r.to.job}`).join(' · '):html`<span class="text-faint">No moves</span>`}</span>
-        ${rs.some(r=>r.late)&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:STAT.late[1],background:STAT.late[2]}}>Late</span>`}
-        <span class="mono text-[13px] text-muted">${rs.length}</span></button>`})}</div>`}
+    ${tab==='week'&&html`<div class="grid gap-4" id="fl-week">${soon.map(k=>{const rs=runsOn(k);const late=rs.filter(r=>r.late).length;return html`<section key=${k} class="panel overflow-hidden fl-weekday">
+        <button type="button" class="w-full flex items-center gap-4 px-5 py-3 bg-sunken border-b border-line text-left hover:brightness-[.98]" onClick=${()=>{setDay(k);setTab('day')}} title="Open this day">
+          <span class="font-display text-[17px] font-semibold">${k===today?'Today':k===iso(addDays(parse(today),1))?'Tomorrow':WD[parse(k).getDay()]} <span class="text-muted font-normal">${WD[parse(k).getDay()]} ${fmtShort(parse(k))}</span></span>
+          <span class="text-[13px] text-muted">${rs.length?`${rs.length} trip${rs.length===1?'':'s'} · ${rs.reduce((a,r)=>a+r.moves.length,0)} machine${rs.reduce((a,r)=>a+r.moves.length,0)===1?'':'s'}${rs.some(r=>r.drive.km!=null)?` · ${Math.round(rs.reduce((a,r)=>a+(r.drive.km||0)+(r.deadhead.km||0),0))} km`:''}`:'No moves'}</span>
+          ${late>0&&html`<span class="text-[11.5px] font-semibold px-2 py-0.5 rounded-full" style=${{color:STAT.late[1],background:STAT.late[2]}}>${late} late</span>`}
+          <span class="ml-auto text-[12.5px] text-muted inline-flex items-center gap-1">Open day ${Icon.chevR}</span></button>
+        ${rs.length>0&&html`<ol class="divide-y divide-line">${rs.map(r=>{const st=statusOf(r,now,nextId);const [sl,sc,sb]=STAT[st];return html`<li key=${r.id} class="grid grid-cols-[120px_minmax(260px,1.1fr)_minmax(0,2fr)] gap-6 px-5 py-4 fl-weekrow">
+          <div class="grid content-start gap-1"><span class="mono text-[20px] font-semibold leading-none">${hm(r.pick)}</span><span class="text-[12.5px] text-muted">to ${hm(r.done)}</span>
+            <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full justify-self-start" style=${{color:sc,background:sb}}>${sl}</span></div>
+          <div class="grid content-start gap-1.5">${r.moves.map(m=>html`<div key=${m.id} class="rounded-lg border border-line px-3 py-2 leading-tight">
+              <div class="text-[14px] font-semibold">${m.name}${m.rego?html` <span class="mono text-[12px] text-muted font-normal">${m.rego}</span>`:''}</div>
+              <div class="text-[12.5px] text-muted">${[m.desc,m.cat].filter(Boolean).join(' · ')||'—'}</div></div>`)}</div>
+          <div class="grid sm:grid-cols-2 gap-4 text-[13px] content-start">
+            <div class="grid gap-0.5"><span class="label">From</span><span class="font-semibold">${r.from.job}</span>${r.from.crew&&html`<span class="text-muted">${r.from.crew}</span>`}<span class="text-muted text-[12.5px]">${r.from.addr||''}</span>
+              <span class="text-[12px]" style=${{color:'hsl(145 45% 30%)'}}>Free ${whenTxt(r.earliest,k)}</span></div>
+            <div class="grid gap-0.5"><span class="label">To</span><span class="font-semibold">${r.to.job}</span>${r.to.crew&&html`<span class="text-muted">${r.to.crew}</span>`}<span class="text-muted text-[12.5px]">${r.to.addr||''}</span>
+              <span class="text-[12px]" style=${{color:r.late?'var(--bad)':'hsl(212 60% 36%)'}}>Needed by ${whenTxt(r.latest,k)}${r.late?` · ${durTxt((r.done-r.latest)/60000)} late`:''}</span>
+              <span class="text-[12px] text-muted">${r.drive.km!=null?`${Math.round(r.drive.km)} km · `:''}${durTxt(r.drive.min)} drive</span></div></div>
+        </li>`})}</ol>`}
+      </section>`})}</div>`}
 
     ${tab!=='set'&&(probs.length>0||F.missing.length>0)&&html`<section class="panel p-3 sm:p-4 grid gap-2" id="fl-probs">
       <h3 class="font-display text-[15px] font-semibold">Needs sorting</h3>
@@ -351,7 +373,8 @@ function FixPlace({p,geo,setGeo,canEdit}){
   </li>`}
 
 function FloatSettings({data,setData,cfg}){
-  const set=p=>setData(d=>({...d,floatCfg:{...(d.floatCfg||{}),...p}}));
+  /* p: the changes, or a function of the latest settings giving them */
+  const set=p=>setData(d=>({...d,floatCfg:{...(d.floatCfg||{}),...(typeof p==='function'?p(cfgOf(d)):p)}}));
   const cats=machineCatsOf(data);const on=floatCats(data,cfg);
   const num=(k,label,unit,step=1)=>html`<label class="grid gap-1"><span class="label">${label}</span><span class="flex items-center gap-2"><input id=${'fl-'+k} type="number" min="0" step=${step} class="field field-sm mono" style=${{height:32,maxWidth:110}} value=${cfg[k]} onChange=${e=>set({[k]:+e.target.value})}/><span class="text-[12.5px] text-muted">${unit}</span></span></label>`;
   return html`<section class="panel p-4 sm:p-5 grid gap-5" id="fl-settings">
@@ -371,26 +394,42 @@ function FloatSettings({data,setData,cfg}){
       <label class="grid gap-1"><span class="label">Night shift starts (if the booking has no time)</span><input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightStart} onChange=${e=>set({nightStart:e.target.value})}/></label>
     </div>
     <${FloatLoads} data=${data} cfg=${cfg} set=${set}/>
-    <div class="grid gap-2"><span class="label">Machine categories that go on the float</span>
-      <div class="flex flex-wrap gap-2">${cats.map(c=>{const yes=on.includes(c);return html`<label key=${c} class=${'inline-flex items-center gap-1.5 text-[13px] px-2 py-1 rounded-md border '+(yes?'border-line-strong bg-surface':'border-line text-muted')}>
-        <input type="checkbox" class="w-4 h-4" checked=${yes} onChange=${()=>set({skipCats:cats.filter(x=>x===c?yes:!on.includes(x))})}/>${c}</label>`})}</div>
-      <span class="text-[12px] text-muted">Bobcats go with the crew truck, and trucks, water carts and utes drive themselves, so they’re left off to start with.</span></div>
   </section>`}
 
+let DRAG=null;   /* the machine being dragged (kept outside React so every drop target sees it straight away) */
 /* which machines can share the float: machines that go alone, named groups ("Small rollers"), and the loads that fit */
-function FloatLoads({data,cfg,set}){
+function FloatLoads({data,cfg,set:set0}){
+  /* once the groups are saved, "Big rollers" isn't added again (even if renamed or emptied) */
+  const seen=(p,c)=>p.groups?{...p,groupsSeen:[...new Set([...((c||cfg).groupsSeen||[]),'Big rollers'])]}:p;
+  const set=p=>set0(typeof p==='function'?c=>seen(p(c),c):seen(p));
   const ms=data.resources.filter(r=>r.type==='machine'&&needsFloat(r,data,cfg)).sort((a,b)=>(a.category||'').localeCompare(b.category||'')||a.name.localeCompare(b.name,undefined,{numeric:true}));
   const noOf=m=>String(m.name||'').trim().split(/[\s·\-–(]/)[0]||m.name;
   const cats=[...new Set(ms.map(m=>(m.category||'').trim()).filter(Boolean))];
   const alone=cfg.alone||[],groups=cfg.groups||[],combos=cfg.combos||[];
   const found=no=>ms.some(m=>isNo(no,m.name,m.rego));
   /* a machine tag: its number, and what it is (description, category, rego) */
-  const Chip=(no,onX)=>{const m=ms.find(x=>isNo(no,x.name,x.rego))||data.resources.find(x=>x.type==='machine'&&isNo(no,x.name,x.rego));
+  /* drag a machine between groups (or out of them) */
+  const [drag,setDrag]=useState(null);
+  const unmark=()=>document.querySelectorAll('.fl-over').forEach(x=>x.classList.remove('fl-over'));
+  const listOf=src=>src==='alone'?alone:src&&src.startsWith('g:')?(groups[+src.slice(2)]||{}).items||[]:[];
+  const moveTo=(dst)=>{const d=DRAG||drag;DRAG=null;unmark();setDrag(null);if(!d||d.from===dst)return;
+    set(c=>{let A=c.alone||[],G=(c.groups||[]).map(g=>({...g,items:[...(g.items||[])]}));
+    if(d.from==='alone')A=A.filter(x=>x!==d.no);else if(d.from&&d.from.startsWith('g:'))G[+d.from.slice(2)].items=G[+d.from.slice(2)].items.filter(x=>x!==d.no);
+    if(dst==='alone'){if(!A.includes(d.no))A=[...A,d.no]}else if(dst.startsWith('g:')){const g=G[+dst.slice(2)];if(!g.items.some(x=>isNo(x,d.no,'')||isNo(d.no,x,'')))g.items.push(d.no)}
+    return {alone:A,groups:G}})};
+  /* the highlight is set on the element itself, so nothing re-draws mid-drag */
+  const drop=dst=>({onDragOver:e=>{if(!DRAG)return;e.preventDefault();e.dataTransfer.dropEffect='move';if(DRAG.from!==dst&&!e.currentTarget.classList.contains('fl-over')){unmark();e.currentTarget.classList.add('fl-over')}},
+    onDragLeave:e=>{if(!e.currentTarget.contains(e.relatedTarget))e.currentTarget.classList.remove('fl-over')},onDrop:e=>{e.preventDefault();moveTo(dst)}});
+  const dropStyle=()=>null;
+  const Chip=(no,onX,src)=>{const m=ms.find(x=>isNo(no,x.name,x.rego))||data.resources.find(x=>x.type==='machine'&&isNo(no,x.name,x.rego));
     const desc=m?[m.sub,m.category,m.rego&&!isNo(no,'',m.rego)?m.rego:''].filter(Boolean).join(' · '):'No machine with this number yet';
-    return html`<span key=${no} class="fl-chip inline-flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-lg border min-w-[180px] max-w-[320px]" style=${m?{background:'var(--surface)',borderColor:'var(--line-strong)'}:{borderColor:'hsl(38 80% 60%)',background:'hsl(45 100% 96%)'}} title=${desc}>
+    return html`<span key=${no} class="fl-chip inline-flex items-center gap-2 pl-1.5 pr-1.5 py-1.5 rounded-lg border min-w-[180px] max-w-[320px] select-none" data-no=${no}
+      draggable="true" onDragStart=${e=>{e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',no)}catch(x){}DRAG={no,from:src};e.currentTarget.style.opacity='.45'}} onDragEnd=${e=>{e.currentTarget.style.opacity='';setTimeout(()=>{DRAG=null;unmark()},0)}}
+      style=${{cursor:'grab',...(m?{background:'var(--surface)',borderColor:'var(--line-strong)'}:{borderColor:'hsl(38 80% 60%)',background:'hsl(45 100% 96%)'})}} title=${desc+' (drag to another group)'}>
+      <span class="text-faint shrink-0" aria-hidden="true">${Icon.grip}</span>
       <span class="grid min-w-0 flex-1 leading-tight"><span class="text-[14px] font-semibold" style=${m?null:{color:'hsl(30 85% 34%)'}}>${m&&!isNo(no,'',m.rego)?m.name:no}${m&&isNo(no,'',m.rego)?html` <span class="mono text-[12px] text-muted font-normal">${no}</span>`:''}</span>
         <span class="text-[12px] truncate" style=${{color:m?'var(--muted)':'hsl(30 85% 34%)'}}>${desc}</span></span>
-      <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded-md text-muted hover:text-ink hover:bg-sunken shrink-0" aria-label=${'Remove '+no} onClick=${onX}>${Icon.x}</button></span>`};
+      ${onX&&html`<button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded-md text-muted hover:text-ink hover:bg-sunken shrink-0" aria-label=${'Remove '+no} onClick=${onX}>${Icon.x}</button>`}</span>`};
   const AddNo=(have,onAdd,id,label)=>html`<select id=${id} class="field" style=${{height:44,maxWidth:280}} value="" onChange=${e=>{const v=e.target.value;if(v)onAdd(v)}} aria-label=${label}>
       <option value="">+ Add a machine…</option>${ms.filter(m=>!have.some(no=>isNo(no,m.name,m.rego))).map(m=>html`<option key=${m.id} value=${noOf(m)}>${mLabel(m)}</option>`)}</select>`;
   const mLabel=m=>[m.name,m.sub,m.category].filter(Boolean).join(' · ');
@@ -403,18 +442,24 @@ function FloatLoads({data,cfg,set}){
   return html`<div class="grid gap-4 rounded-lg border border-line p-3" id="fl-loads">
     <div><div class="font-display text-[15px] font-semibold">Float loads</div><div class="text-[12.5px] text-muted">What can share the float. Machines going the same way at the same time go on one load when they fit.</div></div>
     <div class="grid gap-1.5"><span class="label">Always goes by itself</span>
-      <div class="flex flex-wrap gap-2 items-center">${alone.map(no=>Chip(no,()=>set({alone:alone.filter(x=>x!==no)})))}${AddNo(alone,v=>set({alone:[...alone,v]}),'fl-alone-add','Add a machine that goes by itself')}</div></div>
+      <div class="flex flex-wrap gap-2 items-center rounded-lg p-1 -m-1 min-h-[52px] fl-drop" data-drop="alone" ...${drop('alone')} style=${dropStyle('alone')}>${alone.map(no=>Chip(no,()=>set({alone:alone.filter(x=>x!==no)}),'alone'))}${AddNo(alone,v=>set({alone:[...alone,v]}),'fl-alone-add','Add a machine that goes by itself')}</div></div>
     <div class="grid gap-2"><span class="label">Groups</span>
-      ${groups.map((g,i)=>html`<div key=${i} class="grid gap-2 fl-group rounded-lg bg-sunken p-3">
+      ${groups.map((g,i)=>html`<div key=${i} class="grid gap-2 fl-group fl-drop rounded-lg bg-sunken p-3" data-drop=${'g:'+i} ...${drop('g:'+i)} style=${dropStyle('g:'+i)}>
         <div class="flex items-center gap-2"><input class="field font-semibold text-[15px]" style=${{height:38,maxWidth:280}} value=${g.name} onChange=${e=>{const nv=e.target.value.trim();if(!nv||groups.some((x,k)=>k!==i&&x.name===nv))return;
             set({groups:groups.map((x,k)=>k===i?{...x,name:nv}:x),combos:combos.map(c=>({...c,items:(c.items||[]).map(it=>it==='g:'+g.name?'g:'+nv:it)}))})}} aria-label="Group name"/>
-          <button type="button" class="btn btn-ghost" style=${{height:28,color:'var(--bad)'}} aria-label=${'Remove the group '+g.name} onClick=${()=>set({groups:groups.filter((_,k)=>k!==i),combos:combos.map(c=>({...c,items:(c.items||[]).map(it=>it==='g:'+g.name?'':it)}))})}>${Icon.trash}</button></div>
-        <div class="flex flex-wrap gap-2 items-center">${(g.items||[]).map(no=>Chip(no,()=>set({groups:groups.map((x,k)=>k===i?{...x,items:x.items.filter(y=>y!==no)}:x)})))}${AddNo(g.items||[],v=>set({groups:groups.map((x,k)=>k===i?{...x,items:[...(x.items||[]),v]}:x)}),'fl-group-add-'+i,'Add a machine to '+g.name)}</div></div>`)}
+          </div>
+        <div class="flex flex-wrap gap-2 items-center">${(g.items||[]).map(no=>Chip(no,()=>set({groups:groups.map((x,k)=>k===i?{...x,items:x.items.filter(y=>y!==no)}:x)}),'g:'+i))}
+          ${!(g.items||[]).length&&html`<span class="text-[12.5px] text-muted px-1">Drag machines here</span>`}${AddNo(g.items||[],v=>set({groups:groups.map((x,k)=>k===i?{...x,items:[...(x.items||[]),v]}:x)}),'fl-group-add-'+i,'Add a machine to '+g.name)}</div></div>`)}
+      <div class="grid gap-1.5 rounded-lg border border-dashed border-line p-3 fl-drop" data-drop="pool" ...${drop('pool')} style=${dropStyle('pool')}>
+        <span class="label">Not in a group yet</span>
+        <div class="flex flex-wrap gap-2">${ms.filter(m=>!groups.some(g=>(g.items||[]).some(no=>isNo(no,m.name,m.rego)))&&!alone.some(no=>isNo(no,m.name,m.rego))).map(m=>Chip(noOf(m),null,'pool'))}</div>
+        <span class="text-[12px] text-muted">Drag a machine into a group, or back here to take it out.</span></div>
       <button type="button" class="btn justify-self-start" style=${{height:28}} onClick=${()=>{let n='New group',k=2;while(groups.some(g=>g.name===n))n='New group '+(k++);set({groups:[...groups,{name:n,items:[]}]})}}>${Icon.plus} Add a group</button></div>
     <div class="grid gap-1.5"><span class="label">Loads that fit</span>
       ${combos.length===0&&html`<span class="text-[12.5px] text-muted">None: every machine goes on its own load.</span>`}
       ${combos.map((c,i)=>html`<div key=${i} class="flex flex-wrap items-center gap-1.5 fl-combo">
-        ${(c.items||[]).map((it,j)=>html`${j>0&&html`<span class="text-muted">+</span>`}<select key=${j} class="field" style=${{height:40,maxWidth:300}} value=${it} onChange=${e=>setCombo(i,e.target.value?c.items.map((x,k)=>k===j?e.target.value:x):c.items.filter((_,k)=>k!==j))} aria-label=${'Part '+(j+1)+': '+lab(it)}>${opts}</select>`)}
+        ${(c.items||[]).map((it,j)=>html`${j>0&&html`<span class="text-muted">+</span>`}<span key=${j} class="inline-flex items-center fl-part"><select class="field" style=${{height:40,maxWidth:300,borderTopRightRadius:0,borderBottomRightRadius:0}} value=${it} onChange=${e=>setCombo(i,e.target.value?c.items.map((x,k)=>k===j?e.target.value:x):c.items.filter((_,k)=>k!==j))} aria-label=${'Part '+(j+1)+': '+lab(it)}>${opts}</select>
+          <button type="button" class="btn fl-part-x" style=${{height:40,width:34,padding:0,justifyContent:'center',borderTopLeftRadius:0,borderBottomLeftRadius:0,marginLeft:-1}} title="Take this out of the load" aria-label=${'Take '+(lab(it)||'this')+' out of the load'} onClick=${()=>setCombo(i,c.items.filter((_,k)=>k!==j))}>${Icon.x}</button></span>`)}
         <button type="button" class="btn" style=${{height:40}} aria-label="Add another machine to this load" onClick=${()=>setCombo(i,[...(c.items||[]),''])}>${Icon.plus}</button>
         <button type="button" class="btn btn-ghost" style=${{height:40,color:'var(--bad)'}} aria-label="Remove this load" onClick=${()=>set({combos:combos.filter((_,k)=>k!==i)})}>${Icon.trash}</button></div>`)}
       <button type="button" id="fl-combo-add" class="btn justify-self-start" style=${{height:28}} onClick=${()=>set({combos:[...combos,{items:['','']}]})}>${Icon.plus} Add a load</button>

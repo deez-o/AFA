@@ -85,7 +85,9 @@ ok(P.runs.length === 1 && P.skipped.length === 1, '“Not needed”: the move is
 // loads made from the groups (as AFA described them)
 const CF = { ...cfgOf({}), combos: [{ items: ['g:Pavers that share', 'g:Small rollers', 'g:Small rollers'] }, { items: ['g:Pavers that share', 'n:SR012'] }, { items: ['g:Pavers that share', 'n:SR015'] },
   { items: ['g:Small rollers', 'g:Small rollers'] }, { items: ['n:SR012', 'n:SR015'] }, { items: ['g:Pavers that share', 'g:Big multis'] }, { items: ['g:Pavers that share', 'g:Small multis', 'g:Small rollers'] }] };
-ok(cfgOf({}).combos.length === 0 && cfgOf({}).groups.map(g => g.name).join() === 'Pavers that share,Small rollers,Small multis,Big multis', 'to start: the four groups, and no loads (you make them)');
+ok(cfgOf({}).combos.length === 0 && cfgOf({}).groups.map(g => g.name).join() === 'Pavers that share,Small rollers,Big rollers,Small multis,Big multis', 'to start: the five groups, and no loads (you make them)');
+ok(cfgOf({ floatCfg: { groups: [{ name: 'Small rollers', items: [] }, { name: 'Multis', items: [] }] } }).groups.map(g => g.name).join() === 'Small rollers,Big rollers,Multis', 'groups saved earlier get Big rollers too (after Small rollers)');
+ok(cfgOf({ floatCfg: { groups: [{ name: 'Rollers', items: [] }], groupsSeen: ['Big rollers'] } }).groups.length === 1, '…but not once it has been renamed or taken out');
 ok(!loadFits([{ m: 'a', name: 'PV009' }, { m: 'b', name: 'SR004' }], cfgOf({})), 'with no loads made, nothing shares');
 const mv = (name, cat = '', rego = '') => ({ m: 'id-' + name, name, cat, rego });
 const fits = (...ms) => loadFits(ms.map(x => typeof x === 'string' ? mv(x) : x), CF);
