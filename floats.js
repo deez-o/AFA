@@ -16,7 +16,7 @@ const CFG0={yardName:'Yard',yardAddr:'187-193 Potassium St, Narangba QLD',gapDay
   loadMin:30,unloadMin:30,slow:1.25,floatStart:'05:00',perLoad:1,driver:'',floatName:'Float',skipCats:null,
   /* when the float driver works: moves are put in his hours, on weekdays, when the window allows */
   arriveBefore:60,   /* the gear is there this long before the shift starts */
-  curfew:true,   /* Qld oversize peak-hour curfew: no loaded float on the road 7–9am and 4–6pm, Monday to Friday */
+  curfew:true,   /* Qld oversize peak-hour curfew: the float isn't on the road 7–9am and 4–6pm, Monday to Friday (loaded or empty) */
   driverShift:'day',dayFrom:'06:00',dayTo:'16:00',nightFrom:'18:00',nightTo:'04:00',avoidWeekend:true,
   /* what fits on the float together (AFA's float, Oct 2026): machine numbers (the start of the name, or the rego) */
   alone:['PV010'],
@@ -163,7 +163,7 @@ function bestPick(t,{clock,dh,cfg,travel,L,U}){
   const base=new Date(Math.max(t.earliest,ready||0));const span=Math.min(t.latest-base,4*864e5);
   const cands=[base];if(span>0){const st=new Date(base);st.setMinutes(Math.ceil(st.getMinutes()/30)*30,0,0);for(let c=st;c-base<=span;c=addMin(c,30))if(c>base)cands.push(c)}
   /* loaded and away right as a curfew ends */
-  if(span>0&&cfg.curfew)for(let k=dayOf(base);k<=dayOf(addMin(base,span/6e4));k=iso(addDays(parse(k),1)))CURFEW.forEach(([,b])=>{const c=addMin(at(k,b),-L*n);if(c>base&&c-base<=span)cands.push(c)});
+  if(span>0&&cfg.curfew)for(let k=dayOf(base);k<=dayOf(addMin(base,span/6e4));k=iso(addDays(parse(k),1)))CURFEW.forEach(([,b])=>[addMin(at(k,b),-L*n),addMin(at(k,b),dh.min||0)].forEach(c=>{if(c>base&&c-base<=span)cands.push(c)}));
   /* and the start of each of the driver's shifts, allowing for the empty run to get there */
   if(span>0)for(let k=dayOf(addMin(base,-24*60));k<=dayOf(addMin(base,span/6e4));k=iso(addDays(parse(k),1)))[cfg.dayFrom,cfg.nightFrom].forEach(h=>{const c=addMin(at(k,h||'06:00'),dh.min||0);if(c>base&&c-base<=span)cands.push(c)});
   /* the day (or night) before the shift suits best; the same day next; further away less. To the yard: as soon as it can */
@@ -175,7 +175,7 @@ function bestPick(t,{clock,dh,cfg,travel,L,U}){
     return (d===0||nightBefore?0:d===1?8:Math.abs(d)*30)+((cfg.driverShift==='any'&&(h<6||h>=18))?4:0)+((c-at(shiftDay(c),'12:00'))/36e5)*.02})();   /* within the day before: the morning; within the night before: the start of the night */
   let best=null;cands.forEach(c=>{const leave=addMin(c,-(dh.min||0));const done=addMin(c,L*n+(tr.min||0)+U*n);
     const lateMin=Math.max(0,(done-t.latest)/6e4);const oh=!inHours(leave,done,cfg);
-    const cur=inCurfew(addMin(c,L*n),addMin(c,L*n+(tr.min||0)),cfg);   /* loaded and on the road */const we=!!cfg.avoidWeekend&&(isWeekend(leave)||isWeekend(done));
+    const cur=inCurfew(leave,c,cfg)||inCurfew(addMin(c,L*n),addMin(c,L*n+(tr.min||0)),cfg);   /* on the road: the empty run there, and loaded */const we=!!cfg.avoidWeekend&&(isWeekend(leave)||isWeekend(done));
     const score=(lateMin>0?1e4+lateMin:0)+(cur?3000:0)+(oh?500:0)+(we?200:0)+when(c);
     if(!best||score<best.score)best={pick:c,score,oh,we}});
   return best}
@@ -193,7 +193,7 @@ function planFloat(trips,cfg,travel,plan,opt={}){
     const tr=travel(t.from,t.to);const depart=addMin(pick,L*t.moves.length);const arrive=addMin(depart,tr.min||0);const done=addMin(arrive,U*t.moves.length);
     const leave=addMin(pick,-(dh.min||0));
     const late=done>t.latest,tight=!late&&done>addMin(t.latest,-30),early=pick<t.earliest;
-    const outHours=!inHours(leave,done,cfg),weekend=isWeekend(leave)||isWeekend(done),curfew=inCurfew(depart,arrive,cfg);
+    const outHours=!inHours(leave,done,cfg),weekend=isWeekend(leave)||isWeekend(done),curfew=inCurfew(leave,pick,cfg)||inCurfew(depart,arrive,cfg);
     out.push({...t,pick,leave,depart,arrive,done,drive:tr,deadhead:dh,fixed,late,tight,early,outHours,weekend,curfew,fromLoc:loc,
       ticked:!!(P[t.id]&&P[t.id].done),tickedAt:P[t.id]&&P[t.id].doneAt,note:(P[t.id]&&P[t.id].note)||''});
     clock=done;loc=t.to}
@@ -294,7 +294,7 @@ function FloatsScreen({data,setData,notify}){
         <div class="mono text-[20px] sm:text-[22px] font-semibold leading-none">${hm(r.pick)}<span class="text-faint text-[14px] font-normal"> → ${hm(r.done)}</span></div>
         <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:sc,background:sb}}>${sl}</span>
         ${r.fixed&&!r.ticked&&html`<span class="text-[11px] text-muted">time set by hand</span>`}
-        ${r.curfew&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-curfew" style=${{color:'#fff',background:'hsl(0 72% 45%)'}} title="Loaded on the road in the oversize peak-hour curfew (7–9am, 4–6pm weekdays)">In peak-hour curfew</span>`}
+        ${r.curfew&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-curfew" style=${{color:'#fff',background:'hsl(0 72% 45%)'}} title="On the road in the oversize peak-hour curfew (7–9am, 4–6pm weekdays)">In peak-hour curfew</span>`}
         ${r.outHours&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-oh" style=${{color:'hsl(270 45% 38%)',background:'hsl(270 60% 95%)'}} title="Outside the float driver’s hours (Settings)">Outside driver’s hours</span>`}
         ${r.weekend&&!r.ticked&&cfg.avoidWeekend&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:'hsl(30 85% 34%)',background:'hsl(38 95% 92%)'}}>Weekend</span>`}
         ${r.early&&!r.ticked&&html`<span class="text-[11px] font-semibold" style=${{color:'hsl(30 85% 34%)'}}>Before the machine is free (${hm(r.earliest)})</span>`}
@@ -444,7 +444,7 @@ function FloatSettings({data,setData,cfg}){
         ${cfg.driverShift==='night'&&html`<span class="flex items-center gap-2 text-[13px]"><input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightFrom} onChange=${e=>set({nightFrom:e.target.value})} aria-label="Night shift from"/> to <input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightTo} onChange=${e=>set({nightTo:e.target.value})} aria-label="Night shift to"/> (next morning)</span>`}
       </div>
       <label class="inline-flex items-center gap-2 text-[13.5px]">Gear on site <input id="fl-arrive" type="number" min="0" step="15" class="field field-sm mono" style=${{height:32,width:80}} value=${cfg.arriveBefore} onChange=${e=>set({arriveBefore:+e.target.value})}/> min before the shift starts</label>
-      <label class="inline-flex items-center gap-2 text-[13.5px]"><input id="fl-curfew" type="checkbox" class="w-4 h-4" checked=${!!cfg.curfew} onChange=${e=>set({curfew:e.target.checked})}/> Oversize peak-hour curfew: no loaded float on the road 7–9am and 4–6pm, Monday to Friday</label>
+      <label class="inline-flex items-center gap-2 text-[13.5px]"><input id="fl-curfew" type="checkbox" class="w-4 h-4" checked=${!!cfg.curfew} onChange=${e=>set({curfew:e.target.checked})}/> Oversize peak-hour curfew: the float isn’t on the road 7–9am and 4–6pm, Monday to Friday</label>
       <label class="inline-flex items-center gap-2 text-[13.5px]"><input id="fl-weekdays" type="checkbox" class="w-4 h-4" checked=${!!cfg.avoidWeekend} onChange=${e=>set({avoidWeekend:e.target.checked})}/> Move on weekdays when it can (weekends only when it has to)</label>
       <span class="text-[12px] text-muted">Each move goes at the best time in its window: on time first, then out of the curfew, then in the driver’s hours, then on a weekday, then the day (or night) before the shift. Back to the yard goes as soon as it can. A move that can only happen outside his hours is still planned, and marked.</span>
     </div>
@@ -524,10 +524,10 @@ function runSheetText(cfg,runs,k){
     L.push(`   To:   ${r.to.job}${r.to.crew?' – '+r.to.crew:''}${r.to.addr?', '+r.to.addr:''}`);
     L.push(`   Free from ${whenTxt(r.earliest,k)} · ${r.to.yard?'back at the yard by':'needed by'} ${whenTxt(r.latest,k)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km, ':''}${durTxt(r.drive.min)} drive`);
     if(r.deadhead.min>0)L.push(`   Leave ${hm(r.leave)} (${durTxt(r.deadhead.min)} empty from ${r.fromLoc.key==='yard'?cfg.yardName||'the yard':'the last drop'})`);
-    if(r.curfew)L.push('   ! Loaded in the peak-hour curfew (7-9am / 4-6pm weekdays): check the timing');
+    if(r.curfew)L.push('   ! On the road in the peak-hour curfew (7-9am / 4-6pm weekdays): check the timing');
     if(r.note)L.push(`   Note: ${r.note}`);
     const u=mapsDir(r.from,r.to);if(u)L.push(`   Map: ${u}`);L.push('')});
-  if(!runs.length)L.push('No moves.');if(cfg.curfew)L.push('Oversize curfew: no loaded float on the road 7-9am and 4-6pm, Monday to Friday.');return L.join('\n')}
+  if(!runs.length)L.push('No moves.');if(cfg.curfew)L.push('Oversize curfew: the float is not on the road 7-9am and 4-6pm, Monday to Friday.');return L.join('\n')}
 async function runSheetPdf(data,cfg,runs,k){
   const JsPDF=await loadJsPDF();const doc=new JsPDF({unit:'mm',format:'a4'});const W=210,M=12;let y=M;const d=parse(k);
   const clean=s=>String(s==null?'':s).replace(/[–—]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^\n\x20-\x7E\u00A0-\u00FF]/g,'');
@@ -550,7 +550,7 @@ async function runSheetPdf(data,cfg,runs,k){
     const u=mapsDir(r.from,r.to);if(u){doc.setTextColor(30,70,140);doc.textWithLink('Directions',W-M-20,yy,{url:u});doc.setTextColor(0)}
     if(r.note){font(9,true);doc.text(clean('Note: '+r.note),M+3,yy+5)}
     y+=h+3});
-  if(cfg.curfew){font(8,false);doc.setTextColor(90);doc.text('Oversize curfew: no loaded float on the road 7-9am and 4-6pm, Monday to Friday.',M,287)}
+  if(cfg.curfew){font(8,false);doc.setTextColor(90);doc.text('Oversize curfew: the float is not on the road 7-9am and 4-6pm, Monday to Friday.',M,287)}
   font(7.5,false);doc.setTextColor(140);doc.text(clean(`Made ${fmtShort(new Date())} ${hm(new Date())} in FraserFlow. Drive times from OpenStreetMap, x${cfg.slow} for the float.`),M,292);
   const blob=doc.output('blob');const dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null;
   const name=`${clean(cfg.floatName||'Float')} run sheet ${k}.pdf`;
