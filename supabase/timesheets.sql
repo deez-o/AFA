@@ -36,6 +36,15 @@ create unique index if not exists timesheets_one_per_week on public.timesheets (
 create index if not exists timesheets_week on public.timesheets (week_start);
 create index if not exists timesheets_user on public.timesheets (user_id);
 
+-- signatures: the worker signs when they send it in (or on the supervisor's phone, e.g. someone without a login),
+-- and the supervisor signs to sign it off. Both are needed before a week is signed off.
+alter table public.timesheets add column if not exists worker_sig text check (worker_sig is null or (worker_sig like 'data:image/png;base64,%' and length(worker_sig) < 400000));
+alter table public.timesheets add column if not exists worker_sig_name text;
+alter table public.timesheets add column if not exists worker_signed_at timestamptz;
+alter table public.timesheets add column if not exists worker_sig_by uuid;
+alter table public.timesheets add column if not exists sup_sig text check (sup_sig is null or (sup_sig like 'data:image/png;base64,%' and length(sup_sig) < 400000));
+alter table public.timesheets add column if not exists sup_signed_at timestamptz;
+
 create or replace function public.ts_is_manager() returns boolean language sql stable security definer set search_path = public as $$
   select public.can('timesheets', 2) $$;
 create or replace function public.ts_mine(sid text, uid uuid) returns boolean language sql stable security definer set search_path = public as $$
@@ -49,11 +58,19 @@ declare k text; d jsonb; o jsonb; mgr boolean := public.ts_is_manager();
 begin
   new.updated_at := now(); new.updated_by := auth.uid();
   if tg_op = 'INSERT' then new.created_by := auth.uid(); end if;
+  -- a new or changed worker signature: stamp when and by whose login
+  if new.worker_sig is not null and (tg_op = 'INSERT' or new.worker_sig is distinct from old.worker_sig) then
+    new.worker_signed_at := now(); new.worker_sig_by := auth.uid();
+  elsif new.worker_sig is null then
+    new.worker_signed_at := null; new.worker_sig_by := null; new.worker_sig_name := null;
+  end if;
   if mgr then
     if new.status = 'approved' and (tg_op = 'INSERT' or old.status <> 'approved') then
-      new.approved_by := auth.uid(); new.approved_at := now();
+      if new.worker_sig is null then raise exception 'The worker needs to sign their timesheet before it''s signed off' using errcode = '22023'; end if;
+      if new.sup_sig is null then raise exception 'Sign the timesheet to sign it off' using errcode = '22023'; end if;
+      new.approved_by := auth.uid(); new.approved_at := now(); new.sup_signed_at := now();
     elsif new.status <> 'approved' then
-      new.approved_by := null; new.approved_at := null; new.approved_name := null;
+      new.approved_by := null; new.approved_at := null; new.approved_name := null; new.sup_sig := null; new.sup_signed_at := null;
     end if;
     return new;
   end if;
@@ -63,7 +80,13 @@ begin
     if new.staff_id <> old.staff_id or new.week_start <> old.week_start then raise exception 'Not allowed' using errcode = '42501'; end if;
   end if;
   if new.status = 'approved' then raise exception 'Only a supervisor can sign off a timesheet' using errcode = '42501'; end if;
-  new.approved_by := null; new.approved_at := null; new.approved_name := null;
+  new.approved_by := null; new.approved_at := null; new.approved_name := null; new.sup_sig := null; new.sup_signed_at := null;
+  -- changing a day after signing means signing again
+  if tg_op = 'UPDATE' and new.days is distinct from old.days and new.worker_sig is not distinct from old.worker_sig then
+    new.worker_sig := null; new.worker_signed_at := null; new.worker_sig_by := null; new.worker_sig_name := null;
+    if new.status = 'submitted' then new.status := 'open'; new.submitted_at := null; end if;   -- to be checked, signed and sent again
+  end if;
+  if new.status = 'submitted' and new.worker_sig is null then raise exception 'Sign your timesheet to send it in' using errcode = '22023'; end if;
   new.submitted_at := case when new.status = 'submitted' then coalesce(new.submitted_at, now()) else null end;
   for k, d in select key, value from jsonb_each(new.days) loop
     o := case when tg_op = 'UPDATE' then old.days -> k else null end;

@@ -82,11 +82,44 @@ function TimesheetsScreen({data,live,notify}){
   </div>`;
 }
 
+/* ---------- signing ---------- */
+function Pad({padRef}){
+  const cv=useRef(null);const strokes=useRef([]);const cur=useRef(null);
+  const paint=()=>{const c=cv.current;if(!c)return;const r=c.getBoundingClientRect();const dpr=Math.min(2,window.devicePixelRatio||1);
+    if(c.width!==Math.round(r.width*dpr)||c.height!==Math.round(r.height*dpr)){c.width=Math.round(r.width*dpr);c.height=Math.round(r.height*dpr)}
+    const g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,r.width,r.height);g.lineWidth=2.4;g.lineCap='round';g.lineJoin='round';g.strokeStyle='#111';
+    strokes.current.forEach(st=>{g.beginPath();st.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y));if(st.length===1)g.lineTo(st[0][0]+.1,st[0][1]+.1);g.stroke()})};
+  useEffect(paint);
+  padRef.current={empty:()=>!strokes.current.some(st=>st.length),clear:()=>{strokes.current=[];paint()},
+    png:()=>{const c=cv.current;const w=Math.min(600,c.width),h=Math.round(c.height*w/c.width);const o=document.createElement('canvas');o.width=w;o.height=h;const g=o.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,w,h);g.drawImage(c,0,0,w,h);return o.toDataURL('image/png')}};
+  const pt=e=>{const r=cv.current.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};
+  return html`<canvas ref=${cv} class="w-full rounded-lg border border-line block ts-pad" style=${{height:170,background:'#fff',touchAction:'none',cursor:'crosshair'}} aria-label="Sign here"
+    onPointerDown=${e=>{e.preventDefault();try{cv.current.setPointerCapture(e.pointerId)}catch(x){}cur.current=[pt(e)];strokes.current.push(cur.current);paint()}}
+    onPointerMove=${e=>{if(!cur.current)return;e.preventDefault();cur.current.push(pt(e));paint()}} onPointerUp=${()=>{cur.current=null}} onPointerCancel=${()=>{cur.current=null}}></canvas>`;
+}
+/* a signature: who's signing, the statement, the pad */
+function SignBox({title,who,statement,onSign,onClose,busy}){
+  const pad=useRef(null);const [err,setErr]=useState('');
+  return html`<div class="fixed inset-0 z-[80] flex items-center justify-center p-3 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div class="panel pop w-full max-w-[520px] p-4 grid gap-3" role="dialog" aria-modal="true" id="ts-sign">
+      <div class="flex items-start gap-2"><div class="flex-1 min-w-0"><div class="font-display text-[17px] font-semibold">${title}</div><div class="text-[12.5px] text-muted">${who}</div></div>
+        <button type="button" class="btn px-2" onClick=${onClose} aria-label="Close">${Icon.x}</button></div>
+      <p class="text-[12.5px]">${statement}</p>
+      <div class="grid gap-1"><div class="flex items-center"><span class="label flex-1">Sign here</span><button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>pad.current&&pad.current.clear()}>Clear</button></div><${Pad} padRef=${pad}/></div>
+      ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+      <div class="flex justify-end gap-2"><button type="button" class="btn" onClick=${onClose}>Cancel</button>
+        <button id="ts-sign-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${()=>{if(!pad.current||pad.current.empty()){setErr('Sign in the box.');return}onSign(pad.current.png())}}>${busy?'Saving…':'Sign'}</button></div>
+    </div></div>`;
+}
+const WORKER_STATEMENT='I confirm these are the hours I worked and the leave I took this week.';
+const SUP_STATEMENT='I have checked these hours and leave and sign off this timesheet.';
+const myName=data=>{const live=window.__ffLive;const u=live&&live.user;const sid=live&&live.staffId;const p=sid&&data.resources.find(r=>r.id===sid);return p?p.name:(u&&typeof showLogin==='function'?showLogin(u.email):(u&&u.email)||'')};
+
 /* ---------- someone's own week ---------- */
 function MyWeek({sb,data,v,ws,ds,notify,reload}){
   const me=v.me;const staffId=me.staff_id;const person=data.resources.find(r=>r.id===staffId);
   const so=signOnsOf(v,data,me.id);const ts=v.ts.find(t=>t.staff_id===staffId);
-  const [busy,setBusy]=useState('');const [err,setErr]=useState('');const made=useRef(false);
+  const [busy,setBusy]=useState('');const [err,setErr]=useState('');const made=useRef(false);const [signing,setSigning]=useState(false);
   /* the timesheet starts on the first sign-on of the week (or when the week has leave) */
   useEffect(()=>{if(ts||made.current||!staffId)return;const days=startDays(data,staffId,ds,so);if(!Object.keys(days).length)return;made.current=true;
     sb.from('timesheets').insert({staff_id:staffId,user_id:me.id,name:person?person.name:me.email,week_start:ws,days}).then(({error})=>{if(error&&!/duplicate/i.test(error.message))setErr(errMsg(error));reload()})},[ts,staffId]);
@@ -104,8 +137,11 @@ function MyWeek({sb,data,v,ws,ds,notify,reload}){
       return html`<${DayCard} key=${k} k=${k} d=${d} signed=${signed} editable=${canEdit} mgr=${false}
         onSave=${nd=>save({...ts.days,[k]:{...(signed&&signed[0]?{pack_id:signed[0].pack.id,block_id:signed[0].pack.block_id,crew_id:signed[0].crewId,job:signed[0].label}:{}),...d,...nd,kind:'work',by:'self'}})}/>`})}
     ${!locked&&html`<div class="panel px-4 py-3 flex flex-wrap items-center gap-2">
-      <span class="text-[12.5px] text-muted flex-1">${ts.status==='submitted'?'Sent to your supervisor. You can still fix a day until they sign it off.':'At the end of the week, check your days and send it to your supervisor.'}</span>
-      ${ts.status!=='submitted'&&html`<button id="ts-submit" type="button" class="btn btn-primary" disabled=${!!busy} onClick=${async()=>{if(await save(ts.days,'submitted'))notify('Timesheet sent to your supervisor')}}>Send to supervisor</button>`}</div>`}
+      <span class="text-[12.5px] text-muted flex-1">${ts.status==='submitted'?'Signed and sent to your supervisor. If you change a day, you’ll need to sign and send it again.':'At the end of the week, check your days, sign and send it to your supervisor.'}</span>
+      ${ts.status!=='submitted'&&html`<button id="ts-submit" type="button" class="btn btn-primary" disabled=${!!busy} onClick=${()=>setSigning(true)}>Sign and send to supervisor</button>`}</div>`}
+    ${signing&&html`<${SignBox} title="Sign your timesheet" who=${`${person?person.name:'You'} · week of ${dayName(ds[0])}`} statement=${WORKER_STATEMENT} busy=${!!busy} onClose=${()=>setSigning(false)}
+      onSign=${async png=>{setErr('');setBusy('s');const {error}=await sb.from('timesheets').update({status:'submitted',worker_sig:png,worker_sig_name:person?person.name:me.email}).eq('id',ts.id);setBusy('');
+        if(error){setErr(errMsg(error));setSigning(false);return}setSigning(false);notify('Timesheet signed and sent to your supervisor');reload()}}/>`}
   </div>`;
 }
 const statusChip=ts=>{const s=ts.status;const [l,c]=s==='approved'?[`Signed off${ts.approved_name?' by '+ts.approved_name:''}`,'hsl(145 55% 30%)']:s==='submitted'?['Sent to supervisor','hsl(212 70% 40%)']:['Being filled in','hsl(30 90% 36%)'];
@@ -197,13 +233,13 @@ function AllWeek({sb,data,v,ws,ds,notify,reload}){
   </div>`;
 }
 
-/* one person's week, for the supervisor: every day editable, then sign off */
+/* one person's week, for the supervisor: every day editable, then sign off (the worker's signature and the supervisor's) */
 function PersonWeek({sb,data,row,ds,flags,notify,reload,onBack,onPdf}){
-  const ts=row.ts;const [busy,setBusy]=useState('');const [err,setErr]=useState('');
-  const live=window.__ffLive;const myName=(()=>{const u=live&&live.user;const sid=live&&live.staffId;const p=sid&&data.resources.find(r=>r.id===sid);return p?p.name:(u&&typeof showLogin==='function'?showLogin(u.email):(u&&u.email)||'')})();
+  const ts=row.ts;const [busy,setBusy]=useState('');const [err,setErr]=useState('');const [sign,setSign]=useState(null);   /* 'worker' | 'sup' */
   const save=async patch=>{setErr('');setBusy('s');const {error}=await sb.from('timesheets').update(patch).eq('id',ts.id);setBusy('');if(error){setErr(errMsg(error));return false}reload();return true};
   const tot=ds.reduce((a,k)=>a+hoursOf(ts.days[k]),0);
   const locked=ts.status==='approved';
+  const sigLine=(lbl,img,name,at)=>html`<div class="grid gap-1 min-w-0"><span class="label">${lbl}</span>${img?html`<img src=${img} alt=${lbl} class="h-[64px] w-auto max-w-full object-contain rounded border border-line bg-white"/><span class="text-[12px] text-muted">${name||''}${at?' · '+new Date(at).toLocaleString('en-AU',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}):''}</span>`:html`<span class="text-[12.5px]" style=${{color:'hsl(30 90% 34%)'}}>Not signed yet</span>`}</div>`;
   return html`<div class="grid gap-3" id="ts-person">
     <div class="panel px-4 py-3 flex flex-wrap items-center gap-3">
       <button type="button" class="btn" onClick=${onBack}>${Icon.chevL} All timesheets</button>
@@ -213,10 +249,18 @@ function PersonWeek({sb,data,row,ds,flags,notify,reload,onBack,onPdf}){
     ${err&&html`<div class="panel px-4 py-2 text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
     ${ds.map(k=>html`<${DayCard} key=${k} k=${k} d=${ts.days[k]} signed=${row.so[k]} editable=${!locked} mgr=${!locked} audit=${flags[row.key+'|'+k]}
       onSave=${nd=>save({days:{...ts.days,[k]:{...(ts.days[k]||{}),...(row.so[k]&&row.so[k][0]&&!(ts.days[k]||{}).crew_id?{pack_id:row.so[k][0].pack.id,block_id:row.so[k][0].pack.block_id,crew_id:row.so[k][0].crewId,job:row.so[k][0].label}:{}),...nd}}})}/>`)}
-    <div class="panel px-4 py-3 flex flex-wrap items-center gap-2">
-      <span class="text-[12.5px] text-muted flex-1">${locked?`Signed off${ts.approved_name?' by '+ts.approved_name:''}${ts.approved_at?' on '+new Date(ts.approved_at).toLocaleDateString('en-AU'):''}.`:'Check each day (amber ones are different to the crew), then sign off the week.'}</span>
-      ${locked?html`<button type="button" class="btn" disabled=${!!busy} onClick=${async()=>{if(await save({status:'open'}))notify('Timesheet reopened')}}>Reopen</button>`
-        :html`<button id="ts-approve" type="button" class="btn btn-primary" disabled=${!!busy} onClick=${async()=>{if(await save({status:'approved',approved_name:myName}))notify(`${row.name}’s timesheet signed off`)}}>Sign off week</button>`}</div>
+    <div class="panel px-4 py-3 grid gap-3">
+      <div class="grid sm:grid-cols-2 gap-3">${sigLine('Worker',ts.worker_sig,ts.worker_sig_name,ts.worker_signed_at)}${sigLine('Supervisor',ts.sup_sig,ts.approved_name,ts.sup_signed_at)}</div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-[12.5px] text-muted flex-1">${locked?`Signed off${ts.approved_name?' by '+ts.approved_name:''}${ts.approved_at?' on '+new Date(ts.approved_at).toLocaleDateString('en-AU'):''}.`
+          :!ts.worker_sig?`${row.name} hasn’t signed yet. They sign when they send it in, or here on this phone.`:'Check each day (amber ones are different to the crew), then sign off the week.'}</span>
+        ${locked?html`<button type="button" class="btn" disabled=${!!busy} onClick=${async()=>{if(await save({status:'open'}))notify('Timesheet reopened')}}>Reopen</button>`
+          :html`${!ts.worker_sig&&html`<button id="ts-worker-sign" type="button" class="btn" disabled=${!!busy} onClick=${()=>setSign('worker')}>${row.name.split(' ')[0]} signs here</button>`}
+            <button id="ts-approve" type="button" class="btn btn-primary" disabled=${!!busy||!ts.worker_sig} title=${ts.worker_sig?'':'The worker signs first'} onClick=${()=>setSign('sup')}>Sign off week</button>`}</div></div>
+    ${sign&&html`<${SignBox} title=${sign==='worker'?`${row.name} signs`:'Sign off this timesheet'} who=${sign==='worker'?`${row.name} · week of ${dayName(ds[0])} (signing on this phone)`:`${myName(data)} · ${row.name}, week of ${dayName(ds[0])}`}
+      statement=${sign==='worker'?WORKER_STATEMENT:SUP_STATEMENT} busy=${!!busy} onClose=${()=>setSign(null)}
+      onSign=${async png=>{const ok=await save(sign==='worker'?{worker_sig:png,worker_sig_name:row.name}:{status:'approved',sup_sig:png,approved_name:myName(data)});setSign(null);
+        if(ok)notify(sign==='worker'?`${row.name} has signed`:`${row.name}’s timesheet signed off`)}}/>`}
   </div>`;
 }
 
@@ -225,15 +269,27 @@ async function timesheetPdf(list,ds){
   if(!list.length)throw new Error('No timesheets to export.');
   const Jp=await loadJsPDF();const doc=new Jp({orientation:'p',unit:'mm',format:'a4'});const M=14;
   list.forEach((ts,i)=>{if(i)doc.addPage();let y=18;
-    doc.setFont('helvetica','bold');doc.setFontSize(15);doc.text('Timesheet',M,y);doc.setFontSize(11);doc.text(ts.name||'',196,y,{align:'right'});y+=6;
-    doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.text(`Week ${dayName(ds[0])} – ${dayName(ds[6])} ${parse(ds[6]).getFullYear()}  ·  Alex Fraser Group`,M,y);y+=8;
+    try{doc.addImage(AFA_LOGO,'PNG',M,8,44,17)}catch(e){}
+    doc.setFont('helvetica','bold');doc.setFontSize(15);doc.setTextColor(17);doc.text('Fraser',150,15,{align:'right'});const fw=doc.getTextWidth('Fraser');doc.setTextColor(153,10,44);doc.text('Flow',150,15);doc.setTextColor(0);
+    doc.setFontSize(11);doc.text('TIMESHEET',196,15,{align:'right'});
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(90);doc.text('Alex Fraser Group',196,20.5,{align:'right'});doc.setTextColor(0);
+    y=33;doc.setDrawColor(153,10,44);doc.setLineWidth(.6);doc.line(M,y-5,196,y-5);doc.setLineWidth(.2);
+    doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text(ts.name||'',M,y);doc.setFont('helvetica','normal');doc.setFontSize(9.5);
+    doc.text(`Week ${dayName(ds[0])} – ${dayName(ds[6])} ${parse(ds[6]).getFullYear()}`,196,y,{align:'right'});y+=9;
     const cols=[['Day',26],['Job / leave',70],['Start',16],['Finish',16],['Break',16],['Hours',16],['Notes',26]];
     doc.setFillColor(153,10,44);doc.rect(M,y-4.5,182,7,'F');doc.setTextColor(255);doc.setFont('helvetica','bold');let x=M+1.5;cols.forEach(([h,w])=>{doc.text(h,x,y);x+=w});doc.setTextColor(0);doc.setFont('helvetica','normal');y+=7;
     let tot=0;ds.forEach(k=>{const d=ts.days[k]||{};const h=hoursOf(d);tot+=h;const leave=d.kind&&d.kind!=='work';
       const row=[dayName(k),leave?kindLabel(d.kind):(d.job||''),leave?'':d.start||'',leave?'':d.finish||'',leave||!d.start?'':(d.break||0)+' min',h?h2(h):'',d.notes||''];
       x=M+1.5;row.forEach((t,j)=>{const w=cols[j][1];doc.text(doc.splitTextToSize(String(t),w-2)[0]||'',x,y);x+=w});doc.setDrawColor(220);doc.line(M,y+2.2,M+182,y+2.2);y+=8});
     doc.setFont('helvetica','bold');doc.text('Total hours',M+1.5,y);doc.text(h2(tot),M+1.5+26+70+16+16+16,y);doc.setFont('helvetica','normal');y+=12;
-    doc.text(ts.status==='approved'?`Signed off${ts.approved_name?' by '+ts.approved_name:''}${ts.approved_at?' on '+new Date(ts.approved_at).toLocaleDateString('en-AU'):''}`:'NOT YET SIGNED OFF',M,y);
+    /* signatures: the worker's and the supervisor's */
+    const when=t=>t?new Date(t).toLocaleString('en-AU',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'}):'';
+    [[M,'Worker',ts.worker_sig,ts.worker_sig_name||ts.name,ts.worker_signed_at,WORKER_STATEMENT],[M+93,'Supervisor',ts.sup_sig,ts.approved_name,ts.sup_signed_at,SUP_STATEMENT]].forEach(([x0,lbl,img,nm,at,st])=>{
+      doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.text(lbl,x0,y);doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(90);doc.text(doc.splitTextToSize(st,86),x0,y+4.5);doc.setTextColor(0);
+      doc.setDrawColor(200);doc.rect(x0,y+9,86,26);if(img){try{doc.addImage(img,'PNG',x0+2,y+10,82,24)}catch(e){}}else{doc.setFontSize(9);doc.setTextColor(180,90,0);doc.text('Not signed',x0+43,y+23,{align:'center'});doc.setTextColor(0)}
+      doc.setFontSize(8.5);doc.text([nm||'',when(at)].filter(Boolean).join('  ·  '),x0,y+39)});
+    y+=47;doc.setFontSize(9.5);doc.setFont('helvetica','bold');
+    doc.text(ts.status==='approved'?`Signed off${ts.approved_name?' by '+ts.approved_name:''}${ts.approved_at?' on '+new Date(ts.approved_at).toLocaleDateString('en-AU'):''}`:'NOT YET SIGNED OFF',M,y);doc.setFont('helvetica','normal');
   });
   const name=`Timesheets ${ds[0]}${list.length===1?' '+list[0].name:''}.pdf`.replace(/[\\/:*?"<>|]+/g,'-');
   const dl=await window.claude.use('downloads');await dl.save({filename:name,data:doc.output('blob')});
