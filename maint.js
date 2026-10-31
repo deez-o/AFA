@@ -812,6 +812,7 @@ function MachinesTab({ctx,open}){
       <select class="field w-auto" style=${fs} value=${cat} onChange=${e=>setCat(e.target.value)} aria-label="Category"><option value="">All categories</option>${machineCatsOf(data).map(c=>html`<option key=${c} value=${c}>${c}</option>`)}</select>
       ${nRet>0&&html`<label class="inline-flex items-center gap-1.5 text-[12.5px] cursor-pointer"><input type="checkbox" class="w-4 h-4" checked=${ret} onChange=${e=>setRet(e.target.checked)}/>Show retired (${nRet})</label>`}
       <span class="text-[12.5px] text-muted">${shown.length} machine${shown.length===1?'':'s'}</span><span class="flex-1"></span>
+      ${html`<button id="mc-export-missing" type="button" class="btn" onClick=${()=>exportMissing(ctx)} title="A spreadsheet of machines with no make, model or year, ready to fill in (e.g. from a rego check) and import">${Icon.download} Export missing details</button>`}
       ${canAdd&&ctx.onImportMachines&&html`<button id="mc-import" type="button" class="btn" onClick=${ctx.onImportMachines} title="Update machines from an Excel list (rego details, readings and more)">${Icon.download} Import from Excel</button>`}
       ${canAdd&&html`<button id="mc-add" type="button" class="btn btn-primary" onClick=${()=>setDlg({isNew:true})}>${Icon.plus} Add machine</button>`}
     </div>
@@ -836,6 +837,26 @@ function MachinesTab({ctx,open}){
   </section>`;
 }
 
+/* machines with no make, model or year (not retired): a spreadsheet in the import's layout, ready to fill in and bring back
+   with Import from Excel. What's already known is filled in. */
+async function exportMissing(ctx){
+  const {M,notify}=ctx;
+  try{const list=M.assets.filter(a=>!a.retired&&(!a.p||!a.p.make||!a.p.model||!a.p.year));
+    if(!list.length){notify('Every machine has its make, model and year');return}
+    const ExcelJS=await loadExcelJS();const wb=new ExcelJS.Workbook();const ws=wb.addWorksheet('Missing details',{views:[{state:'frozen',ySplit:3,xSplit:2}]});
+    const H=['Category','Machine #','Description','Rego','Year','Make','Model','VIN / chassis','Meter','Rego expiry','COI due','GVM (kg)','GCM (kg)','ATM (kg)','Tare (kg)'];
+    ws.addRow([`FraserFlow: machines missing details (${list.length}) · ${fmtShort(TODAY)} ${TODAY.getFullYear()} · fill in, then Fleet › Machines › Import from Excel`]).font={bold:true,size:12};ws.addRow([]);
+    const hr=ws.addRow(H);hr.eachCell(c=>{c.font={bold:true,color:{argb:'FFFFFFFF'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF990A2C'}}});
+    const dt=v=>v?new Date(String(v).slice(0,10)+'T00:00:00'):null;
+    list.sort((x,y)=>(machCatOf(x.m)||'~').localeCompare(machCatOf(y.m)||'~')||x.m.name.localeCompare(y.m.name)).forEach(a=>{const p=a.p||{};
+      const r=ws.addRow([machCatOf(a.m)||'',a.m.name,a.m.sub||'',a.m.rego||'',p.year||null,p.make||'',p.model||'',p.serial||'',a.mt,dt(p.rego_expiry),dt(p.coi_due),p.gvm||null,p.gcm||null,p.atm||null,p.tare||null]);
+      r.getCell(2).font={bold:true};r.getCell(4).font={name:'Consolas'};[10,11].forEach(i=>r.getCell(i).numFmt='dd/mm/yyyy');
+      [5,6,7].forEach(i=>{if(!r.getCell(i).value)r.getCell(i).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFF4D6'}}})});
+    [18,12,30,11,7,14,26,22,8,12,12,10,10,10,10].forEach((w,i)=>{ws.getColumn(i+1).width=w});
+    const buf=await wb.xlsx.writeBuffer();const dl=await window.claude.use('downloads');
+    await dl.save({filename:`Machines missing details ${pad(TODAY.getDate())}.${pad(TODAY.getMonth()+1)}.${TODAY.getFullYear()}.xlsx`,data:new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})});
+    notify(`${list.length} machine${list.length===1?'':'s'} exported`)}
+  catch(e){notify('Couldn’t export: '+(e.message||e))}}
 /* registration details on a machine's fleet profile (supabase/maintenance.sql adds the columns) */
 const REG_FIELDS=[['rego_expiry','Rego expiry','date'],['coi_due','Inspection (COI) due','date'],
   ['gvm','GVM (kg)','int'],['gcm','GCM (kg)','int'],['atm','ATM (kg)','int'],['tare','Tare (kg)','int']];
