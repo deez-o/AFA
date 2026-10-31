@@ -212,22 +212,46 @@ function planFloat(trips,cfg,travel,plan,opt={}){
     out.push({...t,pick,leave,depart,arrive,done,drive:tr,deadhead:dh,fixed,late,tight,early,outHours,weekend,curfew,fatigue,shiftStart:drv.shiftStart,fromLoc:loc,
       ticked:!!(P[t.id]&&P[t.id].done),tickedAt:P[t.id]&&P[t.id].doneAt,note:(P[t.id]&&P[t.id].note)||''});
     clock=done;loc=t.to}
-  closeGaps(out,cfg);
+  closeGaps(out,cfg,travel);
   return {runs:out,skipped}}
-/* the float shouldn't sit about mid-shift (e.g. waiting out a curfew between two moves): within a shift, a move with a
-   wait after it starts later instead, so the moves run back to back - as long as it stays on time, out of the curfew,
-   in the driver's hours and on the same day. Moves with a time set by hand, or ticked off, stay put. */
-function closeGaps(runs,cfg){
-  for(let i=runs.length-2;i>=0;i--){const r=runs[i],nx=runs[i+1];
-    if(r.fixed||r.ticked||+r.shiftStart!==+nx.shiftStart&&(nx.leave-r.done)/6e4>=REST_MIN)continue;
-    const idle=Math.floor((nx.leave-r.done)/6e4/5)*5;if(idle<15)continue;
-    for(let d=idle;d>=15;d-=5){const sh=x=>addMin(x,d);const leave=sh(r.leave),pick=sh(r.pick),depart=sh(r.depart),arrive=sh(r.arrive),done=sh(r.done);
-      if(!r.late&&done>r.latest)continue;
-      if(!r.curfew&&(inCurfew(leave,pick,cfg)||inCurfew(depart,arrive,cfg)))continue;
-      if(!r.outHours&&!inHours(leave,done,cfg))continue;
-      if(dayOf(leave)!==dayOf(r.leave))continue;
-      Object.assign(r,{leave,pick,depart,arrive,done,tight:!r.late&&done>addMin(r.latest,-30),waitAfter:Math.round((nx.leave-done)/6e4)});break}}
-  /* the shift now starts with its (possibly later) first move */
+/* the float shouldn't sit about away from the yard mid-shift (e.g. waiting at a site for a curfew to end): each
+   shift is re-planned to start later and/or in another order so its moves run back to back, as long as every move stays
+   on time, out of the curfew, in the driver's hours, on the same day, and the shift keeps to the 12-hour / 10-hour rules.
+   Waiting at the yard is fine. Shifts with a time set by hand or a ticked-off move stay as they are. */
+function closeGaps(runs,cfg,travel){
+  const L=+cfg.loadMin||0,U=+cfg.unloadMin||0;
+  const shifts=[];runs.forEach((r,i)=>{const p=runs[i-1];if(!p||(r.leave-p.done)/6e4>=REST_MIN)shifts.push([]);shifts[shifts.length-1].push(r)});
+  /* time spent waiting anywhere but the yard */
+  const idleOf=list=>{let w=0;list.forEach((r,i)=>{const p=list[i-1];
+    if(p&&p.to.key!=='yard')w+=Math.max(0,(r.leave-p.done)/6e4);           /* waiting at the last drop */
+    if(r.from.key!=='yard')w+=Math.max(0,(r.pick-addMin(r.leave,r.deadhead.min||0))/6e4)});return w};   /* early at the pick-up */
+  shifts.forEach((sh,si)=>{
+    if(sh.length<2||sh.some(r=>r.fixed||r.ticked))return;
+    const before=idleOf(sh);if(before<15)return;
+    const prevDone=si>0?shifts[si-1][shifts[si-1].length-1].done:null,nextLeave=si<shifts.length-1?shifts[si+1][0].leave:null;
+    const startLoc=sh[0].fromLoc;
+    const orders=[sh,[...sh].sort((a,b)=>a.latest-b.latest||a.earliest-b.earliest),[...sh].sort((a,b)=>a.earliest-b.earliest||a.latest-b.latest)];
+    let best=null;
+    orders.forEach(ord=>{
+      const from=sh[0].leave,to=sh[sh.length-1].done;
+      for(let S=new Date(from);S<=to;S=addMin(S,5)){
+        let t=S,loc=startLoc,ok=true;const plan=[];
+        for(const r of ord){const dh=travel(loc,r.from);const leave=t;let pick=addMin(leave,dh.min||0);if(pick<r.earliest)pick=new Date(r.earliest);
+          const tr=r.drive;const depart=addMin(pick,L*r.moves.length),arrive=addMin(depart,tr.min||0),done=addMin(arrive,U*r.moves.length);
+          if((!r.late&&done>r.latest)||(r.late&&done>r.done)||(!r.curfew&&(inCurfew(leave,pick,cfg)||inCurfew(depart,arrive,cfg)))||(!r.outHours&&!inHours(leave,done,cfg))||dayOf(pick)!==dayOf(r.pick)){ok=false;break}
+          plan.push({r,leave,pick,depart,arrive,done,deadhead:dh,fromLoc:loc});t=done;loc=r.to}
+        if(!ok)continue;
+        const first=plan[0].leave,last=plan[plan.length-1].done;
+        if((last-first)/6e4>SHIFT_MAX||(prevDone&&(first-prevDone)/6e4<REST_MIN)||(nextLeave&&(nextLeave-last)/6e4<REST_MIN))continue;
+        const idle=idleOf(plan.map(x=>({...x.r,...x})));
+        if(!best||idle<best.idle-1||(Math.abs(idle-best.idle)<=1&&S<best.S))best={idle,S,plan};
+        if(idle<1)break}});
+    if(!best||best.idle>=before-1)return;
+    best.plan.forEach((x,k)=>{Object.assign(x.r,{leave:x.leave,pick:x.pick,depart:x.depart,arrive:x.arrive,done:x.done,deadhead:x.deadhead,fromLoc:x.fromLoc,
+      tight:!x.r.late&&x.done>addMin(x.r.latest,-30)});sh[k]=x.r});
+  });
+  /* back in time order, each shift starting with its first move */
+  runs.splice(0,runs.length,...shifts.flat());
   let start=null;runs.forEach((r,i)=>{const p=runs[i-1];if(!p||(r.leave-p.done)/6e4>=REST_MIN)start=r.leave;r.shiftStart=start});
 }
 

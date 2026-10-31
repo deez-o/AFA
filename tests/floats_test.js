@@ -197,4 +197,14 @@ ok(!ctx.FFL.needsFloat({ name: 'SS003', category: 'Bobcats' }, {}, CF) && !ctx.F
   const R2 = planFloat([mk('1', 'A', 'B', '2026-11-10 05:00', '2026-11-10 08:30'), mk('2', 'C', 'D', '2026-11-10 05:00', '2026-11-10 14:00')], cfgOf({}), tr, {}).runs;
   ok(!R2[0].late && R2[0].done <= t('2026-11-10 08:30'), 'a move needed early still goes early (and the float waits only because it has to)');
 }
+
+// the float waiting at a site for the curfew: driver starts 5am, move 1 fits before 7am, move 2's machine is free at 10am
+{
+  const tr = () => ({ min: 40, km: 30 });
+  const mk = (id, a, b, e, l) => ({ id, moves: [{ m: id, name: 'W' + id }], from: { key: a }, to: { key: b }, earliest: t(e), latest: t(l) });
+  const c5 = { ...cfgOf({}), dayFrom: '05:00', dayTo: '17:00' };
+  const R = planFloat([mk('1', 'A', 'B', '2026-11-10 04:00', '2026-11-10 15:00'), mk('2', 'C', 'D', '2026-11-10 10:00', '2026-11-10 15:00')], c5, tr, {}).runs;
+  let wait = 0; R.forEach((r, i) => { if (i && R[i - 1].to.key !== 'yard') wait += (r.leave - R[i - 1].done) / 6e4 });
+  ok(R.length === 2 && wait <= 30 && R.every(r => !r.curfew && !r.late && !r.outHours), 'no waiting at a site for the curfew: the first move goes later (' + R.map(r => hm(r.leave) + '–' + hm(r.done)).join(', ') + ')');
+}
 console.log(fails ? `${fails} FAILED` : 'ALL FLOAT TESTS PASSED'); process.exit(fails ? 1 : 0);
