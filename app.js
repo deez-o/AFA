@@ -5604,7 +5604,7 @@ function App({boot,live}){
           ...(data.resources.some(r=>r.type==='crew'&&r.subbie)?[{id:'exp-subworks',label:'Subbie works',desc:'Upcoming works for a subcontractor crew',run:()=>setSubWorksOpen(true)}]:[])]}/>`}
         <div class="flex items-center gap-2 min-w-0">
           <h1 class="font-display font-semibold tracking-tight truncate text-[18px] sm:text-[22px] leading-none">Fraser<span style=${{color:'var(--accent)'}}>Flow</span><span class="text-faint font-normal"> - </span>${SCR.title}</h1>
-          ${!live.canEdit&&!sup&&screen!=='prestarts'&&screen!=='qa'&&(screen!=='fleet'||fleetCal)&&!peopleView&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change the schedule">View only</span>`}
+          ${!live.canEdit&&!sup&&live.role!=='prestart'&&screen!=='prestarts'&&screen!=='qa'&&(screen!=='fleet'||fleetCal)&&!peopleView&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change the schedule">View only</span>`}
         </div>
         <div class="flex-1"></div>
         ${boardScreen&&html`<div class="seg" role="group" aria-label="View length">
