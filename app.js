@@ -2617,12 +2617,12 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
         ${list.map(j=>{const s=sums.get(j.id);const on=j.id===sel;
           const bar=s.issues.length?ISSUE_C:JOB_STATUS[s.status][3];
           return html`<li key=${j.id}><button type="button" class=${'w-full text-left rounded-lg pl-3 pr-2.5 py-2 grid gap-1 job-row '+(on?'':'hover:bg-sunken')} data-status=${s.status} data-issues=${s.issues.length} style=${{boxShadow:`inset 4px 0 0 ${bar}`,...(on?{background:'var(--accent-soft)'}:{})}} onClick=${()=>pick(j.id)} aria-current=${on?'true':undefined}>
-            <div class="flex items-center gap-2 min-w-0"><span class="w-2.5 h-2.5 rounded-sm shrink-0" style=${{background:`hsl(${j.hue??200} 60% 55%)`}}></span>
+            <div class="flex items-center gap-2 min-w-0">
               <span class="font-medium text-[13.5px] truncate flex-1">${j.customer?html`<span class="text-muted">${j.customer} · </span>`:''}${j.name}</span>${jobIssuesChip(s)}${s.bs.some(b=>b.creditIssue)&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white shrink-0 job-credit" style=${{background:'hsl(0 75% 46%)'}} title="A booking on this job has a credit issue">Credit</span>`}${jobStatusChip(s.status)}</div>
-            <div class="flex items-center gap-2 text-[11.5px] text-muted pl-[18px] min-w-0">
+            <div class="flex items-center gap-2 text-[11.5px] text-muted min-w-0">
               <span class="truncate flex-1">${j.address||'No address'}</span>
               ${s.t>0&&html`<span class="mono tnum shrink-0">${fmtN(s.t)} t</span>`}</div>
-            <div class="flex items-center gap-2 text-[11.5px] text-faint pl-[18px]">
+            <div class="flex items-center gap-2 text-[11.5px] text-faint">
               ${j.projectNo&&html`<span class="mono">P ${j.projectNo}</span>`}
               <span>${s.bs.length} booking${s.bs.length===1?'':'s'}</span>
               ${s.shifts>0&&html`<span>${s.done}/${s.shifts} shifts</span>`}
