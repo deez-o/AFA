@@ -1,7 +1,7 @@
 // Checks the rules in api/users.js against a stand-in for Supabase. Run: node tests/api_users_test.js
 const { handler } = require('../api/users.js');
 const ENV = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'service' };
-const USERS = { 'tok-admin': { id: '00000000-0000-0000-0000-0000000000a1', role: 'admin' }, 'tok-super': { id: '00000000-0000-0000-0000-0000000000a6', role: 'superuser' },
+const USERS = { 'tok-office': { id: '00000000-0000-0000-0000-0000000000b1', role: 'office' }, 'tok-admin': { id: '00000000-0000-0000-0000-0000000000a1', role: 'admin' }, 'tok-super': { id: '00000000-0000-0000-0000-0000000000a6', role: 'superuser' },
   'tok-planner': { id: '00000000-0000-0000-0000-0000000000a2', role: 'planner' } };
 let made = [], patched = [], resets = [], deleted = [], existing = new Set(['taken@fraserflow.local']);
 const ROLE_OF = { '00000000-0000-0000-0000-0000000000a1': 'admin', '00000000-0000-0000-0000-0000000000a7': 'prestart' };
@@ -13,6 +13,11 @@ async function http(url, o = {}) {
     if (h.apikey !== 'service') throw new Error('profiles read without the service key');
     const id = url.match(/id=eq\.([^&]+)/)[1]; const u = Object.values(USERS).find(x => x.id === id);
     const role = u ? u.role : ROLE_OF[id]; return json(200, role ? [{ role }] : []);
+  }
+  if (url.includes('/rest/v1/roles')) {   // Admin › Roles
+    if (h.apikey !== 'service') throw new Error('roles read without the service key');
+    return json(200, [{ key: 'admin', perms: {} }, { key: 'superuser', perms: { 'staff.logins': 2 } }, { key: 'planner', perms: { schedule: 2 } },
+      { key: 'prestart', perms: {} }, { key: 'viewer', perms: {} }, { key: 'office', perms: { 'staff.logins': 2 } }, { key: 'foreman', perms: {} }]);
   }
   if (url.includes('/rest/v1/profiles') && o.method === 'PATCH') { patched.push({ url, body: JSON.parse(o.body) }); return json(204, null); }
   if (url.endsWith('/auth/v1/admin/users') && o.method === 'POST') {
@@ -57,5 +62,12 @@ const ok = (c, l) => { console.log((c ? 'PASS' : 'FAIL') + ': ' + l); if (!c) fa
   r = await call('tok-super', { action: 'rename', id: '00000000-0000-0000-0000-0000000000a1', login: 'boss' }); ok(r.statusCode === 403, 'a superuser can’t rename the admin');
   r = await call('tok-admin', { action: 'rename', id: '00000000-0000-0000-0000-0000000000a7', login: 'taken' }); ok(r.statusCode === 409 && /already taken/.test(r.body.error), 'renaming to a username that’s taken: “already taken”');
   r = await call('tok-planner', { action: 'rename', id: '00000000-0000-0000-0000-0000000000a7', login: 'x1' }); ok(r.statusCode === 403, 'a planner can’t rename logins');
+  // roles from Admin › Roles
+  made = []; patched = [];
+  r = await call('tok-office', { action: 'create', login: 'newbie', password: 'temporary1', role: 'foreman' });
+  ok(r.statusCode === 200 && made.length === 1 && patched.some(p => p.body.role === 'foreman'), 'a custom role with Logins can create a login, with a custom role');
+  made = [];
+  r = await call('tok-office', { action: 'create', login: 'newbie2', password: 'temporary1', role: 'nosuchrole' });
+  ok(r.statusCode === 200 && patched.some(p => p.body.role === 'viewer'), 'a role that doesn’t exist falls back to viewer');
   console.log(fails ? `${fails} FAILED` : 'ALL LOGIN FUNCTION TESTS PASSED'); process.exit(fails ? 1 : 0);
 })();

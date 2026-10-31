@@ -34,7 +34,7 @@ function useLab(sb,from){
 }
 
 function LabScreen({data,live,notify}){
-  const sb=live.sb;const canUp=UPLOAD_ROLES.includes(live.role);const mgr=live.role==='admin'||live.role==='superuser';
+  const sb=live.sb;const canUp=can('lab.upload',2);const mgr=can('lab.manage',2);
   const [tab,setTab]=useState('out');   /* outstanding: still needs reports or isn't marked done; complete: marked done */
   const [days,setDays]=useState(90);const [q,setQ]=useState('');const [open,setOpen]=useState(null);const [busy,setBusy]=useState('');const [msg,setMsg]=useState('');const [up,setUp]=useState(null);
   const today=iso(TODAY);const from=iso(addDays(TODAY,-days));

@@ -47,7 +47,7 @@ $$;
 -- who may fill in a prestart: everyone signed in except viewers
 create or replace function public.maint_can_prestart()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser','planner','supervisor','mechanic','prestart','operator'), false)   -- 'operator': the old name, until schema.sql is re-run
+  select public.can('prestarts', 2)   -- Admin › Roles
 $$;
 
 -- 2. Prestart checklists (one per machine category, versioned) -------------------

@@ -5,11 +5,15 @@
 
 create or replace function public.photos_can()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser','planner','supervisor'), false)
+  select public.can('jobs.pictures', 2)   -- Admin › Roles
+$$;
+create or replace function public.photos_can_see()
+returns boolean language sql stable security definer set search_path = public as $$
+  select public.can('jobs.pictures', 1)
 $$;
 create or replace function public.photos_is_manager()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser'), false)
+  select public.can('jobs.manage', 2)
 $$;
 
 create table if not exists public.job_photos (
@@ -48,7 +52,7 @@ create trigger job_photos_rules before insert or update on public.job_photos for
 alter table public.job_photos enable row level security;
 grant select, insert, update, delete on public.job_photos to authenticated;
 drop policy if exists "supervisors and up read" on public.job_photos;
-create policy "supervisors and up read" on public.job_photos for select to authenticated using (public.photos_can());
+create policy "supervisors and up read" on public.job_photos for select to authenticated using (public.photos_can_see());
 drop policy if exists "supervisors and up add" on public.job_photos;
 create policy "supervisors and up add" on public.job_photos for insert to authenticated with check (public.photos_can());
 drop policy if exists "relabel own or administrators" on public.job_photos;
@@ -63,7 +67,7 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values ('jobphotos', 'jobphotos', false, 15728640, array['image/jpeg','image/png','image/webp'])
 on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 drop policy if exists "job photos: read" on storage.objects;
-create policy "job photos: read" on storage.objects for select to authenticated using (bucket_id = 'jobphotos' and public.photos_can());
+create policy "job photos: read" on storage.objects for select to authenticated using (bucket_id = 'jobphotos' and public.photos_can_see());
 drop policy if exists "job photos: add" on storage.objects;
 create policy "job photos: add" on storage.objects for insert to authenticated
   with check (bucket_id = 'jobphotos' and (storage.foldername(name))[1] = 'jobs' and public.photos_can());

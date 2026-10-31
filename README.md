@@ -100,6 +100,7 @@ Fleet's sections sit in a bar below the header: **Dashboard · Machines · Calen
 - `supabase/maintenance.sql`: the maintenance tables, roles and database rules
 - `supabase/prestarts.sql`: prestart checklists and prestarts, the `maintenance` file store, and the link from each login to its Staff record
 - `supabase/defects.sql`: defects, restrictions, and how work orders carry defects through repair
+- `supabase/roles.sql`: roles and what each can do (Admin › Roles), and the `can()` check every rule uses
 - `lab.js` and `supabase/lab.sql`: the Lab screen, lab reports and their file store
 - `qa.js`, `qaforms.js` and `supabase/qa.sql`: Site QA packs (the JSA, toolbox meeting and the other QA forms) (JSA and toolbox meetings), their signatures and PDFs
 - `supabase/planner_link.sql`: stops restricted machines being added to bookings or plans; `machine_alerts` for the planner's warnings; `maintenance_feed` for the notifications bell
@@ -110,6 +111,12 @@ Fleet's sections sit in a bar below the header: **Dashboard · Machines · Calen
 2. Do the same with `supabase/prestarts.sql` (after `maintenance.sql`). It also creates the private file store (Storage bucket `maintenance`) for prestart photos, signatures and manuals.
 3. Then `supabase/defects.sql` (after `prestarts.sql`), then `supabase/planner_link.sql` (run it again after updates: it adds the notification feed).
 4. To check them: paste `tests/maintenance_test.sql` into a new query and **Run**, then `tests/prestarts_test.sql`, `tests/defects_test.sql` and `tests/planner_link_test.sql`. The messages list each check as PASS and finish with `ALL … TESTS PASSED`. They roll themselves back.
+
+### Admin › Roles (the administrator)
+**Admin** in the left menu (just above Ideas, the administrator only) is where roles are made and set up. Each role has a level for every area of FraserFlow: **Hidden**, **View** (look, not change) or **Change**, and some are yes/no (e.g. *Approve or decline leave*, *Fill in & submit QA packs*, *Fleet admin*). Areas are grouped by module: Schedule (board, settings, exports, forecast), Jobs (jobs, paperwork, pictures, removing anyone's files), Planning, Staff & leave (leave calendar, requesting leave for others, approving, own leave form, people, logins), Fleet & Maintenance (fleet, machines, machine calendar, work orders, verify & close, fleet admin, reports), Prestarts, Site QA (read & sign, fill in, change submitted, see all), Lab (lab, upload, remove anyone's reports) and Other (ideas, notifications). A role can also open on a chosen screen, use the **simple schedule** (made for phones on site) and require the **installed app** on phones.
+- **New role** starts from nothing or as a copy of another role; **Delete role** works once no login has it. **Compare roles** shows every role side by side. The Admin role always has everything.
+- The database follows the same settings (every rule reads them through `can()`), so a role set to View really can't change anything.
+- The 8 starting roles have the same access as before. Run `supabase/roles.sql` once to switch this on (it's also part of `schema.sql`).
 
 ### Roles
 | Role | Schedule | Maintenance |

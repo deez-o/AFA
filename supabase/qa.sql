@@ -9,11 +9,11 @@
 -- 1. Who may fill in a pack: supervisors, planners and administrators (operators only sign) --------------
 create or replace function public.qa_can_fill()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser','planner','supervisor'), false)
+  select public.can('qa.fill', 2)   -- Admin › Roles
 $$;
 create or replace function public.qa_is_manager()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser'), false)
+  select public.can('qa.manage', 2)
 $$;
 
 -- 2. Packs: per booking (block) and shift date; a shift can have more than one (e.g. a second work area) ----

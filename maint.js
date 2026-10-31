@@ -896,7 +896,9 @@ function Plans({ctx,open}){
 function FleetScreen({data,live,notify,setData,tab:tab0,onCounts,assetReq,onImportMachines}){
   const sb=live.sb;const role=live.role;
   /* mechanics: full access to Fleet; deleting machines (the roster's list) stays with administrators and superusers */
-  const perms={work:['admin','superuser','supervisor','mechanic'].includes(role),verify:['admin','superuser','supervisor','mechanic'].includes(role),mgr:['admin','superuser','mechanic'].includes(role),admin:role==='admin'||role==='superuser',delWo:role==='admin'||role==='mechanic'};
+  /* what this role can do here (Admin › Roles) */
+  const C=window.ffCan||(()=>false);
+  const perms={work:C('fleet.workorders',2),verify:C('fleet.verify',2),mgr:C('fleet.manage',2),admin:C('fleet.machines',2)&&C('fleet.manage',2),delWo:C('fleet.manage',2)};
   const {db,err,reload}=useMaint(sb);
   /* while Fleet is open: every 5 minutes, send what's waiting and refresh outstanding work orders from ServiceM8 */
   const sm8Ref=useRef(null);sm8Ref.current=db&&perms.work?{db,sb}:null;
@@ -912,7 +914,7 @@ function FleetScreen({data,live,notify,setData,tab:tab0,onCounts,assetReq,onImpo
     <div><button type="button" class="btn" onClick=${reload}>Try again</button></div></div>`;
   if(!M)return html`<div class="panel p-6 text-[13px] text-muted">Loading maintenance…</div>`;
   const staff=[...new Set(data.resources.filter(r=>r.type==='person').map(r=>r.name))].sort();
-  const ctx={sb,db,data,M,perms,notify,reload,staff,plans:db.service_plans,me:live.user&&live.user.id,role,setData,canEdit:!!live.canEdit&&!!setData,onImportMachines};
+  const ctx={sb,db,data,M,perms,notify,reload,staff,plans:db.service_plans,me:live.user&&live.user.id,role,setData,canEdit:!!live.canEdit&&!!setData&&C('fleet.machines',2),onImportMachines};
   const open=o=>{if(o.k==='asset'){setAsset(o.id);return}setDlg(o)};
   const a=asset&&M.byId.get(asset);
   const P=window.FFP;

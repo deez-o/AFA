@@ -1,6 +1,39 @@
 const {useState,useMemo,useEffect,useRef}=React;
 const html=htm.bind(React.createElement);
 
+/* ---------- roles: what each role can see and change (Admin › Roles; database: supabase/roles.sql) ----------
+   Every area has a level: 0 hidden, 1 view only, 2 can change. "act" areas are yes/no (0 or 2). */
+const AREAS=[
+  {mod:'Schedule',items:[['schedule','Schedule board','See the crews’ schedule; change: make, move and edit bookings'],['schedule.settings','Settings','Crews, plant, mixes, seal lists, trucks and subbies'],['schedule.exports','Exports & daily program','Excel, PDFs and the daily program',1],['schedule.forecast','Forecast','The tonnes forecast',1]]},
+  {mod:'Jobs',items:[['jobs','Jobs','See jobs and their bookings; change: add, edit, complete and delete jobs'],['jobs.paperwork','Paperwork','QA PDFs and reports; change: upload documents'],['jobs.pictures','Pictures','See pictures; change: add and relabel their own'],['jobs.manage','Remove anyone’s paperwork and pictures','',2]]},
+  {mod:'Planning',items:[['planning','Job planning','See plans; change: make plans and send them to the schedule']]},
+  {mod:'Staff & leave',items:[['staff.leave','Leave calendar','See leave; change: put leave straight on the calendar'],['staff.request','Request leave for anyone','Goes to an approver first',2],['staff.approve','Approve or decline leave','',2],['staff.myleave','Own leave form','A form for their own leave (instead of the calendar)',2],['staff.people','People','The staff list; change: add and edit staff members'],['staff.logins','Logins','Create logins, reset passwords, set roles',2]]},
+  {mod:'Fleet & Maintenance',items:[['fleet','Fleet','The Fleet section and dashboard',1],['fleet.machines','Machines','See machines; change: add, edit and delete them'],['fleet.calendar','Machine calendar','See where machines are; change: book them'],['fleet.workorders','Work orders, services, readings & defects','See them; change: raise, update and complete'],['fleet.verify','Verify & close','Verify work orders and defects, restrict machines',2],['fleet.manage','Fleet admin','Service plans, checklists, corrections, deleting readings and finished work orders, ServiceM8',2],['fleet.reports','Reports','Fleet reports',1]]},
+  {mod:'Prestarts',items:[['prestarts','Prestarts','Do prestarts on the phone',2]]},
+  {mod:'Site QA',items:[['qa','Site QA','Read packs and sign them'],['qa.fill','Fill in & submit packs','',2],['qa.manage','Change submitted packs','Edit, reopen and delete submitted packs',2],['qa.all','See all QA packs','The list of every pack, with search',1]]},
+  {mod:'Lab',items:[['lab','Lab','Shifts with what was laid, QA and reports',1],['lab.upload','Upload reports','Upload reports and mark reports complete',2],['lab.manage','Remove anyone’s reports','',2]]},
+  {mod:'Other',items:[['ideas','Ideas','The ideas board'],['notify','Notifications & suggestions','The bell and the suggest-an-idea button',1]]}];
+const AREA_KEYS=AREAS.flatMap(m=>m.items.map(i=>i[0]));
+/* the starting roles (the same as supabase/roles.sql), used until that file is run */
+const P=o=>o;
+const DEFAULT_ROLES=[
+  {key:'admin',label:'Admin',description:'Everything, always. Only the administrator manages roles.',built_in:true,sort:0,perms:{},opts:{}},
+  {key:'superuser',label:'Superuser',description:'Everything except Ideas and managing roles.',built_in:true,sort:10,perms:P({schedule:2,'schedule.settings':2,'schedule.exports':2,'schedule.forecast':2,jobs:2,'jobs.paperwork':2,'jobs.pictures':2,'jobs.manage':2,planning:2,'staff.leave':2,'staff.request':2,'staff.approve':2,'staff.people':2,'staff.logins':2,fleet:2,'fleet.machines':2,'fleet.calendar':2,'fleet.workorders':2,'fleet.verify':2,'fleet.manage':2,'fleet.reports':1,prestarts:2,qa:2,'qa.fill':2,'qa.manage':2,'qa.all':1,lab:1,'lab.upload':2,'lab.manage':2,notify:1}),opts:{}},
+  {key:'planner',label:'Planner',description:'Plans and books the work; sees Fleet.',built_in:true,sort:20,perms:P({schedule:2,'schedule.settings':2,'schedule.exports':2,'schedule.forecast':2,jobs:2,'jobs.paperwork':2,'jobs.pictures':2,planning:2,'staff.leave':2,'staff.request':2,'staff.people':2,fleet:1,'fleet.machines':2,'fleet.calendar':2,'fleet.workorders':1,'fleet.reports':1,prestarts:2,qa:2,'qa.fill':2,'qa.all':1,lab:1,'lab.upload':2,notify:1}),opts:{}},
+  {key:'supervisor',label:'Supervisor',description:'On site: the crews’ schedule, jobs and pictures, leave, prestarts and QA.',built_in:true,sort:30,perms:P({schedule:1,jobs:1,'jobs.paperwork':1,'jobs.pictures':2,'staff.leave':1,'staff.request':2,'fleet.workorders':2,'fleet.verify':2,prestarts:2,qa:2,'qa.fill':2,lab:1}),opts:{simple:true}},
+  {key:'mechanic',label:'Mechanic',description:'Fleet & Maintenance in full; the schedule to look at.',built_in:true,sort:40,perms:P({schedule:1,jobs:1,planning:1,'staff.leave':1,'staff.people':1,fleet:2,'fleet.machines':1,'fleet.calendar':1,'fleet.workorders':2,'fleet.verify':2,'fleet.manage':2,'fleet.reports':1,prestarts:2,notify:1}),opts:{}},
+  {key:'prestart',label:'Prestart (operator)',description:'Prestarts on their phone, signing QA, and their own leave.',built_in:true,sort:50,perms:P({prestarts:2,qa:1,'staff.myleave':2}),opts:{home:'prestarts',app_only:true}},
+  {key:'lab',label:'Lab',description:'The Lab screen: reports and QA for each shift.',built_in:true,sort:60,perms:P({lab:1,'lab.upload':2}),opts:{home:'lab'}},
+  {key:'viewer',label:'Viewer',description:'Looks at the schedule, jobs, plans and leave.',built_in:true,sort:70,perms:P({schedule:1,jobs:1,planning:1,'staff.leave':1,'staff.people':1,notify:1}),opts:{}}];
+let FF_ROLES=DEFAULT_ROLES;let FF_PERM={role:'viewer',perms:{},opts:{}};
+const setMyRole=(role,roles)=>{FF_ROLES=roles&&roles.length?roles:DEFAULT_ROLES;const r=FF_ROLES.find(x=>x.key===role)||DEFAULT_ROLES.find(x=>x.key===role)||{perms:{},opts:{}};FF_PERM={role,perms:r.perms||{},opts:r.opts||{},label:r.label||role}};
+/* can the signed-in person see (1) or change (2) this area? the administrator can do everything */
+const can=(area,lvl=1)=>FF_PERM.role==='admin'||((FF_PERM.perms||{})[area]||0)>=lvl;
+const roleOpt=k=>(FF_PERM.opts||{})[k];
+const roleLabel=k=>(FF_ROLES.find(r=>r.key===k)||DEFAULT_ROLES.find(r=>r.key===k)||{label:k}).label;
+const canRoster=()=>['schedule','schedule.settings','jobs','planning','fleet.machines','fleet.calendar','staff.people','staff.leave','staff.approve','ideas'].some(a=>can(a,2));
+window.ffCan=can;window.ffRoleOpt=roleOpt;
+
 /* ---------- dates ---------- */
 const pad=n=>String(n).padStart(2,'0');
 const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -1105,7 +1138,7 @@ function useMachineAlerts(live,setRaw){
     const load=async()=>{try{const {data:rows,error}=await sb.from('machine_alerts').select('*');if(error)throw error;
       const o={};(rows||[]).forEach(r=>{o[r.asset_id]=r});
       if(!off)setRaw(d=>JSON.stringify(d.alerts||{})===JSON.stringify(o)?d:{...d,alerts:o})}catch(e){}   /* not set up yet: no alerts */
-      if(MAINT_ROLES.includes(live.role))try{const {data:ev,error}=await sb.from('maintenance_feed').select('*');if(error)throw error;
+      if(can('fleet',1))try{const {data:ev,error}=await sb.from('maintenance_feed').select('*');if(error)throw error;
         if(!off)setRaw(d=>JSON.stringify(d.mfeed||[])===JSON.stringify(ev||[])?d:{...d,mfeed:ev||[]})}catch(e){}};
     load();const iv=setInterval(load,5*60e3);
     try{ch=sb.channel('alerts-'+uid());['restrictions','defects','meter_readings','service_records','service_plans','asset_profiles','prestarts','work_orders'].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,600)}));ch.subscribe()}catch(e){}
@@ -2220,7 +2253,7 @@ const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking
 const NOTIF_KEY=KEY+':notif-prefs';
 const NOTIF_DEFAULT={quote:false,booking:false,job:false,resource:false,lists:false,jobdone:true,   /* roster changes: off until a person turns them on */
   mcritical:false,mbooking:false,mbreak:false,mprestart:false,mreturn:false,mwo:false,mservice:false};   /* maintenance: off too until switched on in Settings */
-const MAINT_ROLES=['admin','superuser','planner','supervisor','mechanic'];
+
 /* maintenance notifications: events from the database feed, plus things true right now (services due, missing prestarts, restricted machines on bookings) */
 /* open jobs with bookings that have all finished: ask whether the job is complete */
 function jobDoneNotifs(data,prefs){if(!prefs.jobdone)return [];const today=iso(TODAY),out=[];
@@ -2563,7 +2596,7 @@ const jobIssuesChip=s=>s.issues&&s.issues.length?html`<span class="text-[10.5px]
 
 function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
   const [view,setView]=useState('active');const [q,setQ]=useState('');const [show,setShow]=useState('all');
-  const lv=window.__ffLive;const canEditJobs=!lv||!!lv.canEdit;
+  const lv=window.__ffLive;const canEditJobs=!lv||(!!lv.canEdit&&can('jobs',2));
   const [sel,setSel]=useState(()=>{try{return localStorage.getItem(KEY+':job')||''}catch(e){return ''}});
   const pick=id=>{setSel(id);setEdit(null);setConfirmDel(false);try{localStorage.setItem(KEY+':job',id)}catch(e){}};
   const [adding,setAdding]=useState(null);const [edit,setEdit]=useState(null);const [confirmDel,setConfirmDel]=useState(false);const [pending,setPending]=useState(null);const [msg,setMsg]=useState('');
@@ -2723,11 +2756,11 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
           </section>
         </div>
         <${JobPictures} key=${job.id} data=${data} job=${job}/>
-        <section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-paper">
+${can('jobs.paperwork',1)&&html`<section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-paper">
           <h3 id="job-paper" class="font-display text-[15px] font-semibold">Paperwork</h3>
           <div class="text-[12px] text-muted">Shift by shift: submitted QA packs, and the lab’s asphalt reports, core reports and NCRs.</div>
           <${JobPaperwork} data=${data} jobId=${job.id}/>
-        </section>
+        </section>`}
       </div>`}
     </div>
   </div>`;
@@ -2742,7 +2775,7 @@ function shrinkJpeg(file,max=1600){return new Promise((ok,no)=>{const u=URL.crea
   im.onerror=()=>{URL.revokeObjectURL(u);no(new Error('That file isn’t a picture this device can read.'))};im.src=u})}
 function JobPictures({data,job}){
   const live=window.__ffLive;const sb=live&&live.sb;const role=live&&live.role;const me=live&&live.user&&live.user.id;
-  const canUse=['admin','superuser','planner','supervisor'].includes(role);const mgr=role==='admin'||role==='superuser';
+  const canUse=can('jobs.pictures',1);const canAdd=can('jobs.pictures',2);const mgr=can('jobs.manage',2);
   const [rows,setRows]=useState(null);const [urls,setUrls]=useState({});const [err,setErr]=useState('');const [n,setN]=useState(0);const [up,setUp]=useState(null);const [view,setView]=useState(null);
   const shifts=[...new Set(data.blocks.filter(b=>b.jobId===job.id&&b.kind==='job').flatMap(b=>shiftDates(b)))].filter(k=>k<=iso(TODAY)).sort().reverse();
   useEffect(()=>{if(!sb||!canUse)return;let off=false;(async()=>{try{const {data:ps,error}=await sb.from('job_photos').select('*').eq('job_id',job.id);if(error)throw error;if(off)return;setRows(ps||[]);
@@ -2752,10 +2785,10 @@ function JobPictures({data,job}){
   const keys=[...new Set((rows||[]).map(p=>p.shift_date))].sort().reverse();
   const crewOn=k=>[...new Set(data.blocks.filter(b=>b.jobId===job.id&&b.kind==='job'&&b.start<=k&&b.end>=k).map(b=>(data.resources.find(r=>r.id===(coverOf(b,k)||b.resourceId))||{}).name).filter(Boolean))].join(', ');
   const when=t=>new Date(t).toLocaleString('en-AU',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'});
-  const canChange=p=>mgr||p.created_by===me;
+  const canChange=p=>mgr||(canAdd&&p.created_by===me);
   return html`<section class="panel p-4 grid gap-3 content-start" aria-labelledby="job-pics" id="job-pictures">
     <div class="flex flex-wrap items-center gap-2"><h3 id="job-pics" class="font-display text-[15px] font-semibold flex-1">Pictures</h3>
-      <button id="job-pic-add" type="button" class="btn btn-primary" disabled=${!shifts.length} title=${shifts.length?'':'No shifts worked yet'} onClick=${()=>setUp({n:Date.now()})}>${Icon.plus} Add pictures</button></div>
+      ${canAdd&&html`<button id="job-pic-add" type="button" class="btn btn-primary" disabled=${!shifts.length} title=${shifts.length?'':'No shifts worked yet'} onClick=${()=>setUp({n:Date.now()})}>${Icon.plus} Add pictures</button>`}</div>
     ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
     ${!rows?html`<div class="text-[12.5px] text-muted">Loading…</div>`:!keys.length?html`<div class="text-[12.5px] text-muted">No pictures yet.${shifts.length?' Add them shift by shift.':''}</div>`
       :keys.map(k=>html`<div key=${k} class="grid gap-2 job-pic-shift" data-date=${k}>
@@ -2829,30 +2862,33 @@ const previewKeys=()=>Object.keys(SCREENS).filter(k=>SCREENS[k].preview);
 /* a feature added after the admin last changed these switches starts out in progress too */
 const previewOf=d=>{if(!d||!Array.isArray(d.previewOnly))return PREVIEW_DEFAULT;const known=Array.isArray(d.previewKnown)?d.previewKnown:['fleet'];
   return [...d.previewOnly,...previewKeys().filter(k=>!known.includes(k)&&!d.previewOnly.includes(k))]};
-const screenOK0=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=role==='admin'||role==='superuser';
-  return (!s.admin||admin)&&(!s.roles||s.roles.includes(role))&&(!s.preview||role==='admin'||!previewOf(d).includes(k))};
-/* operators only see Prestarts, once it is released to them */
-const screenOK=(k,role,d)=>screenOK0(k,role,d)&&!(role==='prestart'&&k!=='prestarts'&&k!=='qa'&&k!=='staff'&&screenOK0('prestarts',role,d))
-  &&!(role==='prestart'&&k==='staff'&&!screenOK0('prestarts',role,d))   /* operators: Leave (their own leave form) once Prestarts is released to them */
-  &&!(role==='supervisor'&&!['schedule','jobs','staff','prestarts','qa'].includes(k))   /* supervisors: the schedule, jobs (to look at, and pictures), the leave calendar, prestarts and site QA */
-  &&!(role==='lab'&&k!=='lab')   /* lab logins: the Lab screen only */
-  &&k!=='machines';   /* machines are managed and booked in Fleet (Fleet › Machines and Calendar); the old Machines screen is gone */
+/* which areas open each screen (Admin › Roles) */
+const SCREEN_AREAS={schedule:['schedule'],jobs:['jobs'],planning:['planning'],staff:['staff.leave','staff.people','staff.myleave'],fleet:['fleet'],prestarts:['prestarts'],qa:['qa'],lab:['lab'],ideas:['ideas'],admin:[]};
+const screenOK0=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;
+  if(k==='admin')return FF_PERM.role==='admin';
+  return (SCREEN_AREAS[k]||[]).some(a=>can(a,1))&&(!s.preview||FF_PERM.role==='admin'||!previewOf(d).includes(k))};
+const screenOK=(k,role,d)=>k!=='machines'&&screenOK0(k,role,d);   /* machines are managed and booked in Fleet; the old Machines screen is gone */
 /* Fleet's sections; the Calendar is the machines' schedule board */
+const FLEET_TAB_AREA={mc:'fleet.machines',cal:'fleet.calendar',wo:'fleet.workorders',df:'fleet.workorders',rp:'fleet.reports'};
 const FLEET_TABS=[['dash','Dashboard'],['mc','Machines'],['cal','Calendar'],['wo','Work orders'],['df','Defects'],['plans','Service plans'],['ps','Prestarts'],['cl','Checklists'],['rp','Reports']];
-const homeScreen=(role,d)=>role==='prestart'&&screenOK('prestarts',role,d)?'prestarts':role==='lab'?'lab':'schedule';
+const homeScreen=(role,d)=>{const h=roleOpt('home');if(h&&screenOK(h,role,d))return h;return Object.keys(SCREENS).find(k=>screenOK(k,role,d))||'schedule'};
 const SCREENS={
   schedule:{label:'Schedule',title:'Schedule',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   jobs:{label:'Jobs',title:'Jobs',only:[],legend:[],head:''},
   planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
-  fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',tab:'machine',roles:['admin','superuser','planner','supervisor','mechanic'],preview:true},   /* maintenance: not for operators or viewers */
-  prestarts:{label:'Prestarts',title:'Prestarts',only:[],legend:[],head:'',roles:['admin','superuser','planner','supervisor','mechanic','prestart'],preview:true},   /* the phone checklist; the only screen operators see */
-  qa:{label:'QA',title:'Site QA',only:[],legend:[],head:'',roles:['admin','superuser','planner','supervisor','prestart'],preview:true},   /* JSA and toolbox meetings per booking shift: supervisors fill them in, the crew sign */
-  lab:{label:'Lab',title:'Lab',only:[],legend:[],head:'',roles:['admin','superuser','planner','supervisor','lab'],preview:true},   /* past shifts by job: laid from the QA, QA PDFs, lab reports */
-  ideas:{label:'Ideas',title:'Ideas',only:[],legend:[],head:'',roles:['admin'],bottom:true},   /* the administrator only, never superusers; always at the bottom of the menu */   /* administrators only (button hidden for everyone else) */
+  fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',tab:'machine',preview:true},   /* maintenance: not for operators or viewers */
+  prestarts:{label:'Prestarts',title:'Prestarts',only:[],legend:[],head:'',preview:true},   /* the phone checklist; the only screen operators see */
+  qa:{label:'QA',title:'Site QA',only:[],legend:[],head:'',preview:true},   /* JSA and toolbox meetings per booking shift: supervisors fill them in, the crew sign */
+  lab:{label:'Lab',title:'Lab',only:[],legend:[],head:'',preview:true},   /* past shifts by job: laid from the QA, QA PDFs, lab reports */
+  admin:{label:'Admin',title:'Admin',only:[],legend:[],head:'',bottom:true},   /* roles and what each can do: the administrator only */
+  ideas:{label:'Ideas',title:'Ideas',only:[],legend:[],head:'',bottom:true},   /* the administrator only, never superusers; always at the bottom of the menu */   /* administrators only (button hidden for everyone else) */
 };
+/* only their own leave form: the menu says "Leave" */
+const staffIsLeave=()=>!can('staff.leave',1)&&!can('staff.people',1)&&can('staff.myleave',1);
 const NAV_ICON={
+  admin:svg(html`<circle cx="8" cy="5.2" r="2.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M2.8 14.2c.4-2.7 2.6-4.4 5.2-4.4s4.8 1.7 5.2 4.4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M12.6 2.2l.5 1 1.1.2-.8.8.2 1.1-1-.5-1 .5.2-1.1-.8-.8 1.1-.2z" fill="currentColor"/>`,20),
   lab:svg(html`<path d="M6.2 1.8h3.6M6.8 1.8v4.4L3 12.6c-.5.9.1 1.9 1.1 1.9h7.8c1 0 1.6-1 1.1-1.9L9.2 6.2V1.8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round" stroke-linecap="round"/><path d="M4.6 10h6.8" stroke="currentColor" stroke-width="1.5"/>`,20),
   qa:svg(html`<path d="M8 1.6l5 2v4.1c0 3.2-2.1 5.6-5 6.7-2.9-1.1-5-3.5-5-6.7V3.6z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M5.6 8l1.7 1.7 3.2-3.4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,20),
   prestarts:svg(html`<rect x="3" y="2.5" width="10" height="12" rx="1.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6 2.5V1.8h4v.7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M5.6 8.6l1.7 1.6 3.2-3.4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,20),
@@ -2867,8 +2903,8 @@ const NAV_ICON={
 function NavRail({screen,go,isAdmin,role,data,badge={}}){
   const btn=([k,s])=>{const on=screen===k;
     return html`<button key=${k} class=${'flex flex-col items-center gap-0.5 sm:gap-1 rounded-lg py-2 sm:py-2.5 text-[9.5px] sm:text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
-      style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${k==='staff'&&role==='prestart'?'Leave':s.label}>
-      <span class="relative inline-flex">${k==='staff'&&role==='prestart'?NAV_ICON.schedule:NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${k==='staff'&&role==='prestart'?'Leave':s.label}</span>${role==='admin'&&s.preview&&previewOf(data).includes(k)&&html`<span class="-mt-0.5 text-[8.5px] font-bold uppercase tracking-wide px-1 rounded leading-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}} title="Only you can see this while it is in progress">Preview</span>`}</button>`};
+      style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${k==='staff'&&staffIsLeave()?'Leave':s.label}>
+      <span class="relative inline-flex">${k==='staff'&&staffIsLeave()?NAV_ICON.schedule:NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${k==='staff'&&staffIsLeave()?'Leave':s.label}</span>${role==='admin'&&s.preview&&previewOf(data).includes(k)&&html`<span class="-mt-0.5 text-[8.5px] font-bold uppercase tracking-wide px-1 rounded leading-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}} title="Only you can see this while it is in progress">Preview</span>`}</button>`};
   const all=Object.entries(SCREENS).filter(([k])=>screenOK(k,role,data));
   if(all.length<2)return null;   /* one screen (operators: Prestarts): no menu needed */
   /* bottom of the bar: features still in progress (admin only, until released), then Ideas */
@@ -2879,6 +2915,89 @@ function NavRail({screen,go,isAdmin,role,data,badge={}}){
     <div class="flex-1"></div>
     ${all.filter(low).sort((a,b)=>order(a)-order(b)).map(btn)}
   </nav>`;
+}
+/* ---------- Admin › Roles: create and delete roles, and set what each can see or change, area by area ---------- */
+const LVL=[[0,'Hidden'],[1,'View'],[2,'Change']];
+const lvlOpts=kind=>kind===1?[[0,'Hidden'],[1,'View']]:kind===2?[[0,'No'],[2,'Yes']]:LVL;
+const LVL_C={0:'var(--faint)',1:'hsl(212 70% 45%)',2:'hsl(145 55% 32%)'};
+function AdminScreen({live,data,notify}){
+  const sb=live.sb;
+  const [roles,setRoles]=useState(null);const [err,setErr]=useState('');const [profs,setProfs]=useState([]);const [sel,setSel]=useState('');const [tab,setTab]=useState('edit');
+  const [draft,setDraft]=useState(null);const [busy,setBusy]=useState(false);const [adding,setAdding]=useState(null);const [del,setDel]=useState(false);const [n,setN]=useState(0);
+  useEffect(()=>{let off=false;(async()=>{try{const {data:rs,error}=await sb.from('roles').select('*');if(error)throw error;if(off)return;
+      const list=(rs||[]).sort((a,b)=>(a.sort??100)-(b.sort??100)||a.label.localeCompare(b.label));setRoles(list);FF_ROLES=list.length?list:FF_ROLES;
+      setSel(x=>x&&list.some(r=>r.key===x)?x:(list.find(r=>r.key!=='admin')||list[0]||{}).key||'')}
+    catch(e){if(!off){setErr(/roles|relation|schema cache/.test(e.message||'')?'Roles aren’t set up yet: run supabase/roles.sql once in Supabase › SQL Editor. Until then these are the built-in roles.':(e.message||String(e)));setRoles(DEFAULT_ROLES)}}
+    try{const {data:ps}=await sb.from('profiles').select('id,email,role');if(!off&&ps)setProfs(ps)}catch(e){}})();return()=>{off=true}},[n]);
+  const cur=roles&&roles.find(r=>r.key===sel);
+  useEffect(()=>{setDraft(cur?{label:cur.label,description:cur.description||'',perms:{...(cur.perms||{})},opts:{...(cur.opts||{})}}:null);setDel(false)},[sel,roles]);
+  if(!roles)return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;
+  const count=k=>profs.filter(p=>(p.role==='operator'?'prestart':p.role)===k).length;
+  const dirty=cur&&draft&&JSON.stringify({label:cur.label,description:cur.description||'',perms:cur.perms||{},opts:cur.opts||{}})!==JSON.stringify(draft);
+  const setLvl=(k,v)=>setDraft(d=>{const perms={...d.perms};if(v)perms[k]=v;else delete perms[k];return {...d,perms}});
+  const setMod=(m,v)=>setDraft(d=>{const perms={...d.perms};m.items.forEach(([k,,,kind])=>{const ok=lvlOpts(kind).map(x=>x[0]);const vv=ok.includes(v)?v:v===1&&kind===2?0:v===2&&kind===1?1:v;if(vv)perms[k]=vv;else delete perms[k]});return {...d,perms}});
+  const save=async()=>{if(!draft.label.trim()){setErr('Give the role a name.');return}setBusy(true);setErr('');
+    const {error}=await sb.from('roles').update({label:draft.label.trim(),description:draft.description.trim()||null,perms:draft.perms,opts:draft.opts}).eq('key',cur.key);setBusy(false);
+    if(error){setErr(error.message);return}notify&&notify(`${draft.label.trim()} saved. Logins with this role get it next time they open FraserFlow.`);setN(x=>x+1)};
+  const create=async()=>{const label=(adding.label||'').trim();if(!label){setErr('Give the new role a name.');return}
+    let key=label.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,28);if(!/^[a-z]/.test(key))key='r_'+key;if(key.length<2)key='role_'+Date.now().toString(36);
+    while(roles.some(r=>r.key===key))key=key.slice(0,26)+'_'+Math.floor(Math.random()*90+10);
+    const src=roles.find(r=>r.key===adding.from);setBusy(true);setErr('');
+    const {error}=await sb.from('roles').insert({key,label,description:null,perms:src?{...(src.key==='admin'?Object.fromEntries(AREAS.flatMap(m=>m.items.map(([k,,,kind])=>[k,kind===1?1:2]))):src.perms)}:{},opts:src?{...(src.opts||{})}:{},sort:(roles.reduce((m,r)=>Math.max(m,r.sort??100),0))+10});
+    setBusy(false);if(error){setErr(error.message);return}setAdding(null);setSel(key);notify&&notify(`${label} added`);setN(x=>x+1)};
+  const remove=async()=>{setBusy(true);setErr('');const {error}=await sb.from('roles').delete().eq('key',cur.key);setBusy(false);if(error){setErr(error.message);return}notify&&notify(`${cur.label} deleted`);setSel('');setN(x=>x+1)};
+  const screensFor=d=>Object.keys(SCREENS).filter(k=>k!=='machines'&&k!=='admin'&&(SCREEN_AREAS[k]||[]).some(a=>(d.perms[a]||0)>=1));
+  const seg=(k,kind,v,on)=>html`<div class="seg w-max shrink-0 adm-lvl" data-area=${k} role="group" aria-label=${k}>${lvlOpts(kind).map(([lv,l])=>html`<button key=${lv} type="button" data-lvl=${lv} aria-pressed=${(v||0)===lv} disabled=${!on} onClick=${()=>setLvl(k,lv)} style=${(v||0)===lv&&lv?{color:LVL_C[lv],fontWeight:600}:null}>${l}</button>`)}</div>`;
+  const isAdm=cur&&cur.key==='admin';
+  return html`<div class="flex-1 min-h-0 flex flex-col md:flex-row gap-3" id="admin">
+    <aside class="panel w-full md:w-[280px] shrink-0 flex flex-col min-h-0 overflow-hidden">
+      <div class="px-3 pt-3 pb-2 border-b border-line flex items-center gap-2"><div class="font-display text-[16px] font-semibold flex-1">Roles</div>
+        <button id="adm-new" type="button" class="btn btn-primary" onClick=${()=>{setAdding({label:'',from:sel||'viewer'});setErr('')}}>${Icon.plus} New role</button></div>
+      ${adding&&html`<div class="px-3 py-3 grid gap-2 border-b border-line bg-sunken" id="adm-adding">
+        <input id="adm-new-name" class="field" style=${{height:34,fontSize:13}} placeholder="Role name, e.g. Foreman" value=${adding.label} onInput=${e=>setAdding({...adding,label:e.target.value})}/>
+        <label class="grid gap-1"><span class="label">Start from</span><select id="adm-new-from" class="field" style=${{height:34,fontSize:13}} value=${adding.from} onChange=${e=>setAdding({...adding,from:e.target.value})}>
+          <option value="">Nothing (everything hidden)</option>${roles.map(r=>html`<option key=${r.key} value=${r.key}>A copy of ${r.label}</option>`)}</select></label>
+        <div class="flex justify-end gap-2"><button type="button" class="btn" onClick=${()=>setAdding(null)}>Cancel</button><button id="adm-new-add" type="button" class="btn btn-primary" disabled=${busy} onClick=${create}>Add role</button></div></div>`}
+      <ul class="flex-1 min-h-0 overflow-y-auto p-2 grid gap-1 content-start">${roles.map(r=>{const on=r.key===sel;return html`<li key=${r.key}><button type="button" class=${'w-full text-left rounded-lg px-2.5 py-2 grid gap-0.5 adm-role '+(on?'':'hover:bg-sunken')} data-role=${r.key} style=${on?{background:'var(--accent-soft)',boxShadow:'inset 3px 0 0 var(--accent)'}:null} onClick=${()=>{setSel(r.key);setTab('edit')}}>
+        <span class="flex items-center gap-2"><span class="text-[13.5px] font-medium flex-1 truncate">${r.label}</span><span class="text-[11px] text-muted mono">${count(r.key)} login${count(r.key)===1?'':'s'}</span></span>
+        <span class="text-[11.5px] text-muted truncate">${r.key==='admin'?'Everything':`${Object.values(r.perms||{}).filter(v=>v>=2).length} change · ${Object.values(r.perms||{}).filter(v=>v===1).length} view`}</span></button></li>`})}</ul>
+    </aside>
+    <div class="flex-1 min-w-0 min-h-0 overflow-y-auto md:pr-1 grid gap-3 content-start">
+      <div class="panel px-4 py-3 flex flex-wrap items-center gap-2"><div class="seg" role="tablist"><button id="adm-tab-edit" type="button" aria-pressed=${tab==='edit'} onClick=${()=>setTab('edit')}>Edit role</button><button id="adm-tab-compare" type="button" aria-pressed=${tab==='compare'} onClick=${()=>setTab('compare')}>Compare roles</button></div>
+        <span class="text-[12px] text-muted flex-1">Hidden: they don’t see it. View: they can look but not change. Change: they can change it. The database follows these too.</span></div>
+      ${err&&html`<div class="panel px-4 py-3 text-[12.5px]" style=${{color:'var(--bad)'}} id="adm-err">${err}</div>`}
+      ${tab==='compare'?html`<section class="panel overflow-x-auto" id="adm-compare"><table class="w-full text-[12px]">
+          <thead><tr class="text-left"><th class="label font-normal py-2 px-3 sticky left-0 bg-surface">Area</th>${roles.map(r=>html`<th key=${r.key} class="label font-normal py-2 px-2 text-center whitespace-nowrap">${r.label}</th>`)}</tr></thead>
+          <tbody>${AREAS.map(m=>[html`<tr key=${'m'+m.mod} class="bg-sunken"><td colspan=${roles.length+1} class="px-3 py-1.5 label" style=${{color:'var(--ink)'}}>${m.mod}</td></tr>`,
+            ...m.items.map(([k,l])=>html`<tr key=${k} class="border-t border-line"><td class="py-1.5 px-3 sticky left-0 bg-surface whitespace-nowrap">${l}</td>${roles.map(r=>{const v=r.key==='admin'?2:((r.perms||{})[k]||0);
+              return html`<td key=${r.key} class="py-1.5 px-2 text-center" title=${['Hidden','View','Change'][v]}><span class="inline-block text-[11px] font-semibold" style=${{color:LVL_C[v]}}>${['–','View','Change'][v]}</span></td>`})}</tr>`)])}</tbody></table></section>`
+      :!cur||!draft?html`<div class="panel p-8 text-center text-[13px] text-muted">Pick a role.</div>`
+      :html`<section class="panel p-4 grid gap-3" id="adm-role" data-role=${cur.key}>
+        <div class="grid sm:grid-cols-2 gap-3">
+          <label class="grid gap-1"><span class="label">Role name</span><input id="adm-label" class="field" style=${{height:34,fontSize:14}} value=${draft.label} disabled=${isAdm} onInput=${e=>setDraft({...draft,label:e.target.value})}/></label>
+          <label class="grid gap-1"><span class="label">Description</span><input id="adm-desc" class="field" style=${{height:34,fontSize:13}} value=${draft.description} disabled=${isAdm} placeholder="What this role is for" onInput=${e=>setDraft({...draft,description:e.target.value})}/></label></div>
+        ${isAdm?html`<div class="rounded-lg bg-sunken px-3 py-2.5 text-[13px]">The Admin role always has everything, including this Admin area. It can’t be changed or deleted.</div>`:html`
+        <div class="grid sm:grid-cols-3 gap-3 rounded-lg border border-line p-3">
+          <label class="grid gap-1"><span class="label">Opens on</span><select id="adm-home" class="field" style=${{height:34,fontSize:13}} value=${draft.opts.home||''} onChange=${e=>setDraft({...draft,opts:{...draft.opts,home:e.target.value||undefined}})}>
+            <option value="">The first screen they can see</option>${screensFor(draft).map(k=>html`<option key=${k} value=${k}>${SCREENS[k].label}</option>`)}</select></label>
+          <label class="inline-flex items-start gap-2 text-[13px] cursor-pointer"><input id="adm-simple" type="checkbox" class="w-4 h-4 mt-0.5" checked=${!!draft.opts.simple} onChange=${e=>setDraft({...draft,opts:{...draft.opts,simple:e.target.checked||undefined}})}/><span>Simple schedule<span class="block text-[11.5px] text-muted">Crews only, no extras: made for phones on site</span></span></label>
+          <label class="inline-flex items-start gap-2 text-[13px] cursor-pointer"><input id="adm-apponly" type="checkbox" class="w-4 h-4 mt-0.5" checked=${!!draft.opts.app_only} onChange=${e=>setDraft({...draft,opts:{...draft.opts,app_only:e.target.checked||undefined}})}/><span>Phones must use the app<span class="block text-[11.5px] text-muted">On a phone they install FraserFlow first</span></span></label></div>
+        ${AREAS.map(m=>html`<div key=${m.mod} class="rounded-lg border border-line overflow-hidden adm-mod" data-mod=${m.mod}>
+          <div class="px-3 py-2 bg-sunken flex flex-wrap items-center gap-2"><span class="font-display text-[14px] font-semibold flex-1">${m.mod}</span>
+            <span class="text-[11.5px] text-muted">Set all:</span>${[[0,'Hidden'],[1,'View'],[2,'Change']].map(([v,l])=>html`<button key=${v} type="button" class="text-[11.5px] font-medium underline underline-offset-2 text-muted hover:text-ink adm-all" data-lvl=${v} onClick=${()=>setMod(m,v)}>${l}</button>`)}</div>
+          ${m.items.map(([k,l,d,kind])=>html`<div key=${k} class="px-3 py-2 border-t border-line flex flex-wrap items-center gap-x-3 gap-y-1">
+            <div class="min-w-[200px] flex-1"><div class="text-[13px] font-medium">${l}</div>${d&&html`<div class="text-[11.5px] text-muted">${d}</div>`}</div>
+            ${seg(k,kind,draft.perms[k],true)}</div>`)}</div>`)}`}
+        <div class="flex flex-wrap items-center gap-2 sticky bottom-0 bg-surface pt-2">
+          ${!isAdm&&(del?html`<span class="text-[12.5px] font-medium" style=${{color:'var(--bad)'}} id="adm-del-confirm">${count(cur.key)?`${count(cur.key)} login${count(cur.key)===1?' has':'s have'} this role: give ${count(cur.key)===1?'it':'them'} another role first (Staff › People).`:`Delete ${cur.label}?`}</span>
+              ${!count(cur.key)&&html`<button id="adm-del-go" type="button" class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} disabled=${busy} onClick=${remove}>Yes, delete</button>`}<button type="button" class="btn" onClick=${()=>setDel(false)}>Cancel</button>`
+            :html`<button id="adm-del" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>${Icon.trash} Delete role</button>`)}
+          <span class="flex-1"></span>
+          ${!isAdm&&html`<button type="button" class="btn" disabled=${!dirty} onClick=${()=>setDraft({label:cur.label,description:cur.description||'',perms:{...(cur.perms||{})},opts:{...(cur.opts||{})}})}>Undo changes</button>
+          <button id="adm-save" type="button" class="btn btn-primary" disabled=${!dirty||busy} onClick=${save}>${busy?'Saving…':'Save role'}</button>`}</div>
+        ${count(cur.key)>0&&html`<div class="text-[12px] text-muted" id="adm-logins">Logins with this role: ${profs.filter(p=>(p.role==='operator'?'prestart':p.role)===cur.key).map(p=>showLogin(p.email)).join(', ')}</div>`}
+      </section>`}
+    </div></div>`;
 }
 /* ---------- settings menu: dark mode, notifications and (live) account ---------- */
 /* notifications bundled in groups: one switch for the whole group (shows how many are on), opened to pick them one by one */
@@ -2969,7 +3088,7 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,ma
       ${account&&html`<div class="px-4 py-3 border-b border-line">
         <div class="text-[12px] text-muted">Signed in as</div>
         <div class="text-[13.5px] font-semibold truncate">${showLogin(account.email)}</div>
-        ${(account.role==='admin'||account.role==='superuser')&&html`<div class="text-[11.5px] text-muted mt-0.5 acct-role">${({admin:'Administrator',superuser:'Superuser (full access)'})[account.role]}</div>`}   ${'' /* roles are only shown to administrators and superusers */}
+        ${account.role&&html`<div class="text-[11.5px] text-muted mt-0.5 acct-role">${account.role==='admin'?'Administrator':roleLabel(account.role)}</div>`}   ${'' /* roles are only shown to administrators and superusers */}
       </div>`}
       <div class="p-2">
         ${sectionLabel('Appearance')}
@@ -4406,7 +4525,7 @@ function PlanningScreen({data,setData,notify,onOpenBooking}){
   return html`<div class="flex-1 min-h-0 flex gap-3">
     <aside class="panel w-[280px] shrink-0 flex flex-col min-h-0 overflow-hidden">
       <div class="p-3 border-b border-line grid gap-2">
-        <button type="button" class="btn btn-primary justify-center" onClick=${add}>${Icon.plus} New plan</button>
+        ${can('planning',2)&&html`<button type="button" class="btn btn-primary justify-center" onClick=${add}>${Icon.plus} New plan</button>`}
         <input class="field field-sm" style=${{height:30,fontSize:13}} placeholder="Search plans" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search plans"/>
       </div>
       <ul class="flex-1 min-h-0 overflow-y-auto p-2 grid gap-1 content-start">
@@ -4422,13 +4541,13 @@ function PlanningScreen({data,setData,notify,onOpenBooking}){
       ${!cur?html`<div class="panel p-8 text-center grid gap-3 place-items-center">
           <div class="font-display text-[18px] font-semibold">Job planning</div>
           <p class="text-[13px] text-muted max-w-[520px]">Fill in the site inspection and the method for a job: site details and map pins, asphalt and profiling for each shift, the machines, trucking and subcontractors needed, and the safety checks. Send it to the schedule to create or update the crew’s booking, then print the plan as a PDF for the crew.</p>
-          <button type="button" class="btn btn-primary" onClick=${add}>${Icon.plus} New plan</button></div>`
-        :html`<${PlanForm} key=${cur.id} plan=${cur} data=${data} save=${save} onDelete=${id=>setConfirmDel(id)} onSchedule=${doSchedule} onOpenBooking=${onOpenBooking}
+          ${can('planning',2)&&html`<button type="button" class="btn btn-primary" onClick=${add}>${Icon.plus} New plan</button>`}</div>`
+        :html`<fieldset class="m-0 p-0 border-0 min-w-0" disabled=${!can('planning',2)}><${PlanForm} key=${cur.id} plan=${cur} data=${data} save=${save} onDelete=${id=>setConfirmDel(id)} onSchedule=${doSchedule} onOpenBooking=${onOpenBooking}
             onShifts=${(bid,n)=>setData(d=>setBookingShifts(d,bid,n))}
             onQuick=${list=>setData(d=>({...d,planQuick:list}))} onSteps=${list=>setData(d=>({...d,planSteps:list}))}
             onAddImg=${img=>setData(d=>({...d,planImgs:[...planImgsOf(d),img]}))} onDelImg=${id=>setData(d=>({...d,planImgs:planImgsOf(d).filter(x=>x.id!==id)}))}
             onPdf=${async p=>{try{const blob=await buildPlanPdf(data,p);const dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null;if(!dl){notify('Saving files isn’t available in this view.');return}
-              await dl.save({filename:`${(label(p)).replace(/[\\/:*?"<>|]+/g,' ').trim()} - job plan.pdf`,data:blob});notify('Plan PDF saved')}catch(e){notify(e&&e.code==='declined'?'Download cancelled.':(e&&e.message)||'The PDF could not be built.')}}}/>`}
+              await dl.save({filename:`${(label(p)).replace(/[\\/:*?"<>|]+/g,' ').trim()} - job plan.pdf`,data:blob});notify('Plan PDF saved')}catch(e){notify(e&&e.code==='declined'?'Download cancelled.':(e&&e.message)||'The PDF could not be built.')}}}/></fieldset>`}
     </div>
     ${confirmDel&&html`<div class="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setConfirmDel(null)}}>
       <div class="panel pop w-full max-w-[420px] p-5 grid gap-3" role="dialog" aria-modal="true">
@@ -4943,7 +5062,7 @@ function removeSampleData(d){
 const LEAVE_KINDS=['leave','sick','rdo','training'];
 /* leave figures for the Staff screen's top bar: away today, away this week (Mon–Sun), starting in the next 4 weeks */
 /* leave requests (supabase/leave_requests.sql): supervisors put leave in; an administrator or superuser approves it onto the calendar */
-const LEAVE_DECIDERS=['admin','superuser'];
+const leaveDecider=()=>can('staff.approve',2);
 function useLeaveRequests(live,on){
   const [list,setList]=useState([]);const [ok,setOk]=useState(true);
   const load=async()=>{if(!on)return;try{const since=new Date(Date.now()-30*864e5).toISOString();
@@ -4954,7 +5073,7 @@ function useLeaveRequests(live,on){
   return {list,ok,reload:load};
 }
 function LeaveRequests({LR,data,setData,live,notify,onOpen}){
-  const decider=LEAVE_DECIDERS.includes(live.role);const me=live.user.id;
+  const decider=leaveDecider();const me=live.user.id;
   const name=id=>(data.resources.find(r=>r.id===id)||{}).name||'Someone';
   const pend=LR.list.filter(r=>r.status==='pending').sort((a,b)=>a.start_date.localeCompare(b.start_date));
   const mine=decider?[]:LR.list.filter(r=>r.requested_by===me&&(r.status==='approved'||r.status==='declined')).sort((a,b)=>String(b.decided_at).localeCompare(String(a.decided_at))).slice(0,5);
@@ -5020,7 +5139,7 @@ function MyLeave({live,data,LR,notify}){
   </div>`;
 }
 function LeaveRequestDialog({r,LR,data,setData,live,notify,onClose}){
-  const decider=LEAVE_DECIDERS.includes(live.role);const mineReq=r.requested_by===live.user.id;const [reason,setReason]=useState('');const [busy,setBusy]=useState(false);const [err,setErr]=useState('');const [declining,setDeclining]=useState(false);
+  const decider=leaveDecider();const mineReq=r.requested_by===live.user.id;const [reason,setReason]=useState('');const [busy,setBusy]=useState(false);const [err,setErr]=useState('');const [declining,setDeclining]=useState(false);
   const p=data.resources.find(x=>x.id===r.person_id);
   const clash=data.blocks.find(b=>b.resourceId===r.person_id&&LEAVE_KINDS.includes(b.kind)&&b.start<=r.end_date&&b.end>=r.start_date);
   const decide=async status=>{setBusy(true);setErr('');const bid=status==='approved'?uid():null;
@@ -5095,7 +5214,8 @@ function LeaveDialog({data,setData,onClose,notify,personId,request,start,end}){
 }
 
 /* ---------- logins: created and reset by the server (api/users.js), which holds Supabase's admin key ---------- */
-const LOGIN_ROLES=[['admin','Admin'],['superuser','Superuser'],['planner','Planner'],['supervisor','Supervisor'],['mechanic','Mechanic'],['prestart','Prestart'],['lab','Lab'],['viewer','Viewer']];
+/* the roles a login can have (Admin › Roles) */
+const loginRoles=()=>[...FF_ROLES].sort((a,b)=>(a.sort??100)-(b.sort??100)||a.label.localeCompare(b.label)).map(r=>[r.key,r.label]);;
 const roleKey=r=>r==='operator'?'prestart':r;   /* "operator" was the old name */
 const TEMP_PASSWORD='temppass';   /* every new or reset login starts with this; they must choose their own at their first sign-in */
 const tempPw=()=>TEMP_PASSWORD;
@@ -5114,7 +5234,7 @@ function NewLoginDialog({sb,role,people,linked,person,onDone,onClose}){
     <div class="grid sm:grid-cols-2 gap-3">
       <${SFld} label="Username (or email)"><input id="lg-new-login" class="field" autocapitalize="none" spellcheck="false" placeholder="e.g. jsmith" value=${f.login} onInput=${e=>setF({...f,login:e.target.value})}/><//>
       <${SFld} label="Temporary password"><input id="lg-new-pw" class="field mono" value=${f.password} onInput=${e=>setF({...f,password:e.target.value})}/><//>
-      <${SFld} label="Role"><select id="lg-new-role" class="field" value=${f.role} onChange=${e=>setF({...f,role:e.target.value})}>${LOGIN_ROLES.filter(([k])=>k!=='admin'||role==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select><//>
+      <${SFld} label="Role"><select id="lg-new-role" class="field" value=${f.role} onChange=${e=>setF({...f,role:e.target.value})}>${loginRoles().filter(([k])=>k!=='admin'||role==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select><//>
       <${SFld} label="Staff member"><select id="lg-new-staff" class="field" value=${f.staff_id} disabled=${!!person} onChange=${e=>setF({...f,staff_id:e.target.value})}><option value="">Not linked (e.g. office)</option>${people.map(p=>html`<option key=${p.id} value=${p.id} disabled=${linked.has(p.id)}>${p.name}${linked.has(p.id)?' (has a login)':''}</option>`)}</select><//>
     </div><//>`;
 }
@@ -5158,7 +5278,7 @@ function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit,admin,
       ${withLogin&&html`<div class="sm:col-span-2 rounded-lg border border-line p-3 grid sm:grid-cols-2 gap-3" id="pd-login">
         <label class="sm:col-span-2 inline-flex items-center gap-2 text-[13px] font-medium cursor-pointer"><input id="pd-login-on" type="checkbox" class="w-4 h-4" checked=${lg.on} onChange=${e=>setLg({...lg,on:e.target.checked})}/>Create their login</label>
         ${lg.on&&html`<${SFld} label="Username"><input id="pd-login-name" class="field mono" autocapitalize="none" spellcheck="false" placeholder="e.g. jsmith" value=${loginName} onInput=${e=>setLg({...lg,login:e.target.value,edited:true})}/><//>
-          <${SFld} label="Role"><select id="pd-login-role" class="field" value=${lg.role} onChange=${e=>setLg({...lg,role:e.target.value})}>${LOGIN_ROLES.filter(([k])=>k!=='admin'||myRole==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select><//>
+          <${SFld} label="Role"><select id="pd-login-role" class="field" value=${lg.role} onChange=${e=>setLg({...lg,role:e.target.value})}>${loginRoles().filter(([k])=>k!=='admin'||myRole==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select><//>
           <div class="sm:col-span-2 text-[12px] text-muted">They sign in with this username and the password <span class="mono font-semibold text-ink">${TEMP_PASSWORD}</span>, then choose their own.</div>`}
       </div>`}
     </fieldset><//>`;
@@ -5166,7 +5286,7 @@ function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit,admin,
 
 /* the People view: everyone on staff, their crew and leave, and (administrators) their login */
 function StaffPeople({data,setData,live,notify,onAddLeave}){
-  const admin=!!live&&(live.role==='admin'||live.role==='superuser');const canEdit=live?live.canEdit:true;const sb=live&&live.sb;const me=live&&live.user.id;const myRole=live&&live.role;
+  const admin=!!live&&can('staff.logins',2);const canEdit=live?live.canEdit&&can('staff.people',2):true;const sb=live&&live.sb;const me=live&&live.user.id;const myRole=live&&live.role;
   const [profs,setProfs]=useState(null);const [perr,setPerr]=useState('');const [dlg,setDlg]=useState(null);const [made,setMade]=useState(null);
   const [reset,setReset]=useState(null);const [busy,setBusy]=useState(false);const [q,setQ]=useState('');const [crew,setCrew]=useState('');const [delL,setDelL]=useState(null);
   const [ren,setRen]=useState(null);   /* {id, value} while changing a username */
@@ -5189,17 +5309,17 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
   const people=data.resources.filter(r=>r.type==='person');const byId=new Map(people.map(p=>[p.id,p]));
   const crews=data.resources.filter(r=>r.type==='crew');const crewName=id=>(crews.find(c=>c.id===id)||{}).name;
   const profOf=new Map((profs||[]).filter(p=>p.staff_id).map(p=>[p.staff_id,p]));const linked=new Set(profOf.keys());
-  const loose=(profs||[]).filter(p=>!p.staff_id||!byId.has(p.staff_id)).sort((a,b)=>LOGIN_ROLES.findIndex(([k])=>k===roleKey(a.role))-LOGIN_ROLES.findIndex(([k])=>k===roleKey(b.role))||showLogin(a.email).localeCompare(showLogin(b.email)));
+  const loose=(profs||[]).filter(p=>!p.staff_id||!byId.has(p.staff_id)).sort((a,b)=>loginRoles().findIndex(([k])=>k===roleKey(a.role))-loginRoles().findIndex(([k])=>k===roleKey(b.role))||showLogin(a.email).localeCompare(showLogin(b.email)));
   const today=iso(TODAY);
   const leaveOf=p=>{const bs=data.blocks.filter(b=>b.resourceId===p.id&&LEAVE_KINDS.includes(b.kind)&&b.end>=today).sort((a,b)=>a.start.localeCompare(b.start));const b=bs[0];if(!b)return null;
     return b.start<=today?{now:true,b,t:`${KINDS[b.kind].label} · back ${fmtShort(addDays(parse(b.end),1))}`}:{b,t:`${KINDS[b.kind].label} ${leaveRange(b)}`}};
   const ql=q.trim().toLowerCase();
-  const roleRank=p=>{const pr=profOf.get(p.id);if(!pr)return 99;const i=LOGIN_ROLES.findIndex(([k])=>k===roleKey(pr.role));return i<0?98:i};
+  const roleRank=p=>{const pr=profOf.get(p.id);if(!pr)return 99;const i=loginRoles().findIndex(([k])=>k===roleKey(pr.role));return i<0?98:i};
   const list=people.filter(p=>(!crew||(crew==='~'?!p.crewId:p.crewId===crew))&&(!ql||[p.name,p.sub,crewName(p.crewId),profOf.get(p.id)&&showLogin(profOf.get(p.id).email)].join(' ').toLowerCase().includes(ql)))
     .sort((a,b)=>roleRank(a)-roleRank(b)||a.name.localeCompare(b.name));   /* by login role (admin first, no login last), then name */
   const roleSel=p=>{const self=p.id===me;const lock=self||(roleKey(p.role)==='admin'&&myRole!=='admin');
     return html`<select class="field w-auto lg-role" style=${{height:30,fontSize:12.5}} value=${roleKey(p.role)} disabled=${lock} title=${self?'You can’t change your own role':lock?'Only the admin can change this':''} onChange=${e=>saveProf(p,{role:e.target.value})} aria-label=${'Role for '+showLogin(p.email)}>
-      ${LOGIN_ROLES.filter(([k])=>k!=='admin'||myRole==='admin'||roleKey(p.role)==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select>`};
+      ${loginRoles().filter(([k])=>k!=='admin'||myRole==='admin'||roleKey(p.role)==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select>`};
   const resetCtl=p=>p.id===me||(roleKey(p.role)==='admin'&&myRole!=='admin')?null:reset&&reset.id===p.id
     ?(reset.sure   /* second step: confirm */
       ?html`<span class="inline-flex items-center gap-1.5 lg-reset-confirm"><span class="text-[12px] font-medium" style=${{color:'var(--bad)'}}>Reset ${showLogin(p.email)}’s password? Their current one stops working.</span><button type="button" class="btn" style=${{height:30}} onClick=${()=>setReset(null)}>Cancel</button><button type="button" class="btn lg-reset-yes" style=${{height:30,background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} disabled=${busy} onClick=${()=>doReset(p)}>${busy?'Resetting…':'Yes, reset'}</button></span>`
@@ -5321,28 +5441,29 @@ function App({boot,live}){
     const t=setInterval(chk,60000);document.addEventListener('visibilitychange',chk);window.addEventListener('focus',chk);
     return()=>{clearInterval(t);document.removeEventListener('visibilitychange',chk);window.removeEventListener('focus',chk)}},[]);
   /* which screen of the left menu is open (remembered in this browser) */
-  const isAdmin=live.role==='admin'||live.role==='superuser';   /* superusers have the admin's powers */
+  const isAdmin=can('staff.logins',2);
   const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return screenOK(v,live.role,boot)?v:homeScreen(live.role,boot)}catch(e){return homeScreen(live.role,boot)}});
   /* Staff screen: the leave calendar, or the People list (staff and their logins) */
   const [staffView,setStaffView0]=useState(()=>{try{return localStorage.getItem(KEY+':staff-view')==='people'?'people':'leave'}catch(e){return 'leave'}});
   const setStaffView=v=>{setStaffView0(v);try{localStorage.setItem(KEY+':staff-view',v)}catch(e){}};
   const [leaveDlg,setLeaveDlg]=useState(null);   /* {personId} while adding leave */
-  const LR=useLeaveRequests(live,['admin','superuser','supervisor','prestart'].includes(live.role));
-  const myLeaveView=screen==='staff'&&live.role==='prestart';   /* operators: their own leave form, not the calendar */const [leaveReq,setLeaveReq]=useState(null);
+  const LR=useLeaveRequests(live,can('staff.approve',2)||can('staff.request',2)||can('staff.myleave',2));
+  const myLeaveView=screen==='staff'&&staffIsLeave();   /* operators: their own leave form, not the calendar */const [leaveReq,setLeaveReq]=useState(null);
   const sendLeave=async row=>{const {error}=await live.sb.from('leave_requests').insert(row);if(error)return /leave_requests/.test(error.message||'')&&/exist|schema/i.test(error.message||'')?'Leave requests aren’t set up yet: an administrator needs to run supabase/leave_requests.sql.':error.message;LR.reload();return null};
-  const peopleView=screen==='staff'&&staffView==='people'&&live.role!=='supervisor';   /* supervisors: the leave calendar only */
+  const peopleView=screen==='staff'&&can('staff.people',1)&&(staffView==='people'||!can('staff.leave',1));   /* the People list, for roles that have it */
   /* Fleet's section (remembered); its Calendar is the machine board */
   const [fleetTab,setFleetTab0]=useState(()=>{try{const v=localStorage.getItem(KEY+':fleet-tab');return FLEET_TABS.some(t=>t[0]===v)?v:'dash'}catch(e){return 'dash'}});
   const setFleetTab=v=>{setFleetTab0(v);try{localStorage.setItem(KEY+':fleet-tab',v)}catch(e){}};
   const [fleetCounts,setFleetCounts]=useState({});const [fleetAsset,setFleetAsset]=useState(null);
   const fleetCal=screen==='fleet'&&fleetTab==='cal';
-  const boardScreen=screen!=='planning'&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='lab'&&!peopleView&&!myLeaveView;   /* the date controls and + Booking belong to the board screens */
+  const boardScreen=screen!=='planning'&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='lab'&&screen!=='admin'&&!peopleView&&!myLeaveView;   /* the date controls and + Booking belong to the board screens */
   const goScreen=k=>{setScreen(k);try{localStorage.setItem(KEY+':screen',k)}catch(e){}
     const t=SCREENS[k].tab;if(t)setTab(t);else if(tab==='person'||tab==='machine')setTab('crew')};
   useEffect(()=>{const t=SCREENS[screen].tab;if(t&&tab!==t)setTab(t);else if(!t&&(tab==='person'||tab==='machine'))setTab('crew')},[screen,tab]);
   useEffect(()=>{if(!screenOK(screen,live.role,data)){if(screen==='machines'&&screenOK('fleet',live.role,data)){setFleetTab('cal');goScreen('fleet')}else goScreen(homeScreen(live.role,data))}},[screen,data.previewOnly,data.previewKnown]);
   const openFleetAsset=screenOK('fleet',live.role,data)?id=>{setFleetAsset({id,n:Date.now()});if(fleetTab==='cal')setFleetTab('dash');goScreen('fleet')}:null;
-  const sup=live.role==='supervisor';   /* supervisors: the crews' schedule, nothing to change, no extras */
+  const sup=!!roleOpt('simple');   /* "simplified phone schedule" roles (supervisors): the crews' schedule, no extras */
+  const leaveReqOnly=!can('staff.leave',2)&&can('staff.request',2);   /* puts in leave that waits for approval */
   const SCR0=fleetCal?{...SCREENS.machines,title:SCREENS.fleet.title}:SCREENS[screen];
   const SCR=sup&&screen==='schedule'?{...SCR0,only:['crew'],legend:['Crews'],head:'Crews'}:myLeaveView?{...SCR0,title:'Leave'}:SCR0;
   useEffect(()=>{document.title='FraserFlow - '+SCR.title},[screen]);
@@ -5464,7 +5585,7 @@ function App({boot,live}){
   const legend=[['Crews',['job','standby','crewtraining']],['Asphalt plant',['plantmaint','plantreduced']],['Machines',['onjob','service','repair','inspection']],['Staff',['leave','sick','rdo','training']]];
 
   return html`<div class="shell h-full flex gap-2 sm:gap-4">
-    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} data=${data} badge=${{ideas:(data.suggestions||[]).length,staff:LEAVE_DECIDERS.includes(live.role)?LR.list.filter(r=>r.status==='pending').length:0}}/>
+    <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} data=${data} badge=${{ideas:(data.suggestions||[]).length,staff:leaveDecider()?LR.list.filter(r=>r.status==='pending').length:0}}/>
     <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='staff'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onMaint=${openFleetAsset} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
     ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
       <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
@@ -5476,10 +5597,10 @@ function App({boot,live}){
           <img src=${BRAND_OVAL} alt="Alex Fraser Group" class="block h-[38px] sm:h-[50px] w-auto select-none" draggable="false"/>
           <img src=${BRAND_TAG} alt="Building greener roads" class="brand-tag hidden xl:block h-[30px] w-auto select-none" draggable="false"/>
         </div>
-        ${screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='staff'&&live.role!=='prestart'&&!sup&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
+        ${screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='staff'&&can('schedule.settings',1)&&!sup&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
           title=${on?'Hide Settings':'Crews, plant, mixes, seal, trucks and subcontractors'}
           style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.gear} Settings</button>`)(panel&&tab!=='jobs')}
-        ${screen==='schedule'&&html`<${ExportsMenu} items=${[{id:'exp-program',label:'Daily program',desc:'PDF for each job working on a day',run:()=>setProgram(true)},
+        ${screen==='schedule'&&can('schedule.exports',1)&&html`<${ExportsMenu} items=${[{id:'exp-program',label:'Daily program',desc:'PDF for each job working on a day',run:()=>setProgram(true)},
           ...(data.resources.some(r=>r.type==='crew'&&r.subbie)?[{id:'exp-subworks',label:'Subbie works',desc:'Upcoming works for a subcontractor crew',run:()=>setSubWorksOpen(true)}]:[])]}/>`}
         <div class="flex items-center gap-2 min-w-0">
           <h1 class="font-display font-semibold tracking-tight truncate text-[18px] sm:text-[22px] leading-none">Fraser<span style=${{color:'var(--accent)'}}>Flow</span><span class="text-faint font-normal"> - </span>${SCR.title}</h1>
@@ -5498,24 +5619,24 @@ function App({boot,live}){
           <button class="btn" onClick=${goToday} disabled=${atToday}>Today</button>
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>`}
-        ${live.role!=='prestart'&&live.role!=='lab'&&!sup&&html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
-        ${live.role!=='prestart'&&live.role!=='lab'&&!sup&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} onMaint=${openFleetAsset} onCompleteJob=${live.canEdit?(id=>{setData(d=>({...d,jobs:d.jobs.map(j=>j.id===id?{...j,completed:true,completedAt:iso(TODAY)}:j)}));const j=data.jobs.find(x=>x.id===id);setToast(`${j?jobLabel(j):'Job'} marked complete`)}):null} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
-        ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary" disabled=${!live.canEdit&&live.role!=='supervisor'} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Add leave</button>`}
-        ${boardScreen&&screen!=='staff'&&!sup&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'||screen==='fleet'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
-        ${screen==='schedule'&&!sup&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
-        <${SettingsMenu} simple=${live.role==='prestart'} maint=${MAINT_ROLES.includes(live.role)&&screenOK('fleet',live.role,data)} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
+        ${can('notify',1)&&!sup&&html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
+        ${can('notify',1)&&!sup&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${screenOK('fleet',live.role,data)} onMaint=${openFleetAsset} onCompleteJob=${live.canEdit?(id=>{setData(d=>({...d,jobs:d.jobs.map(j=>j.id===id?{...j,completed:true,completedAt:iso(TODAY)}:j)}));const j=data.jobs.find(x=>x.id===id);setToast(`${j?jobLabel(j):'Job'} marked complete`)}):null} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
+        ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary" disabled=${!(live.canEdit&&can('staff.leave',2))&&!leaveReqOnly} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Add leave</button>`}
+        ${boardScreen&&screen!=='staff'&&!sup&&can(fleetCal?'fleet.calendar':'schedule',2)&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'||screen==='fleet'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
+        ${screen==='schedule'&&!sup&&can('schedule.forecast',1)&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
+        <${SettingsMenu} simple=${!can('notify',1)} maint=${screenOK('fleet',live.role,data)} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
       </header>
 
       ${live.offline&&html`<${OfflineBar} at=${live.offline.at}/>`}
       <${UpdateBar}/>
-      ${screen==='staff'&&live.role!=='supervisor'&&!myLeaveView&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg" role="tablist" aria-label="Staff sections">
+      ${screen==='staff'&&can('staff.people',1)&&can('staff.leave',1)&&!myLeaveView&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg" role="tablist" aria-label="Staff sections">
         <button id="sv-leave" type="button" role="tab" aria-selected=${!peopleView} aria-pressed=${!peopleView} onClick=${()=>setStaffView('leave')}>Leave calendar</button>
         <button id="sv-people" type="button" role="tab" aria-selected=${peopleView} aria-pressed=${peopleView} onClick=${()=>setStaffView('people')}>People</button></div></div>`}
-      ${screen==='fleet'&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg flex-wrap" role="tablist" aria-label="Fleet sections">${FLEET_TABS.map(([k,l])=>html`<button key=${k} id=${'fl-tab-'+k} type="button" role="tab" aria-selected=${fleetTab===k} aria-pressed=${fleetTab===k} onClick=${()=>setFleetTab(k)}>${l}${k==='wo'&&fleetCounts.wo!=null?html` <span class="mono text-[11px] text-faint">${fleetCounts.wo}</span>`:k==='df'&&fleetCounts.df!=null?html` <span class="mono text-[11px] text-faint">${fleetCounts.df}</span>`:''}</button>`)}</div></div>`}
-      ${leaveDlg&&html`<${LeaveDialog} data=${data} setData=${setData} notify=${setToast} personId=${leaveDlg.personId} start=${leaveDlg.start} end=${leaveDlg.end} request=${!live.canEdit&&live.role==='supervisor'?sendLeave:null} onClose=${()=>setLeaveDlg(null)}/>`}
+      ${screen==='fleet'&&html`<div class="flex flex-wrap items-center gap-2"><div class="seg flex-wrap" role="tablist" aria-label="Fleet sections">${FLEET_TABS.filter(([k])=>can(FLEET_TAB_AREA[k]||'fleet',1)).map(([k,l])=>html`<button key=${k} id=${'fl-tab-'+k} type="button" role="tab" aria-selected=${fleetTab===k} aria-pressed=${fleetTab===k} onClick=${()=>setFleetTab(k)}>${l}${k==='wo'&&fleetCounts.wo!=null?html` <span class="mono text-[11px] text-faint">${fleetCounts.wo}</span>`:k==='df'&&fleetCounts.df!=null?html` <span class="mono text-[11px] text-faint">${fleetCounts.df}</span>`:''}</button>`)}</div></div>`}
+      ${leaveDlg&&html`<${LeaveDialog} data=${data} setData=${setData} notify=${setToast} personId=${leaveDlg.personId} start=${leaveDlg.start} end=${leaveDlg.end} request=${leaveReqOnly?sendLeave:null} onClose=${()=>setLeaveDlg(null)}/>`}
       ${leaveReq&&html`<${LeaveRequestDialog} key=${leaveReq.id} r=${leaveReq} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onClose=${()=>setLeaveReq(null)}/>`}
       ${screen==='staff'&&!peopleView&&!myLeaveView&&html`<${LeaveRequests} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onOpen=${setLeaveReq}/>`}
-      ${myLeaveView?html`<${MyLeave} live=${live} data=${data} LR=${LR} notify=${setToast}/>`:peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:(screen==='fleet'&&!fleetCal)||screen==='prestarts'||screen==='qa'||screen==='lab'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':screen==='qa'?'QaScreen':screen==='lab'?'LabScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast} setData=${setData} tab=${fleetTab} onCounts=${setFleetCounts} assetReq=${fleetAsset} onImportMachines=${()=>setMachImport(true)}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
+      ${myLeaveView?html`<${MyLeave} live=${live} data=${data} LR=${LR} notify=${setToast}/>`:peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:(screen==='fleet'&&!fleetCal)||screen==='prestarts'||screen==='qa'||screen==='lab'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':screen==='qa'?'QaScreen':screen==='lab'?'LabScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast} setData=${setData} tab=${fleetTab} onCounts=${setFleetCounts} assetReq=${fleetAsset} onImportMachines=${()=>setMachImport(true)}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='admin'?html`<${AdminScreen} live=${live} data=${data} notify=${setToast}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
       ${screen==='staff'?(()=>{const L=leaveStats(data);return html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3" id="leave-stats">
         <${Stat} k="Away today" v=${L.today.length} sub=${L.today.length?L.today.map(x=>`${x.p.name.split(' ')[0]} (back ${fmtShort(addDays(parse(x.b.end),1))})`).join(', '):'everyone in'} tone=${L.today.length?'var(--warn)':null}/>
         <${Stat} k="Away this week" v=${L.week.length} sub=${L.week.length?`${L.weekDays} staff-day${L.weekDays===1?'':'s'} · ${L.week.map(p=>p.name.split(' ')[0]).join(', ')}`:'no leave this week'}/>
@@ -5535,7 +5656,7 @@ function App({boot,live}){
       </section>`}
 
       <section class="panel flex-1 min-h-[320px] flex flex-col overflow-hidden">
-        <${Board} data=${screen==='staff'&&LR.list.some(r=>r.status==='pending')?{...data,blocks:[...data.blocks,...LR.list.filter(r=>r.status==='pending'&&data.resources.some(x=>x.id===r.person_id)).map(r=>({id:'lr-'+r.id,resourceId:r.person_id,kind:r.kind,start:r.start_date,end:r.end_date,title:'Waiting for approval'+(r.note?' · '+r.note:''),pending:true,req:r}))]}:data} days=${days} view=${view} narrow=${narrow} readOnly=${!live.canEdit} onCreate=${screen==='staff'&&!live.canEdit&&live.role==='supervisor'?b=>setLeaveDlg({personId:b.resourceId,start:b.start,end:b.end}):onCreate} onEdit=${b=>b.pending?setLeaveReq(b.req):setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
+        <${Board} data=${screen==='staff'&&LR.list.some(r=>r.status==='pending')?{...data,blocks:[...data.blocks,...LR.list.filter(r=>r.status==='pending'&&data.resources.some(x=>x.id===r.person_id)).map(r=>({id:'lr-'+r.id,resourceId:r.person_id,kind:r.kind,start:r.start_date,end:r.end_date,title:'Waiting for approval'+(r.note?' · '+r.note:''),pending:true,req:r}))]}:data} days=${days} view=${view} narrow=${narrow} readOnly=${!(live.canEdit&&can(screen==='staff'?'staff.leave':fleetCal?'fleet.calendar':'schedule',2))} onCreate=${screen==='staff'&&leaveReqOnly?b=>setLeaveDlg({personId:b.resourceId,start:b.start,end:b.end}):onCreate} onEdit=${b=>b.pending?setLeaveReq(b.req):setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
           collapsed=${collapsed} toggleSection=${t=>setCollapsed(c=>({...c,[t]:!c[t]}))}/>
         <div class="border-t border-line px-4 py-2.5 hidden sm:flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
           ${legend.filter(([g])=>SCR.legend.includes(g)).map(([g,ks])=>html`<span key=${g} class="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -5779,7 +5900,9 @@ function Root(){
       const uidK=session.user.id;
       try{
         const {data:prof,error:pe}=await sb.from('profiles').select('role').eq('id',uidK).maybeSingle();if(pe)throw pe;
-        const rl=((prof&&prof.role)==='operator'?'prestart':(prof&&prof.role))||'viewer';setRole(rl);   /* "operator" was the old name for prestart */
+        const rl=((prof&&prof.role)==='operator'?'prestart':(prof&&prof.role))||'viewer';
+        let roles=null;try{const {data:rs,error:re2}=await sb.from('roles').select('*');if(!re2&&rs&&rs.length)roles=rs}catch(e){}   /* Admin › Roles (supabase/roles.sql) */
+        setMyRole(rl,roles);try{localStorage.setItem('ff:roles',JSON.stringify(roles||null))}catch(e){}setRole(rl);   /* "operator" was the old name for prestart */
         const rows=await fetchAllRows(sb);
         if(!rows.length){setPhase('empty');return}
         setBoot(rowsToData(rows));setOffline(null);setPhase('ready');
@@ -5787,7 +5910,7 @@ function Root(){
         ffStore.set('rows:'+uidK,{at:Date.now(),rows});   /* the copy used when there's no reception */
       }catch(e){
         const saved=isNetErr(e)?await ffStore.get('rows:'+uidK):null;if(!saved)throw e;
-        setRole((r=>r==='operator'?'prestart':r)(localStorage.getItem('ff:role:'+uidK))||'viewer');setBoot(rowsToData(saved.rows));setOffline({at:saved.at});setPhase('ready');
+        {const rl0=(r=>r==='operator'?'prestart':r)(localStorage.getItem('ff:role:'+uidK))||'viewer';let rs0=null;try{rs0=JSON.parse(localStorage.getItem('ff:roles')||'null')}catch(x){}setMyRole(rl0,rs0);setRole(rl0)}setBoot(rowsToData(saved.rows));setOffline({at:saved.at});setPhase('ready');
       }
     }catch(e){setMsg(isNetErr(e)?'Couldn’t reach the server. Check your connection and reload.':'Couldn’t load the roster: '+(e.message||e));setPhase('error')}
   })()},[phase,sb,session]);
@@ -5796,9 +5919,9 @@ function Root(){
   if(phase==='error')return html`<${Centered}><p class="text-[13px]">${msg}</p><button class="btn" onClick=${()=>location.reload()}>Reload</button><//>`;
   if(phase==='login')return html`<${Login} sb=${sb}/>`;
   if(phase==='setpw')return html`<${SetPassword} sb=${sb} first=${true} onDone=${()=>setPhase('loading')}/>`;
-  if(phase==='empty')return html`<${FirstRun} canEdit=${role!=='viewer'} onStart=${start}/>`;
-  if(roleKey(role)==='prestart'&&needsInstall())return html`<${InstallGate} sb=${sb} email=${session.user.email}/>`;   /* operators on a phone use the installed app */
-  return html`<${App} boot=${boot} live=${{sb,user:session.user,role,offline,canEdit:!offline&&(role==='admin'||role==='superuser'||role==='planner')}}/>`;
+  if(phase==='empty')return html`<${FirstRun} canEdit=${canRoster()} onStart=${start}/>`;
+  if(roleOpt('app_only')&&needsInstall())return html`<${InstallGate} sb=${sb} email=${session.user.email}/>`;   /* operators on a phone use the installed app */
+  return html`<${App} boot=${boot} live=${{sb,user:session.user,role,offline,canEdit:!offline&&canRoster()}}/>`;
 }
 
 

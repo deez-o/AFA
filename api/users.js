@@ -44,7 +44,15 @@ async function handler(req, res, env = process.env, http = fetch) {
   const me = await who.json();
   const pr = await http(`${url}/rest/v1/profiles?id=eq.${encodeURIComponent(me.id)}&select=role`, { headers: admin });
   const myRole = pr.ok ? ((await pr.json())[0] || {}).role : null;
-  if (myRole !== 'admin' && myRole !== 'superuser') return send(res, 403, { error: 'Only administrators and superusers can manage logins.' });
+  // who may manage logins, and which roles exist, come from Admin › Roles (the roles table); before that table exists: administrators and superusers
+  let roleKeys = ROLES, canLogins = myRole === 'admin' || myRole === 'superuser';
+  const rl = await http(`${url}/rest/v1/roles?select=key,perms`, { headers: admin });
+  if (rl.ok) { const rows = await rl.json(); if (Array.isArray(rows) && rows.length) {
+    roleKeys = rows.map(r => r.key);
+    const mine = rows.find(r => r.key === myRole);
+    canLogins = myRole === 'admin' || !!(mine && mine.perms && Number(mine.perms['staff.logins']) >= 2);
+  } }
+  if (!canLogins) return send(res, 403, { error: 'Your role can’t manage logins.' });
 
   let b;
   try { b = await readBody(req); } catch (e) { return send(res, 400, { error: 'Bad request' }); }
@@ -54,7 +62,7 @@ async function handler(req, res, env = process.env, http = fetch) {
   if (b.action === 'create') {
     const login = String(b.login || '').trim();
     if (!login.includes('@') && !/^[a-z0-9][a-z0-9._-]{1,39}$/i.test(login)) return send(res, 400, { error: 'Usernames use letters, numbers, dots, dashes or underscores (2–40 characters).' });
-    const role = ROLES.includes(b.role) ? b.role : 'viewer';
+    const role = roleKeys.includes(b.role) ? b.role : 'viewer';
     if (role === 'admin' && myRole !== 'admin') return send(res, 403, { error: 'Only the administrator can create another admin.' });
     const made = await http(url + '/auth/v1/admin/users', { method: 'POST', headers: admin,
       body: JSON.stringify({ email: toEmail(login), password, email_confirm: true, user_metadata: { password_set: false } }) });

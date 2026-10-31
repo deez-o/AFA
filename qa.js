@@ -378,12 +378,12 @@ function useMe(sb,me,data,email){
   const staff=prof&&prof.staff_id?data.resources.find(r=>r.id===prof.staff_id):null;
   return {staff,name:staff?staff.name:showLogin(email||'')}}
 function QaScreen({data,live,notify}){
-  const sb=live.sb;const me=live.user.id;const role=roleKey(live.role);const canFill=FILL_ROLES.includes(role);
+  const sb=live.sb;const me=live.user.id;const role=roleKey(live.role);const canFill=can('qa.fill',2);
   const [day,setDay]=useState(()=>iso(TODAY));const [openId,setOpenId]=useState(null);
-  const canAll=['admin','superuser','planner'].includes(role);const [mode,setMode]=useState('day');const [fromAll,setFromAll]=useState(false);
+  const canAll=can('qa.all',1);const [mode,setMode]=useState('day');const [fromAll,setFromAll]=useState(false);
   const who=useMe(sb,me,data,live.user.email);
   const {v,err,save}=useQa(sb,me,{date:day},[day]);
-  const ctx={sb,me,myName:who.name,canFill,isManager:role==='admin'||role==='superuser',save,notify};
+  const ctx={sb,me,myName:who.name,canFill,isManager:can('qa.manage',2),save,notify};
   if(err&&!v)return html`<div class="panel p-6 grid gap-2 max-w-[640px]"><div class="font-display text-[17px] font-semibold">QA packs aren’t set up yet</div><p class="text-[13px] text-muted">An administrator needs to run <span class="mono">supabase/qa.sql</span> once in Supabase → SQL Editor.</p><p class="text-[12px] text-faint mono">${err}</p></div>`;
   if(!v)return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;
   const myCrew=who.staff&&who.staff.crewId;
@@ -454,12 +454,12 @@ function AllPacks({sb,data,onOpen,onDay}){
 
 /* ---------- inside a booking: a pack per shift ---------- */
 function QaBookingTab({data,block,live}){
-  const sb=live.sb;const me=live.user.id;const role=roleKey(live.role);const canFill=FILL_ROLES.includes(role);
+  const sb=live.sb;const me=live.user.id;const role=roleKey(live.role);const canFill=can('qa.fill',2);
   const who=useMe(sb,me,data,live.user.email);
   const {v,err,save}=useQa(sb,me,{block:block.id},[block.id]);const [open,setOpen]=useState(null);
   if(err&&!v)return html`<div class="text-[13px] text-muted">QA packs aren’t set up yet: an administrator needs to run <span class="mono">supabase/qa.sql</span>. <span class="text-faint">${err}</span></div>`;
   if(!v)return html`<div class="text-[13px] text-muted">Loading…</div>`;
-  const ctx={sb,me,myName:who.name,canFill,isManager:role==='admin'||role==='superuser',save};
+  const ctx={sb,me,myName:who.name,canFill,isManager:can('qa.manage',2),save};
   const days=shiftDates(block).map(k=>({b:block,k,crewId:coverOf(block,k)||block.resourceId}));
   const cp=open&&v.packs.find(p=>p.id===open);const cur=cp&&days.find(e=>e.k===cp.shift_date);
   return html`<div class="grid gap-2" id="qa-booking">
@@ -588,7 +588,7 @@ async function costsPdf(data,e,p,sigs,opt={}){
 const LAB_KINDS=[['asphalt','Asphalt Report'],['core','Core Report'],['ncr','NCR']];
 function JobQaDocs({data,jobId,sb,role,me}){
   const [v,setV]=useState(null);const [lab,setLab]=useState([]);const [err,setErr]=useState('');const [busy,setBusy]=useState('');const [up,setUp]=useState(null);const [n,setN]=useState(0);
-  const canUp=['admin','superuser','planner'].includes(role);const mgr=role==='admin'||role==='superuser';
+  const canUp=can('jobs.paperwork',2);const mgr=can('jobs.manage',2);
   /* every shift of the job up to today, for a QA pack uploaded by hand */
   const jobShifts=[...new Set(data.blocks.filter(b=>b.jobId===jobId&&b.kind==='job').flatMap(b=>shiftDates(b)))].filter(k=>k<=iso(TODAY)).sort().reverse();
   const delFile=async r=>{const {error}=await sb.from('lab_reports').delete().eq('id',r.id);if(error){setErr(errMsg(error));return}try{await sb.storage.from('lab').remove([r.path])}catch(x){}setN(x=>x+1)};

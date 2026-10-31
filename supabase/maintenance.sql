@@ -14,23 +14,20 @@
 --    mechanic:   full access to Fleet (as admin/superuser there), except deleting machines and managing logins
 --    prestart:   prestarts only (called "operator" before); can see maintenance status
 --    viewer:     look only
-alter table public.profiles drop constraint if exists profiles_role_check;
-update public.profiles set role = 'prestart' where role = 'operator';   -- the role once called "operator" is now "prestart"
-alter table public.profiles add constraint profiles_role_check
-  check (role in ('admin','superuser','planner','supervisor','mechanic','prestart','lab','viewer'));
+-- (roles are kept in the roles table: Admin › Roles; see schema.sql)
 
 create or replace function public.maint_can_work()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser','supervisor','mechanic'), false)
+  select public.can('fleet.workorders', 2)   -- Admin › Roles
 $$;
 -- mechanics have full access to Fleet: verifying, service plans, checklists, readings, restrictions, ServiceM8
 create or replace function public.maint_can_verify()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser','supervisor','mechanic'), false)
+  select public.can('fleet.verify', 2)
 $$;
 create or replace function public.maint_is_manager()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser','mechanic'), false)
+  select public.can('fleet.manage', 2)
 $$;
 
 -- a maintenance record must point at a machine on the roster when it is created
@@ -418,8 +415,9 @@ create policy "maintenance staff change" on public.work_orders for update to aut
 -- Its service record, readings, defects and files stay with the machine; its downtime comes off the schedule.
 drop policy if exists "administrators remove" on public.work_orders;
 drop policy if exists "administrators and mechanics remove finished" on public.work_orders;
-create policy "administrators and mechanics remove finished" on public.work_orders for delete to authenticated
-  using (public.my_role() in ('admin','mechanic') and status in ('completed','closed'));
+drop policy if exists "remove finished work orders" on public.work_orders;
+create policy "remove finished work orders" on public.work_orders for delete to authenticated
+  using (public.maint_is_manager() and status in ('completed','closed'));
 
 drop policy if exists "maintenance staff add" on public.service_records;
 create policy "maintenance staff add" on public.service_records for insert to authenticated with check (public.maint_can_work());

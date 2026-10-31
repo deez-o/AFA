@@ -30,7 +30,7 @@ alter table public.leave_requests add constraint leave_requests_status_check che
 
 create or replace function public.leave_can_request()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser','planner','supervisor'), false)
+  select public.can('staff.leave', 2) or public.can('staff.request', 2)   -- Admin › Roles
 $$;
 -- operators put in leave for themselves only
 create or replace function public.my_staff_id()
@@ -39,11 +39,11 @@ returns text language sql stable security definer set search_path = public as $$
 $$;
 create or replace function public.leave_can_request_for(pid text)
 returns boolean language sql stable security definer set search_path = public as $$
-  select public.leave_can_request() or (coalesce(public.my_role() in ('prestart','operator'), false) and pid is not distinct from public.my_staff_id() and pid is not null)
+  select public.leave_can_request() or (public.can('staff.myleave', 2) and pid is not distinct from public.my_staff_id() and pid is not null)
 $$;
 create or replace function public.leave_can_decide()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser'), false)
+  select public.can('staff.approve', 2)
 $$;
 
 create or replace function public.leave_request_rules()

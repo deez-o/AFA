@@ -3,20 +3,19 @@
 -- Run once in Supabase → SQL Editor → New query → paste → Run, after schema.sql and qa.sql.
 -- Safe to run again. It only adds a role, a table, a private file store and their rules.
 
-alter table public.profiles drop constraint if exists profiles_role_check;
-alter table public.profiles add constraint profiles_role_check check (role in ('admin','superuser','planner','supervisor','mechanic','prestart','lab','viewer'));
+-- (the Lab role is in the roles table: Admin › Roles; see roles.sql)
 
 create or replace function public.lab_can_see()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser','planner','supervisor','lab'), false)
+  select public.can('lab', 1) or public.can('jobs.paperwork', 1)   -- Admin › Roles
 $$;
 create or replace function public.lab_can_upload()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser','planner','lab'), false)
+  select public.can('lab.upload', 2) or public.can('jobs.paperwork', 2)
 $$;
 create or replace function public.lab_is_manager()
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','superuser'), false)
+  select public.can('lab.manage', 2) or public.can('jobs.manage', 2)
 $$;
 
 -- a lab report: for a job, optionally one shift
