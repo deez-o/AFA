@@ -29,7 +29,7 @@ let M = run(d).moves.filter(m => m.m === 'p1');
 const direct = M.find(m => m.kind === 'direct');
 ok(direct && direct.from.job.includes('Job A') && direct.to.job.includes('Job B'), 'night job A → day job B is one direct move');
 ok(direct && hm(direct.earliest) === '04:00' && direct.earliest.getDate() === 12, 'free from 04:00 (night shift 18:00 + 10 h, the 11th into the 12th)');
-ok(direct && hm(direct.latest) === '06:30' && direct.latest.getDate() === 12, 'needed by 06:30 (the booking’s start time)');
+ok(direct && hm(direct.latest) === '05:30' && direct.latest.getDate() === 12, 'needed by 05:30: an hour before the 06:30 start');
 ok(!run(d).moves.some(m => m.m === 't1'), 'a tipper (Trucks) drives itself: no float');
 ok(!M.some(m => m.from.job === 'Job A' && m.to.job === 'Job A'), 'no move between shifts of the same job');
 
@@ -40,7 +40,7 @@ d.blocks.push(bk('b2', 'jC', 'c1', '2026-11-12', '2026-11-12', 'day', ['r1']));
 M = run(d).moves.filter(m => m.m === 'r1');
 ok(M.some(m => m.kind === 'toYard' && m.from.job === 'Job A') && M.some(m => m.kind === 'fromYard' && m.to.job === 'Job C'), 'next job 9 days away: to the yard, then out to it');
 const out = M.find(m => m.kind === 'fromYard' && m.to.job === 'Job C');
-ok(out && out.earliest.getDate() === 11 && hm(out.latest) === '06:00', 'out of the yard from the day before, by the 06:00 start');
+ok(out && out.earliest.getDate() <= 11 && hm(out.latest) === '05:00' && out.latest.getDate() === 12, 'out of the yard in the days before, there by 05:00 for the 06:00 start');
 
 // 3. the same site over a weekend: stays
 d = base();
@@ -102,4 +102,27 @@ ok(fits('PV008', 'MT006', 'SR011') && !fits('PV008', 'MT006', 'SR011', 'SR004'),
 ok(!fits('PV009', 'PV012'), 'two pavers don’t share');
 ok(!fits('PV009', 'SR099'), 'a roller not on the list doesn’t go with a paver');
 ok(!ctx.FFL.needsFloat({ name: 'SS003', category: 'Bobcats' }, {}, CF) && !ctx.FFL.needsFloat({ name: 'WC1', category: 'Water Carts' }, {}, CF), 'bobcats and water carts aren’t floated');
+
+// when the float moves: the driver's hours, weekdays first (1 Nov 2026 is a Sunday)
+{
+  const tr = () => ({ min: 40, km: 30 });
+  const trip = (e, l) => ({ id: 'x', moves: [{ m: 'a', name: 'PV009' }], from: { key: 'A' }, to: { key: 'B' }, earliest: t(e), latest: t(l) });
+  const cd = { ...cfgOf({}) };   // day driver 06:00–16:00, weekdays first
+  let r = planFloat([trip('2026-11-06 16:00', '2026-11-09 06:00')], cd, tr, {}).runs[0];
+  ok(r.pick.getDay() === 0 && hm(r.leave) === '06:00' && !r.outHours, 'Friday 16:00 → needed Monday 06:00: Sunday during the day, the day before (not Friday or Sunday night)');
+  r = planFloat([trip('2026-11-09 16:00', '2026-11-11 06:00')], cd, tr, {}).runs[0];
+  ok(r.pick.getDate() === 10 && hm(r.leave) === '06:00' && !r.weekend, 'Monday 16:00 → Wednesday 06:00: Tuesday, the day before, in hours');
+  r = planFloat([trip('2026-11-09 16:00', '2026-11-13 05:00')], cd, tr, {}).runs[0];
+  ok(r.pick.getDate() === 12, 'Monday → Friday start: Thursday, the day before (not as soon as it’s free)');
+  r = planFloat([{ ...trip('2026-11-09 16:00', '2026-11-13 05:00'), to: { key: 'yard' } }], cd, tr, {}).runs[0];
+  ok(r.pick.getDate() === 10, 'back to the yard: as soon as it can in hours (Tuesday)');
+  r = planFloat([trip('2026-11-05 16:00', '2026-11-09 06:00')], cd, tr, {}).runs[0];
+  ok(r.pick.getDay() === 5 && hm(r.leave) === '06:00', 'Thursday 16:00 → Monday: Friday daytime, not the weekend');
+  r = planFloat([trip('2026-11-10 04:00', '2026-11-10 06:30')], cd, tr, {}).runs[0];
+  ok(hm(r.pick) === '04:00' && r.outHours && !r.late, 'night shift ends 04:00, day starts 06:30: still planned on time, marked outside the driver’s hours');
+  r = planFloat([trip('2026-11-09 16:00', '2026-11-11 06:00')], { ...cd, driverShift: 'night' }, tr, {}).runs[0];
+  ok(r.pick.getDate() === 10 && hm(r.leave) === '18:00', 'a night driver: the night before (Tuesday 18:00)');
+  r = planFloat([trip('2026-11-06 16:00', '2026-11-09 06:00')], { ...cd, avoidWeekend: false, driverShift: 'any' }, tr, {}).runs[0];
+  ok(r.pick.getDay() === 0 && hm(r.pick) === '06:00', 'any time, weekends fine: still the day before, in daylight (Sunday 06:00)');
+}
 console.log(fails ? `${fails} FAILED` : 'ALL FLOAT TESTS PASSED'); process.exit(fails ? 1 : 0);

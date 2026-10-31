@@ -14,6 +14,9 @@
 const NO_FLOAT=/truck|bobcat|skid ?steer|tipper|water ?cart|ute\b|float|trailer|bogie|prime ?mover|semi\b|tanker|spray|car\b|vehicle/i;   /* drive themselves */
 const CFG0={yardName:'Yard',yardAddr:'187-193 Potassium St, Narangba QLD',gapDays:3,dayStart:'06:00',nightStart:'18:00',shiftHrs:10,
   loadMin:30,unloadMin:30,slow:1.25,floatStart:'05:00',perLoad:1,driver:'',floatName:'Float',skipCats:null,
+  /* when the float driver works: moves are put in his hours, on weekdays, when the window allows */
+  arriveBefore:60,   /* the gear is there this long before the shift starts */
+  driverShift:'day',dayFrom:'06:00',dayTo:'16:00',nightFrom:'18:00',nightTo:'04:00',avoidWeekend:true,
   /* what fits on the float together (AFA's float, Oct 2026): machine numbers (the start of the name, or the rego) */
   alone:['PV010'],
   groups:[{name:'Pavers that share',items:['PV008','PV009','PV012']},{name:'Small rollers',items:['SR004','SR005','SR010','SR011','SR013','SR014']},
@@ -87,22 +90,23 @@ function buildMoves(d,opt){
     /* stints: a run of shifts at one place */
     const S=[];A.forEach(a=>{const s=S[S.length-1];if(s&&s.place.key===a.place.key){   /* same place: the machine stays (weekends, breaks) */if(a.end>s.end){s.end=a.end;s.last=a}s.n++;return}
       S.push({place:a.place,start:a.start,end:a.end,first:a,last:a,n:1,kind:a.kind})});
-    const mk=(kind,fromP,toP,earliest,latest,why)=>{if(fromP.key===toP.key)return;moves.push({id:`${m.id}>${toP.key}@${isoLocal(latest)}`,kind,m:m.id,name:m.name,rego:m.rego||'',cat:m.category||'',desc:m.sub||'',
+    const mk=(kind,fromP,toP,earliest,latest0,why)=>{if(fromP.key===toP.key)return;
+      const latest=toP.key==='yard'?latest0:addMin(latest0,-(+cfg.arriveBefore||0));if(latest<=earliest&&latest0>earliest)earliest=addMin(latest,-30);moves.push({id:`${m.id}>${toP.key}@${isoLocal(latest)}`,kind,m:m.id,name:m.name,rego:m.rego||'',cat:m.category||'',desc:m.sub||'',
       from:fromP,to:toP,earliest,latest,why})};
     const atYard=s=>s.place.key==='yard';
     S.forEach((s,i)=>{const p=S[i-1];
       if(!p){   /* the first known place: brought from the yard if it starts later in the window */
-        if(!atYard(s)&&s.start>addMin(at(from,'00:00'),36*60))mk('fromYard',yard,s.place,addMin(s.start,-24*60),s.start,{from:'At the yard (no earlier booking)',to:startWhy(s.first)});
+        if(!atYard(s)&&s.start>addMin(at(from,'00:00'),36*60))mk('fromYard',yard,s.place,addMin(s.start,-4*24*60),s.start,{from:'At the yard (no earlier booking)',to:startWhy(s.first)});
         return}
       const gap=s.start-p.end;const why={from:endWhy(p.last),to:startWhy(s.first)};
       if(gap<=0)return;   /* booked in two places at once: shown as a clash, not a move */
       if(gap<gapMs)return mk(atYard(p)?'fromYard':atYard(s)?'toYard':'direct',p.place,s.place,p.end,s.start,why);
-      if(atYard(p))return mk('fromYard',yard,s.place,new Date(Math.max(p.end,addMin(s.start,-24*60))),s.start,why);
+      if(atYard(p))return mk('fromYard',yard,s.place,new Date(Math.max(p.end,addMin(s.start,-4*24*60))),s.start,why);
       if(atYard(s))return mk('toYard',p.place,yard,p.end,s.start,why);
       /* next job days away: back to the yard, then out again the day before */
       const back=new Date(Math.max(addMin(p.end,12*60),Math.min(addMin(p.end,36*60),addMin(s.start,-24*60))));
       mk('toYard',p.place,yard,p.end,back,{from:why.from,to:`Next job ${whenTxt(s.start)} (${Math.round(gap/864e5)} days later): to the yard till then`});
-      mk('fromYard',yard,s.place,new Date(Math.max(addMin(s.start,-24*60),back)),s.start,{from:'From the yard',to:why.to});
+      mk('fromYard',yard,s.place,new Date(Math.max(addMin(s.start,-4*24*60),back)),s.start,{from:'From the yard',to:why.to});
     });
     const L=S[S.length-1];
     if(L&&!atYard(L)&&L.end<addMin(at(to,'00:00'),-(+cfg.gapDays||3)*24*60))mk('toYard',L.place,yard,L.end,addMin(L.end,36*60),{from:endWhy(L.last),to:'Nothing booked after this: back to the yard'});
@@ -140,22 +144,48 @@ function toTrips(moves,cfg){
 /* ---------- 4. the float's day: one float, trip after trip ---------- */
 /* travel(a,b) → {min, km, est} (est: not from road routing yet). Dispatch rule: of the trips the float can start now,
    the one needed soonest; otherwise the next one that can start. A pick-up time set by hand is kept. */
+/* is a move (float leaving → unloaded) inside the driver's hours? */
+function inHours(leave,done,cfg){
+  const mode=cfg.driverShift||'day';if(mode==='any')return true;
+  if(mode==='day'){const k=dayOf(leave);return dayOf(done)===k&&leave>=at(k,cfg.dayFrom||'06:00')&&done<=at(k,cfg.dayTo||'16:00')}
+  const k0=dayOf(leave);const startToday=at(k0,cfg.nightFrom||'18:00');const k=leave>=startToday?k0:iso(addDays(parse(k0),-1));
+  const ws=at(k,cfg.nightFrom||'18:00'),we=at(iso(addDays(parse(k),1)),cfg.nightTo||'04:00');return leave>=ws&&done<=we}
+const isWeekend=t=>t.getDay()===0||t.getDay()===6;
+/* the best time for a trip in its window: on time, in the driver's hours, on a weekday, then as soon as possible */
+function bestPick(t,{clock,dh,cfg,travel,L,U}){
+  const n=t.moves.length,tr=travel(t.from,t.to);const ready=clock?addMin(clock,dh.min||0):null;
+  const base=new Date(Math.max(t.earliest,ready||0));const span=Math.min(t.latest-base,4*864e5);
+  const cands=[base];if(span>0){const st=new Date(base);st.setMinutes(Math.ceil(st.getMinutes()/30)*30,0,0);for(let c=st;c-base<=span;c=addMin(c,30))if(c>base)cands.push(c)}
+  /* and the start of each of the driver's shifts, allowing for the empty run to get there */
+  if(span>0)for(let k=dayOf(addMin(base,-24*60));k<=dayOf(addMin(base,span/6e4));k=iso(addDays(parse(k),1)))[cfg.dayFrom,cfg.nightFrom].forEach(h=>{const c=addMin(at(k,h||'06:00'),dh.min||0);if(c>base&&c-base<=span)cands.push(c)});
+  /* the day (or night) before the shift suits best; the same day next; further away less. To the yard: as soon as it can */
+  const want=iso(addDays(parse(dayOf(t.latest)),-1));
+  /* a night driver's hours after midnight belong to the night they started */
+  const shiftDay=c=>cfg.driverShift==='night'&&c.getHours()<12?iso(addDays(parse(dayOf(c)),-1)):dayOf(c);
+  const dayIdx=c=>Math.round((parse(shiftDay(c))-parse(want))/864e5);
+  const when=c=>t.to.key==='yard'?(c-base)/36e5:(()=>{const d=dayIdx(c);const nightBefore=cfg.driverShift!=='night'&&d===1&&c<at(dayOf(c),'06:00');const h=c.getHours();
+    return (d===0||nightBefore?0:d===1?8:Math.abs(d)*30)+((cfg.driverShift==='any'&&(h<6||h>=18))?4:0)+((c-at(shiftDay(c),'12:00'))/36e5)*.02})();   /* within the day before: the morning; within the night before: the start of the night */
+  let best=null;cands.forEach(c=>{const leave=addMin(c,-(dh.min||0));const done=addMin(c,L*n+(tr.min||0)+U*n);
+    const lateMin=Math.max(0,(done-t.latest)/6e4);const oh=!inHours(leave,done,cfg);const we=!!cfg.avoidWeekend&&(isWeekend(leave)||isWeekend(done));
+    const score=(lateMin>0?1e4+lateMin:0)+(oh?500:0)+(we?200:0)+when(c);
+    if(!best||score<best.score)best={pick:c,score,oh,we}});
+  return best}
 function planFloat(trips,cfg,travel,plan,opt={}){
   const P=plan||{};const L=+cfg.loadMin||0,U=+cfg.unloadMin||0;
   const left=trips.filter(t=>!(P[t.id]&&P[t.id].skip));const out=[];
   const skipped=trips.filter(t=>P[t.id]&&P[t.id].skip).map(t=>({...t,skip:true}));
   let loc={key:'yard',ll:opt.yardLL||null},clock=null;
   while(left.length){
+    /* each trip's best time from where the float is now; the soonest of those goes next */
     const cand=left.map(t=>{const dh=travel(loc,t.from);const fixed=P[t.id]&&fromIsoLocal(P[t.id].time);
-      const ready=clock?addMin(clock,dh.min||0):t.earliest;const pick=fixed||new Date(Math.max(t.earliest,ready));return {t,dh,pick,fixed:!!fixed}});
-    const now=clock||new Date(Math.min(...left.map(t=>t.earliest)));
-    const avail=cand.filter(c=>c.fixed?c.pick<=addMin(now,60):c.t.earliest<=addMin(now,(c.dh.min||0)));
-    const pickc=(avail.length?avail:cand).sort((a,b)=>avail.length?(a.t.latest-b.t.latest||a.pick-b.pick):(a.pick-b.pick||a.t.latest-b.t.latest))[0];
+      if(fixed)return {t,dh,pick:fixed,fixed:true};const b=bestPick(t,{clock,dh,cfg,travel,L,U});return {t,dh,pick:b.pick,fixed:false}});
+    const pickc=cand.sort((a,b)=>a.pick-b.pick||a.t.latest-b.t.latest)[0];
     const {t,dh,pick,fixed}=pickc;left.splice(left.indexOf(t),1);
     const tr=travel(t.from,t.to);const depart=addMin(pick,L*t.moves.length);const arrive=addMin(depart,tr.min||0);const done=addMin(arrive,U*t.moves.length);
     const leave=addMin(pick,-(dh.min||0));
     const late=done>t.latest,tight=!late&&done>addMin(t.latest,-30),early=pick<t.earliest;
-    out.push({...t,pick,leave,depart,arrive,done,drive:tr,deadhead:dh,fixed,late,tight,early,fromLoc:loc,
+    const outHours=!inHours(leave,done,cfg),weekend=isWeekend(leave)||isWeekend(done);
+    out.push({...t,pick,leave,depart,arrive,done,drive:tr,deadhead:dh,fixed,late,tight,early,outHours,weekend,fromLoc:loc,
       ticked:!!(P[t.id]&&P[t.id].done),tickedAt:P[t.id]&&P[t.id].doneAt,note:(P[t.id]&&P[t.id].note)||''});
     clock=done;loc=t.to}
   return {runs:out,skipped}}
@@ -255,6 +285,8 @@ function FloatsScreen({data,setData,notify}){
         <div class="mono text-[20px] sm:text-[22px] font-semibold leading-none">${hm(r.pick)}<span class="text-faint text-[14px] font-normal"> → ${hm(r.done)}</span></div>
         <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:sc,background:sb}}>${sl}</span>
         ${r.fixed&&!r.ticked&&html`<span class="text-[11px] text-muted">time set by hand</span>`}
+        ${r.outHours&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-oh" style=${{color:'hsl(270 45% 38%)',background:'hsl(270 60% 95%)'}} title="Outside the float driver’s hours (Settings)">Outside driver’s hours</span>`}
+        ${r.weekend&&!r.ticked&&cfg.avoidWeekend&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:'hsl(30 85% 34%)',background:'hsl(38 95% 92%)'}}>Weekend</span>`}
         ${r.early&&!r.ticked&&html`<span class="text-[11px] font-semibold" style=${{color:'hsl(30 85% 34%)'}}>Before the machine is free (${hm(r.earliest)})</span>`}
         <div class="flex-1"></div>
         <a class="btn" style=${{height:30}} href=${mapsDir(r.from,r.to)} target="_blank" rel="noopener">${Icon.pin} Directions</a>
@@ -266,7 +298,7 @@ function FloatsScreen({data,setData,notify}){
         <div class="grid gap-0.5"><span class="label">Pick up</span><span class="font-semibold">${r.from.job}${r.from.crew?html` <span class="text-muted font-normal">· ${r.from.crew}</span>`:''}</span>
           <span class="text-muted text-[12.5px]">${r.from.addr||'No address'}</span><span class="text-[12px]" style=${{color:'hsl(145 45% 30%)'}}>Free from ${whenTxt(r.earliest,dayOf(r.pick))} · ${r.moves[0].why.from}</span></div>
         <div class="grid gap-0.5"><span class="label">Drop off</span><span class="font-semibold">${r.to.job}${r.to.crew?html` <span class="text-muted font-normal">· ${r.to.crew}</span>`:''}</span>
-          <span class="text-muted text-[12.5px]">${r.to.addr||'No address'}</span><span class="text-[12px]" style=${{color:r.late?'var(--bad)':'hsl(212 60% 36%)'}}>Needed by ${whenTxt(r.latest,dayOf(r.pick))} · ${r.moves[0].why.to}</span>
+          <span class="text-muted text-[12.5px]">${r.to.addr||'No address'}</span><span class="text-[12px]" style=${{color:r.late?'var(--bad)':'hsl(212 60% 36%)'}}>${r.to.yard?'Back at the yard by':'Needed by'} ${whenTxt(r.latest,dayOf(r.pick))} · ${r.moves[0].why.to}</span>
           ${r.late&&html`<span class="text-[12px] font-semibold" style=${{color:'var(--bad)'}}>Gets there ${durTxt((r.done-r.latest)/60000)} late</span>`}</div>
       </div>
       <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-muted">
@@ -341,7 +373,7 @@ function FloatsScreen({data,setData,notify}){
             <div class="grid gap-0.5"><span class="label">From</span><span class="font-semibold">${r.from.job}</span>${r.from.crew&&html`<span class="text-muted">${r.from.crew}</span>`}<span class="text-muted text-[12.5px]">${r.from.addr||''}</span>
               <span class="text-[12px]" style=${{color:'hsl(145 45% 30%)'}}>Free ${whenTxt(r.earliest,k)}</span></div>
             <div class="grid gap-0.5"><span class="label">To</span><span class="font-semibold">${r.to.job}</span>${r.to.crew&&html`<span class="text-muted">${r.to.crew}</span>`}<span class="text-muted text-[12.5px]">${r.to.addr||''}</span>
-              <span class="text-[12px]" style=${{color:r.late?'var(--bad)':'hsl(212 60% 36%)'}}>Needed by ${whenTxt(r.latest,k)}${r.late?` · ${durTxt((r.done-r.latest)/60000)} late`:''}</span>
+              <span class="text-[12px]" style=${{color:r.late?'var(--bad)':'hsl(212 60% 36%)'}}>${r.to.yard?'Back at the yard by':'Needed by'} ${whenTxt(r.latest,k)}${r.late?` · ${durTxt((r.done-r.latest)/60000)} late`:''}</span>
               <span class="text-[12px] text-muted">${r.drive.km!=null?`${Math.round(r.drive.km)} km · `:''}${durTxt(r.drive.min)} drive</span></div></div>
         </li>`})}</ol>`}
       </section>`})}</div>`}
@@ -392,6 +424,18 @@ function FloatSettings({data,setData,cfg}){
       ${num('slow','Float drive time × car time','×',.05)}
       <label class="grid gap-1"><span class="label">Day shift starts (if the booking has no time)</span><input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.dayStart} onChange=${e=>set({dayStart:e.target.value})}/></label>
       <label class="grid gap-1"><span class="label">Night shift starts (if the booking has no time)</span><input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightStart} onChange=${e=>set({nightStart:e.target.value})}/></label>
+    </div>
+    <div class="grid gap-2 rounded-lg border border-line p-3" id="fl-hours">
+      <div class="font-display text-[15px] font-semibold">When the float moves</div>
+      <div class="flex flex-wrap items-center gap-3">
+        <span class="label">The driver works</span>
+        <div class="seg" role="group" aria-label="The driver works">${[['day','Day shift'],['night','Night shift'],['any','Any time']].map(([k,l])=>html`<button key=${k} type="button" id=${'fl-shift-'+k} aria-pressed=${(cfg.driverShift||'day')===k} onClick=${()=>set({driverShift:k})}>${l}</button>`)}</div>
+        ${(cfg.driverShift||'day')==='day'&&html`<span class="flex items-center gap-2 text-[13px]"><input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.dayFrom} onChange=${e=>set({dayFrom:e.target.value})} aria-label="Day shift from"/> to <input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.dayTo} onChange=${e=>set({dayTo:e.target.value})} aria-label="Day shift to"/></span>`}
+        ${cfg.driverShift==='night'&&html`<span class="flex items-center gap-2 text-[13px]"><input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightFrom} onChange=${e=>set({nightFrom:e.target.value})} aria-label="Night shift from"/> to <input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightTo} onChange=${e=>set({nightTo:e.target.value})} aria-label="Night shift to"/> (next morning)</span>`}
+      </div>
+      <label class="inline-flex items-center gap-2 text-[13.5px]">Gear on site <input id="fl-arrive" type="number" min="0" step="15" class="field field-sm mono" style=${{height:32,width:80}} value=${cfg.arriveBefore} onChange=${e=>set({arriveBefore:+e.target.value})}/> min before the shift starts</label>
+      <label class="inline-flex items-center gap-2 text-[13.5px]"><input id="fl-weekdays" type="checkbox" class="w-4 h-4" checked=${!!cfg.avoidWeekend} onChange=${e=>set({avoidWeekend:e.target.checked})}/> Move on weekdays when it can (weekends only when it has to)</label>
+      <span class="text-[12px] text-muted">Each move goes at the best time in its window: on time first, then in the driver’s hours, then on a weekday, then the day (or night) before the shift. Back to the yard goes as soon as it can. A move that can only happen outside his hours is still planned, and marked.</span>
     </div>
     <${FloatLoads} data=${data} cfg=${cfg} set=${set}/>
   </section>`}
@@ -467,7 +511,7 @@ function runSheetText(cfg,runs,k){
   runs.forEach((r,i)=>{L.push(`${i+1}. ${hm(r.pick)} pick up ${r.moves.map(m=>m.name+(m.rego?' ('+m.rego+')':'')).join(' + ')}`);
     L.push(`   From: ${r.from.job}${r.from.crew?' – '+r.from.crew:''}${r.from.addr?', '+r.from.addr:''}`);
     L.push(`   To:   ${r.to.job}${r.to.crew?' – '+r.to.crew:''}${r.to.addr?', '+r.to.addr:''}`);
-    L.push(`   Free from ${whenTxt(r.earliest,k)} · needed by ${whenTxt(r.latest,k)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km, ':''}${durTxt(r.drive.min)} drive`);
+    L.push(`   Free from ${whenTxt(r.earliest,k)} · ${r.to.yard?'back at the yard by':'needed by'} ${whenTxt(r.latest,k)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km, ':''}${durTxt(r.drive.min)} drive`);
     if(r.deadhead.min>0)L.push(`   Leave ${hm(r.leave)} (${durTxt(r.deadhead.min)} empty from ${r.fromLoc.key==='yard'?cfg.yardName||'the yard':'the last drop'})`);
     if(r.note)L.push(`   Note: ${r.note}`);
     const u=mapsDir(r.from,r.to);if(u)L.push(`   Map: ${u}`);L.push('')});
@@ -488,7 +532,7 @@ async function runSheetPdf(data,cfg,runs,k){
     font(13,true);doc.text(`${i+1}.  ${hm(r.pick)}`,M+3,y+6);font(10.5,true);doc.text(clean(r.moves.map(m=>m.name+(m.rego?' ('+m.rego+')':'')).join(' + ')),M+30,y+6);
     font(8.5,false);doc.setTextColor(90);doc.text(clean(`Leave ${hm(r.leave)} · load ${hm(r.pick)}-${hm(r.depart)} · arrive ${hm(r.arrive)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km, ':''}${durTxt(r.drive.min)}`),W-M-3,y+6,{align:'right'});doc.setTextColor(0);
     font(8,true);doc.text('PICK UP',M+3,y+11.5);doc.text('DROP OFF',M+98,y+11.5);font(9.5,false);doc.text(from,M+3,y+15.5);doc.text(to,M+98,y+15.5);
-    const yy=y+15.5+Math.max(from.length,to.length)*4.2;font(8.5,false);doc.setTextColor(40,110,60);doc.text(clean(`Free from ${whenTxt(r.earliest,k)}`),M+3,yy);doc.setTextColor(30,70,140);doc.text(clean(`Needed by ${whenTxt(r.latest,k)}`),M+98,yy);
+    const yy=y+15.5+Math.max(from.length,to.length)*4.2;font(8.5,false);doc.setTextColor(40,110,60);doc.text(clean(`Free from ${whenTxt(r.earliest,k)}`),M+3,yy);doc.setTextColor(30,70,140);doc.text(clean(`${r.to.yard?'Back at the yard by':'Needed by'} ${whenTxt(r.latest,k)}`),M+98,yy);
     if(r.late){font(8.5,true);doc.setTextColor(180,20,30);doc.text(clean(`LATE: gets there ${durTxt((r.done-r.latest)/60000)} after`),M+135,yy);font(8.5,false)}doc.setTextColor(0);
     const u=mapsDir(r.from,r.to);if(u){doc.setTextColor(30,70,140);doc.textWithLink('Directions',W-M-20,yy,{url:u});doc.setTextColor(0)}
     if(r.note){font(9,true);doc.text(clean('Note: '+r.note),M+3,yy+5)}
