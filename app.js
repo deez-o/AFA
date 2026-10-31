@@ -4420,6 +4420,8 @@ async function buildPlanPdf(data,p,opt={}){
   const idxs=one>=0?[one]:dates.map((_,i)=>i);
   const tot=new Map();if(one<0)sps.forEach(sp=>(sp.lines||[]).filter(lineHas).forEach(l=>{const k=mixLabel(l);const t=tot.get(k)||{t:0,a:0};t.t+=planTonnes(l);t.a+=num(l.area);tot.set(k,t)}));
   if(tot.size){head('Totals');[...tot.entries()].forEach(([k,v])=>{room(5);font(8.5,true);doc.text(clean(k),M,y+3.5);font(8.5,false);doc.text(seal?`${fmtN(v.a)} m2`:`${fmtN(v.t)} t over ${fmtN(v.a)} m2`,M+46,y+3.5);y+=4.6})}
+  if(p.traffic||p.profNotes||p.notes){head('Site rules & notes');if(p.traffic){font(8.5,true,[80,80,80]);room(5);doc.text('Traffic control',M,y+3.5);y+=4.6;bullets(p.traffic)}
+    if(p.profNotes){font(8.5,true,[80,80,80]);room(5);doc.text('Profiling',M,y+3.5);y+=4.6;bullets(p.profNotes)}if(p.notes){font(8.5,true,[80,80,80]);room(5);doc.text('Notes',M,y+3.5);y+=4.6;bullets(p.notes)}}
   if(dates.length){head(one>=0?'This shift':'Shift by shift');
     idxs.forEach(i=>{const sp=sps[i];const k=dates[i];room(14);doc.setFillColor(241,241,244);doc.rect(M,y,W,6,'F');font(9,true);doc.text(`${night?'Night':'Shift'} ${i+1} - ${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`,M+2,y+4.2);
       const st=(sp.lines||[]).reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);const rd=seal?0:spRounds(p,sp);if(st){font(8.5,true,AFA_RED);doc.text(`${fmtN(st)} t${rd?` - ${fmtN(rd)} rounds`:''}`,198-2,y+4.2,{align:'right'})}
@@ -4440,8 +4442,6 @@ async function buildPlanPdf(data,p,opt={}){
   if((p.jobSubs||[]).filter(subHas).length){head('Subcontractors (whole job)');kv((p.jobSubs||[]).filter(subHas).map(s=>[s.name||'-',[s.info,fmtTime(s.time||p.crewOnSite)].filter(Boolean).join(' - ')]))}
   const sl=p.seal||{};if(num(sl.tackArea)||num(sl.sealArea)||sl.onSite){head('Seal crew');kv([['On site',fmtTime(sl.onSite)],['Tack area',num(sl.tackArea)?`${fmtN(num(sl.tackArea))} m2`:''],['Seal area',num(sl.sealArea)?`${fmtN(num(sl.sealArea))} m2`:'']])}
   if((p.hazards||[]).some(h=>h.hazard||h.control)){head('Safety / environmental - hazards and controls');(p.hazards||[]).filter(h=>h.hazard||h.control).forEach(h=>kv([[h.hazard||'-',h.control||'']]))}
-  if(p.traffic||p.profNotes||p.notes){head('Site rules & notes');if(p.traffic){font(8.5,true,[80,80,80]);room(5);doc.text('Traffic control',M,y+3.5);y+=4.6;bullets(p.traffic)}
-    if(p.profNotes){font(8.5,true,[80,80,80]);room(5);doc.text('Profiling',M,y+3.5);y+=4.6;bullets(p.profNotes)}if(p.notes){font(8.5,true,[80,80,80]);room(5);doc.text('Notes',M,y+3.5);y+=4.6;bullets(p.notes)}}
   const n=doc.getNumberOfPages();const cnt=n-firstPage+1;for(let i=firstPage;i<=n;i++){doc.setPage(i);font(7,false,[130,130,130]);doc.text(`${clean(p.title||'Job plan')}${one>=0?` - ${dates[one]?fmtShort(parse(dates[one])):''} plan`:''} - page ${i-firstPage+1} of ${cnt}`,105,292,{align:'center'})}
   return opt.doc?doc:doc.output('blob');
 }
