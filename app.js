@@ -2932,6 +2932,8 @@ const screenOK=(k,role,d)=>k!=='machines'&&screenOK0(k,role,d);   /* machines ar
 const FLEET_TAB_AREA={mc:'fleet.machines',cal:'fleet.calendar',wo:'fleet.workorders',df:'fleet.workorders',rp:'fleet.reports'};
 const FLEET_TABS=[['dash','Dashboard'],['mc','Machines'],['cal','Calendar'],['wo','Work orders'],['df','Defects'],['plans','Service plans'],['ps','Prestarts'],['cl','Checklists'],['rp','Reports']];
 const homeScreen=(role,d)=>{const h=roleOpt('home');if(h&&screenOK(h,role,d))return h;return Object.keys(SCREENS).find(k=>screenOK(k,role,d))||'schedule'};
+/* "prestart" users (operators) see Site QA as "Sign on" */
+const signOnRole=()=>!!FF_PERM&&FF_PERM.role==='prestart';
 const SCREENS={
   schedule:{label:'Schedule',title:'Schedule',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   jobs:{label:'Projects',title:'Projects',only:[],legend:[],head:''},
@@ -2939,7 +2941,7 @@ const SCREENS={
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
   fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',tab:'machine',preview:true},   /* maintenance: not for operators or viewers */
-  qa:{label:'QA',title:'Site QA',only:[],legend:[],head:'',preview:true},   /* JSA and toolbox meetings per booking shift: supervisors fill them in, the crew sign */
+  qa:{get label(){return signOnRole()?'Sign on':'QA'},get title(){return signOnRole()?'Sign on':'Site QA'},only:[],legend:[],head:'',preview:true},   /* JSA and toolbox meetings per booking shift: supervisors fill them in, the crew sign */
   lab:{label:'Lab',title:'Lab',only:[],legend:[],head:'',preview:true},   /* past shifts by job: laid from the QA, QA PDFs, lab reports */
   prestarts:{label:'Prestarts',title:'Prestarts',only:[],legend:[],head:'',preview:true},   /* the phone checklist; the only screen operators see */
   admin:{label:'Admin',title:'Admin',only:[],legend:[],head:'',bottom:true},   /* roles and what each can do: the administrator only */
