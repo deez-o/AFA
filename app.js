@@ -848,9 +848,14 @@ function packLanes(items){
 }
 
 /* ---------- board ---------- */
-function Board({data,days,view,narrow,tall=narrow,readOnly,onCreate,onEdit,onMove,onResize,onRename,onReorder,onExport,collapsed,toggleSection,notifPrefs,only,headLabel}){
+function Board({data,days,view,narrow,tall=narrow,onMore,readOnly,onCreate,onEdit,onMove,onResize,onRename,onReorder,onExport,collapsed,toggleSection,notifPrefs,only,headLabel}){
   /* ---- drag to reorder sections and rows (by their grip handles) ---- */
   const boxRef=React.useRef(null);
+  /* phones: scrolling near the right-hand end adds more days, so the schedule keeps going as far as you scroll */
+  const moreRef=React.useRef(onMore);moreRef.current=onMore;
+  useEffect(()=>{const box=boxRef.current;if(!box)return;let asked=0;
+    const chk=()=>{const f=moreRef.current;if(!f)return;if(box.scrollLeft+box.clientWidth>=box.scrollWidth-240&&asked!==box.scrollWidth){asked=box.scrollWidth;f()}};
+    box.addEventListener('scroll',chk,{passive:true});return()=>box.removeEventListener('scroll',chk)},[]);
   const [reo,setReo]=useState(null);
   const reoRef=React.useRef(null);
   reoRef.current=reo;
@@ -5741,9 +5746,13 @@ function App({boot,live}){
 
   const monthStart=d=>new Date(d.getFullYear(),d.getMonth(),1,12);
   /* 2-month view: from the 1st of the anchor's month to the end of the next month */
+  /* phones: extra days added as the board is scrolled to the right (back to none when the dates or view change) */
+  const [extra,setExtra]=useState(0);
+  useEffect(()=>{setExtra(0)},[anchor,view]);
+  const moreDays=phone&&view!==60?()=>setExtra(e=>Math.min(e+(view===7?7:14),366)):null;
   const days=useMemo(()=>{
     if(view===60){const s0=monthStart(anchor),e=new Date(s0.getFullYear(),s0.getMonth()+2,0,12);return Array.from({length:diffDays(s0,e)+1},(_,i)=>addDays(s0,i))}
-    return Array.from({length:view},(_,i)=>addDays(anchor,i))},[anchor,view]);
+    return Array.from({length:view+(phone?extra:0)},(_,i)=>addDays(anchor,i))},[anchor,view,phone,extra]);
   const N=days.length;
   const step=view===30?28:view===3?3:view;
   const move=dir=>setAnchor(a=>{if(view===60){const s0=monthStart(a);return new Date(s0.getFullYear(),s0.getMonth()+dir,1,12)}return addDays(a,dir*step)});
@@ -5908,7 +5917,7 @@ function App({boot,live}){
       </section>`}
 
       <section class="panel flex-1 min-h-[320px] flex flex-col overflow-hidden">
-        <${Board} data=${screen==='staff'&&LR.list.some(r=>r.status==='pending')?{...data,blocks:[...data.blocks,...LR.list.filter(r=>r.status==='pending'&&data.resources.some(x=>x.id===r.person_id)).map(r=>({id:'lr-'+r.id,resourceId:r.person_id,kind:r.kind,start:r.start_date,end:r.end_date,title:'Waiting for approval'+(r.note?' · '+r.note:''),pending:true,req:r}))]}:data} days=${days} view=${view} narrow=${narrow} tall=${phone} readOnly=${!(live.canEdit&&can(screen==='staff'?'staff.leave':fleetCal?'fleet.calendar':'schedule',2))} onCreate=${screen==='staff'&&leaveReqOnly?b=>setLeaveDlg({personId:b.resourceId,start:b.start,end:b.end}):onCreate} onEdit=${b=>b.pending?setLeaveReq(b.req):setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
+        <${Board} data=${screen==='staff'&&LR.list.some(r=>r.status==='pending')?{...data,blocks:[...data.blocks,...LR.list.filter(r=>r.status==='pending'&&data.resources.some(x=>x.id===r.person_id)).map(r=>({id:'lr-'+r.id,resourceId:r.person_id,kind:r.kind,start:r.start_date,end:r.end_date,title:'Waiting for approval'+(r.note?' · '+r.note:''),pending:true,req:r}))]}:data} days=${days} view=${view} narrow=${narrow} tall=${phone} onMore=${moreDays} readOnly=${!(live.canEdit&&can(screen==='staff'?'staff.leave':fleetCal?'fleet.calendar':'schedule',2))} onCreate=${screen==='staff'&&leaveReqOnly?b=>setLeaveDlg({personId:b.resourceId,start:b.start,end:b.end}):onCreate} onEdit=${b=>b.pending?setLeaveReq(b.req):setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
           collapsed=${collapsed} toggleSection=${t=>setCollapsed(c=>({...c,[t]:!c[t]}))}/>
         <div class="border-t border-line px-4 py-2.5 hidden sm:flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
           ${legend.filter(([g])=>SCR.legend.includes(g)).map(([g,ks])=>html`<span key=${g} class="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
