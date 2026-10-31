@@ -5564,9 +5564,17 @@ function App({boot,live}){
   const [narrow,setNarrow]=useState(()=>{try{return window.matchMedia('(max-width: 639px)').matches}catch(e){return false}});
   useEffect(()=>{let m;try{m=window.matchMedia('(max-width: 639px)')}catch(e){return}const h=()=>setNarrow(m.matches);try{m.addEventListener('change',h)}catch(e){m.addListener&&m.addListener(h)}return()=>{try{m.removeEventListener('change',h)}catch(e){}}},[]);
   const todayNoon=()=>{const d=new Date(TODAY);d.setHours(12,0,0,0);return d};
-  const [view,setView]=useState(()=>{let n=false;try{n=window.matchMedia('(max-width: 639px)').matches}catch(e){}if(n)return 3;try{const v=Number(localStorage.getItem(KEY+':view'));return [7,14,30,60].includes(v)?v:7}catch(e){return 7}});
+  /* a phone opens the schedule on the week when upright and on 30 days when turned sideways (and switches when it's turned) */
+  const phoneWay=()=>{try{if(window.matchMedia('(max-width: 639px)').matches)return 'up';
+    if(window.matchMedia('(pointer: coarse) and (orientation: landscape) and (max-height: 520px)').matches)return 'side'}catch(e){}return ''};
+  const [view,setView]=useState(()=>{const pw=phoneWay();if(pw==='up')return 7;if(pw==='side')return 30;try{const v=Number(localStorage.getItem(KEY+':view'));return [7,14,30,60].includes(v)?v:7}catch(e){return 7}});
   const [anchor,setAnchor]=useState(()=>view===3?todayNoon():mondayOf(TODAY));
-  useEffect(()=>{if(narrow&&![3,7].includes(view)){setView(3);setAnchor(todayNoon())}else if(!narrow&&view===3){setView(7);setAnchor(mondayOf(TODAY))}},[narrow]);
+  useEffect(()=>{if(narrow&&view!==7||view===3){setView(7);setAnchor(mondayOf(TODAY))}},[narrow]);   /* upright phone: the week only (no 3-day view) */
+  useEffect(()=>{let ms;try{ms=[window.matchMedia('(max-width: 639px)'),window.matchMedia('(pointer: coarse) and (orientation: landscape) and (max-height: 520px)')]}catch(e){return}
+    let last=phoneWay();
+    const h=()=>{const pw=phoneWay();if(pw===last)return;last=pw;if(pw==='up'){setView(7);setAnchor(mondayOf(TODAY))}else if(pw==='side'){setView(30);setAnchor(mondayOf(TODAY))}};
+    ms.forEach(m=>{try{m.addEventListener('change',h)}catch(e){m.addListener&&m.addListener(h)}});
+    return()=>ms.forEach(m=>{try{m.removeEventListener('change',h)}catch(e){}})},[]);
   const [editing,setEditing]=useState(null);
   const [panel,setPanel]=useState(false);   /* the Settings panel starts closed every time FraserFlow opens */
   useEffect(()=>{try{localStorage.setItem(KEY+':panel',panel?'shown':'hidden')}catch(e){}},[panel]);
@@ -5752,13 +5760,12 @@ function App({boot,live}){
           ${!live.canEdit&&!sup&&live.role!=='prestart'&&screen!=='prestarts'&&screen!=='qa'&&(screen!=='fleet'||fleetCal)&&!peopleView&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change the schedule">View only</span>`}
         </div>
         <div class="flex-1"></div>
-        ${boardScreen&&html`<div class="seg" role="group" aria-label="View length">
-          ${narrow&&html`<button id="view-3" aria-pressed=${view===3} onClick=${()=>pickView(3)}>3 days</button>`}
+        ${boardScreen&&html`${!narrow&&html`<div class="seg" role="group" aria-label="View length">
           <button aria-pressed=${view===7} onClick=${()=>pickView(7)}>Week</button>
-          ${!narrow&&html`<button aria-pressed=${view===14} onClick=${()=>pickView(14)}>14 days</button>
+          <button aria-pressed=${view===14} onClick=${()=>pickView(14)}>14 days</button>
           <button aria-pressed=${view===30} onClick=${()=>pickView(30)}>30 days</button>
-          <button aria-pressed=${view===60} onClick=${()=>pickView(60)}>2 months</button>`}
-        </div>
+          <button aria-pressed=${view===60} onClick=${()=>pickView(60)}>2 months</button>
+        </div>`}
         <div class="flex items-center gap-1">
           <button class="btn px-2" onClick=${()=>move(-1)} aria-label=${view===60?'Previous month':'Previous'}>${Icon.chevL}</button>
           <button class="btn" onClick=${goToday} disabled=${atToday}>Today</button>
