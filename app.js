@@ -2546,22 +2546,34 @@ function jobSummary(data,j){
   const first=bs.length?bs[0].start:null,last=bs.reduce((m,b)=>!m||b.end>m?b.end:m,null);
   const crews=[...new Set(bs.map(b=>b.resourceId))].map(id=>data.resources.find(r=>r.id===id)).filter(Boolean);
   const status=j.completed?'done':!bs.length?'none':next===today||bs.some(b=>b.start<=today&&b.end>=today)?'now':next?'upcoming':'finished';
-  return {bs,t,a,shifts,done,next,first,last,crews,status,mixes:[...mixes].sort((x,y)=>y[1]-x[1])}}
-const JOB_STATUS={now:['On site today','var(--accent)','var(--accent-soft)'],upcoming:['Upcoming','hsl(210 70% var(--blk-fg-l))','hsl(210 80% var(--blk-l))'],
-  finished:['All shifts done','hsl(145 50% var(--blk-fg-l))','hsl(145 50% var(--blk-l))'],none:['No bookings','var(--muted)','var(--sunken)'],done:['Completed','var(--muted)','var(--sunken)']};
-const jobStatusChip=s=>{const [l,c,bg]=JOB_STATUS[s];return html`<span class="text-[10.5px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap" style=${{color:c,background:bg}}>${l}</span>`};
+  /* things to sort out on an open job */
+  const live=bs.filter(b=>b.end>=today);const issues=[];
+  if(!j.completed){
+    if(bs.some(b=>b.creditIssue))issues.push('Credit issue');
+    if(live.some(b=>b.inductionReq&&!b.inductionDone))issues.push('Induction paperwork not sent');
+    if(live.some(b=>restrictedIn(data,b.plantIds).length))issues.push('Restricted machine booked');
+    if(status==='finished')issues.push('All shifts done: complete the job');}
+  return {bs,t,a,shifts,done,next,first,last,crews,status,issues,mixes:[...mixes].sort((x,y)=>y[1]-x[1])}}
+/* on now: green · upcoming: blue · issues: red · waiting to be completed: amber */
+const JOB_STATUS={now:['On now','hsl(145 60% 26%)','hsl(145 55% 88%)','hsl(145 55% 40%)'],upcoming:['Upcoming','hsl(212 70% 32%)','hsl(212 80% 91%)','hsl(212 75% 52%)'],
+  finished:['Needs completing','hsl(32 85% 30%)','hsl(38 95% 88%)','hsl(36 90% 50%)'],none:['No bookings','var(--muted)','var(--sunken)','var(--line-strong)'],done:['Completed','var(--muted)','var(--sunken)','var(--line-strong)']};
+const ISSUE_C='hsl(0 72% 47%)';
+const jobStatusChip=s=>{const [l,c,bg]=JOB_STATUS[s];return html`<span class=${'text-[10.5px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap job-st job-st-'+s} style=${{color:c,background:bg}}>${l}</span>`};
+const jobIssuesChip=s=>s.issues&&s.issues.length?html`<span class="text-[10.5px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap text-white job-issues" style=${{background:ISSUE_C}} title=${s.issues.join('\n')}>${s.issues.length} issue${s.issues.length===1?'':'s'}</span>`:null;
 
 function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
-  const [view,setView]=useState('active');const [q,setQ]=useState('');
+  const [view,setView]=useState('active');const [q,setQ]=useState('');const [show,setShow]=useState('all');
+  const lv=window.__ffLive;const canEditJobs=!lv||!!lv.canEdit;
   const [sel,setSel]=useState(()=>{try{return localStorage.getItem(KEY+':job')||''}catch(e){return ''}});
   const pick=id=>{setSel(id);setEdit(null);setConfirmDel(false);try{localStorage.setItem(KEY+':job',id)}catch(e){}};
   const [adding,setAdding]=useState(null);const [edit,setEdit]=useState(null);const [confirmDel,setConfirmDel]=useState(false);const [pending,setPending]=useState(null);const [msg,setMsg]=useState('');
   const sums=useMemo(()=>new Map(data.jobs.map(j=>[j.id,jobSummary(data,j)])),[data.jobs,data.blocks]);
   const order={now:0,upcoming:1,finished:2,none:3,done:4};
   const ql=q.trim().toLowerCase();
-  const list=data.jobs.filter(j=>!!j.completed===(view==='completed')&&(!ql||[j.name,j.customer,j.address,j.projectNo].join(' ').toLowerCase().includes(ql)))
+  const showOk=j=>{const s=sums.get(j.id);return view==='completed'||show==='all'||(show==='issues'?s.issues.length>0:s.status===show)};
+  const list=data.jobs.filter(j=>!!j.completed===(view==='completed')&&showOk(j)&&(!ql||[j.name,j.customer,j.address,j.projectNo].join(' ').toLowerCase().includes(ql)))
     .sort((x,y)=>{const a=sums.get(x.id),b=sums.get(y.id);if(view==='completed')return (y.completedAt||'').localeCompare(x.completedAt||'');
-      return order[a.status]-order[b.status]||(a.next||'9').localeCompare(b.next||'9')||x.name.localeCompare(y.name)});
+      return order[a.status]-order[b.status]||(b.issues.length>0)-(a.issues.length>0)||(a.next||'9').localeCompare(b.next||'9')||x.name.localeCompare(y.name)});
   const nDone=data.jobs.filter(j=>j.completed).length;
   const job=data.jobs.find(j=>j.id===sel)||null;const S=job&&sums.get(job.id);
   const customers=[...new Set(data.jobs.map(j=>(j.customer||'').trim()).filter(Boolean))].sort();
@@ -2579,14 +2591,17 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
   const range=(a,b)=>a?`${fmtShort(parse(a))}${b&&b!==a?' – '+fmtShort(parse(b)):''}`:'–';
 
   return html`<div class="flex-1 min-h-0 flex gap-3">
-    <aside class="panel w-[340px] shrink-0 flex flex-col min-h-0 overflow-hidden">
+    <aside class=${'panel w-full md:w-[340px] shrink-0 flex-col min-h-0 overflow-hidden '+(job?'hidden md:flex':'flex')}>
       <div class="px-3 pt-3 pb-2 grid gap-2 border-b border-line">
         <div class="flex items-center gap-2">
           <div class="seg flex-1" role="group" aria-label="Show jobs">
             <button type="button" class="flex-1" aria-pressed=${view==='active'} onClick=${()=>setView('active')}>Active <span class="mono text-[11px] text-faint">${data.jobs.length-nDone}</span></button>
             <button type="button" class="flex-1" aria-pressed=${view==='completed'} onClick=${()=>setView('completed')}>Completed <span class="mono text-[11px] text-faint">${nDone}</span></button></div>
-          <button id="job-new" type="button" class="btn btn-primary shrink-0" onClick=${()=>{setAdding(adding?null:{name:'',customer:'',address:'',projectNo:''});setMsg('')}}>${Icon.plus} New</button></div>
+          ${canEditJobs&&html`<button id="job-new" type="button" class="btn btn-primary shrink-0" onClick=${()=>{setAdding(adding?null:{name:'',customer:'',address:'',projectNo:''});setMsg('')}}>${Icon.plus} New</button>`}</div>
         <input id="job-search" class="field" style=${fs} placeholder="Search job, customer, address, project" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search jobs"/>
+        ${view==='active'&&html`<div class="flex flex-wrap gap-1.5" id="job-show" role="group" aria-label="Show">${[['all','All',null],['now','On now',JOB_STATUS.now],['upcoming','Upcoming',JOB_STATUS.upcoming],['issues','Issues',null],['finished','Needs completing',JOB_STATUS.finished]].map(([k,l,st])=>{
+          const n=data.jobs.filter(j=>!j.completed&&(k==='all'||(k==='issues'?sums.get(j.id).issues.length>0:sums.get(j.id).status===k))).length;const dot=k==='issues'?ISSUE_C:st?st[3]:null;
+          return html`<button key=${k} type="button" data-show=${k} aria-pressed=${show===k} class=${'text-[11.5px] rounded-full border px-2 py-0.5 inline-flex items-center gap-1 '+(show===k?'font-semibold':'text-muted hover:text-ink')} style=${show===k?{background:'var(--accent-soft)',borderColor:'var(--accent)',color:'var(--ink)'}:{borderColor:'var(--line)'}} onClick=${()=>setShow(k)}>${dot&&html`<span class="w-2 h-2 rounded-full" style=${{background:dot}}></span>`}${l} <span class="mono text-faint">${n}</span></button>`})}</div>`}
       </div>
       ${adding&&html`<form class="px-3 py-3 grid gap-2 border-b border-line bg-sunken" onSubmit=${create}>
         <div class="text-[13px] font-semibold">New job</div>
@@ -2600,9 +2615,10 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
       <ul class="flex-1 min-h-0 overflow-y-auto p-2 grid gap-1 content-start" aria-label="Jobs">
         ${list.length===0&&html`<li class="px-3 py-6 text-center text-[13px] text-muted">${ql?`Nothing matches “${q}”.`:view==='completed'?'No completed jobs yet.':'No active jobs. Add one with New.'}</li>`}
         ${list.map(j=>{const s=sums.get(j.id);const on=j.id===sel;
-          return html`<li key=${j.id}><button type="button" class=${'w-full text-left rounded-lg px-2.5 py-2 grid gap-1 '+(on?'':'hover:bg-sunken')} style=${on?{background:'var(--accent-soft)',boxShadow:'inset 3px 0 0 var(--accent)'}:null} onClick=${()=>pick(j.id)} aria-current=${on?'true':undefined}>
+          const bar=s.issues.length?ISSUE_C:JOB_STATUS[s.status][3];
+          return html`<li key=${j.id}><button type="button" class=${'w-full text-left rounded-lg pl-3 pr-2.5 py-2 grid gap-1 job-row '+(on?'':'hover:bg-sunken')} data-status=${s.status} data-issues=${s.issues.length} style=${{boxShadow:`inset 4px 0 0 ${bar}`,...(on?{background:'var(--accent-soft)'}:{})}} onClick=${()=>pick(j.id)} aria-current=${on?'true':undefined}>
             <div class="flex items-center gap-2 min-w-0"><span class="w-2.5 h-2.5 rounded-sm shrink-0" style=${{background:`hsl(${j.hue??200} 60% 55%)`}}></span>
-              <span class="font-medium text-[13.5px] truncate flex-1">${j.customer?html`<span class="text-muted">${j.customer} · </span>`:''}${j.name}</span>${s.bs.some(b=>b.creditIssue)&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white shrink-0 job-credit" style=${{background:'hsl(0 75% 46%)'}} title="A booking on this job has a credit issue">Credit</span>`}${jobStatusChip(s.status)}</div>
+              <span class="font-medium text-[13.5px] truncate flex-1">${j.customer?html`<span class="text-muted">${j.customer} · </span>`:''}${j.name}</span>${jobIssuesChip(s)}${s.bs.some(b=>b.creditIssue)&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white shrink-0 job-credit" style=${{background:'hsl(0 75% 46%)'}} title="A booking on this job has a credit issue">Credit</span>`}${jobStatusChip(s.status)}</div>
             <div class="flex items-center gap-2 text-[11.5px] text-muted pl-[18px] min-w-0">
               <span class="truncate flex-1">${j.address||'No address'}</span>
               ${s.t>0&&html`<span class="mono tnum shrink-0">${fmtN(s.t)} t</span>`}</div>
@@ -2615,8 +2631,9 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
       </ul>
     </aside>
 
-    <div class="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1">
+    <div class=${'flex-1 min-w-0 min-h-0 overflow-y-auto md:pr-1 '+(job?'':'hidden md:block')}>
       ${!job?html`<div class="panel p-8 text-center text-[13px] text-muted">Pick a job on the left to see everything about it.</div>`:html`<div class="grid gap-3">
+        <div class="md:hidden"><button id="job-back" type="button" class="btn" onClick=${()=>pick('')}>${Icon.chevL} All jobs</button></div>
         ${pending&&html`<div class="panel p-4 grid gap-2" role="alert" style=${{boxShadow:'inset 0 0 0 1.5px hsl(40 85% 50%)'}}>
           <div class="text-[13.5px] font-semibold">This job still has ${pending.length} booking${pending.length===1?'':'s'} today or later</div>
           <div class="text-[12.5px] text-muted">Completing it moves it to Completed but leaves the bookings on the schedule.</div>
@@ -2636,12 +2653,13 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
                 <h2 class="font-display text-[22px] font-semibold leading-tight">${job.name}</h2>
                 <div class="text-[13px] text-muted flex items-center gap-1.5 mt-0.5">${Icon.pin} ${job.address||'No site address'}</div>
               </div>
-              <div class="flex flex-wrap items-center gap-2">${jobStatusChip(S.status)}
-                <button id="job-edit" type="button" class="btn" onClick=${()=>{setEdit({name:job.name,customer:job.customer||'',address:job.address||'',projectNo:job.projectNo||''});setMsg('')}}>${Icon.pencil} Edit</button>
+              <div class="flex flex-wrap items-center gap-2">${jobStatusChip(S.status)}${jobIssuesChip(S)}
+                ${canEditJobs&&html`<button id="job-edit" type="button" class="btn" onClick=${()=>{setEdit({name:job.name,customer:job.customer||'',address:job.address||'',projectNo:job.projectNo||''});setMsg('')}}>${Icon.pencil} Edit</button>
                 <button id="job-done" type="button" class="btn" onClick=${()=>tryDone(!job.completed)}>${job.completed?'Reopen job':'Mark completed'}</button>
                 ${S.bs.length===0&&(confirmDel?html`<button type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>{setData(d=>({...d,jobs:d.jobs.filter(x=>x.id!==job.id)}));pick('')}}>Delete job</button><button type="button" class="btn btn-ghost" onClick=${()=>setConfirmDel(false)}>Keep</button>`
-                  :html`<button type="button" class="btn btn-ghost text-muted" onClick=${()=>setConfirmDel(true)}>Delete</button>`)}
-              </div></div>`}
+                  :html`<button type="button" class="btn btn-ghost text-muted" onClick=${()=>setConfirmDel(true)}>Delete</button>`)}`}
+              </div></div>
+              ${S.issues.length>0&&html`<div class="rounded-lg px-3 py-2 text-[12.5px] grid gap-0.5 job-issue-list" style=${{background:'hsl(0 72% 47% / .1)',color:ISSUE_C}}>${S.issues.map(t=>html`<div key=${t} class="font-medium">• ${t}</div>`)}</div>`}`}
           <div class="grid gap-2 grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
             ${tile('Bookings',S.bs.length,S.crews.map(c=>c.name).join(', ')||'–')}
             ${tile('Shifts',S.shifts?`${S.done} / ${S.shifts}`:'–',S.shifts?`${S.shifts-S.done} to go`:'')}
@@ -2662,7 +2680,7 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
               shiftDates(b).forEach(k=>linesOf(sd[k]).filter(lineHas).forEach(l=>{t+=num(l.tonnes);a+=num(l.area);if(l.type)types.add(l.type);if(l.binder)binders.add(l.binder);if((l.stone||'').trim())stones.add(l.stone.trim())}));
               return {t,a,types:[...types],binders:[...binders],stones:[...stones]}};
             /* seal and asphalt share one column layout so the two tables line up */
-            const W=[12,11,6,5.5,12,10,8,8,11.5,7,9];   /* % of the width */
+            const W=[11.5,14,6,5,11,9.5,7.5,8,11,7,9.5];   /* % of the width */
             const n0=v=>v?fmtN(Math.round(v)):html`<span class="text-faint">–</span>`;
             const flags=b=>html`<span class="inline-flex flex-wrap gap-1">
               ${!b.sapEntered&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded" style=${{background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">SAP</span>`}
@@ -2680,7 +2698,7 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
                 <tbody>${bs.map((b,i)=>{const c=data.resources.find(r=>r.id===b.resourceId);const q=Q[i];const ds=shiftDates(b);const today=iso(TODAY);const past=b.end<today,live=b.start<=today&&b.end>=today;
                   return html`<tr key=${b.id} class="border-t border-line cursor-pointer hover:bg-sunken job-bk-row" style=${past?{opacity:.6}:null} onClick=${()=>onEditBooking(b)} tabindex="0" onKeyDown=${e=>{if(e.key==='Enter')onEditBooking(b)}}>
                     <td class="py-2 pr-3 whitespace-nowrap"><span class="font-medium">${c?c.name:'Crew'}</span>${c&&c.subbie&&html` <${SubTag}/>`}${b.crewSize?html` <span class="text-muted">· ${b.crewSize} man</span>`:''}</td>
-                    <td class="py-2 pr-3 mono whitespace-nowrap">${range(b.start,b.end)}${live?html` <span class="text-[10.5px] font-semibold px-1 rounded" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>Now</span>`:''}</td>
+                    <td class="py-2 pr-3 mono whitespace-nowrap overflow-hidden text-ellipsis">${range(b.start,b.end)}${live?html` <span class="text-[10.5px] font-semibold px-1 rounded" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>Now</span>`:''}</td>
                     <td class="py-2 pr-3 whitespace-nowrap">${b.shift==='night'?html`<span class="inline-flex items-center gap-1">${Icon.moon} Night</span>`:'Day'}</td>
                     <td class="py-2 pr-3 tnum">${ds.length}</td>
                     <td class="py-2 pr-3 truncate" title=${q.types.join(', ')}>${q.types.join(', ')||html`<span class="text-faint">–</span>`}</td>
@@ -2694,20 +2712,17 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
             return html`<div class="grid gap-4">${group(true,S.bs.filter(sealOf))}${group(false,S.bs.filter(b=>!sealOf(b)))}</div>`})()}
         </section>
 
-        <div class="grid gap-3 lg:grid-cols-2">
+        <div class="grid gap-3">
           <section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-plans">
             <h3 id="job-plans" class="font-display text-[15px] font-semibold">Job plans</h3>
             ${!plans.length?html`<div class="text-[12.5px] text-muted">No plan for this job yet. Make one on the Planning page.</div>`
               :plans.map(p=>html`<div key=${p.id} class="flex items-center gap-2 rounded-lg border border-line px-3 py-2">
                   <div class="min-w-0 flex-1"><div class="text-[13px] font-medium truncate">${p.title||p.jobName||'Untitled plan'}</div>
                     <div class="text-[11.5px] text-muted">${p.status==='scheduled'?'On the schedule':p.status==='ready'?'Ready':'Draft'}${p.appliedAt?' · sent '+new Date(p.appliedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'}):''}</div></div>
-                  <button type="button" class="btn" style=${{height:30}} onClick=${()=>onOpenPlan(p.id)}>Open</button></div>`)}
-          </section>
-          <section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-pics" id="job-pictures" style=${{borderStyle:'dashed'}}>
-            <h3 id="job-pics" class="font-display text-[15px] font-semibold">Pictures</h3>
-            <div class="text-[12.5px] text-muted">Coming soon: the job’s photos will be kept here.</div>
+                  ${canEditJobs&&html`<button type="button" class="btn" style=${{height:30}} onClick=${()=>onOpenPlan(p.id)}>Open</button>`}</div>`)}
           </section>
         </div>
+        <${JobPictures} key=${job.id} data=${data} job=${job}/>
         <section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-paper">
           <h3 id="job-paper" class="font-display text-[15px] font-semibold">Paperwork</h3>
           <div class="text-[12px] text-muted">Shift by shift: submitted QA packs, and the lab’s asphalt reports, core reports and NCRs.</div>
@@ -2716,6 +2731,72 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
       </div>`}
     </div>
   </div>`;
+}
+
+/* Jobs › a job › Pictures: photos of the job, shift by shift, each with a label, who added it and when.
+   Supervisors and up. Pictures are shrunk on the phone before they're sent. */
+const PHOTO_BUCKET='jobphotos';const errTxt=e=>(e&&(e.message||e.error_description))||String(e);
+function shrinkJpeg(file,max=1600){return new Promise((ok,no)=>{const u=URL.createObjectURL(file);const im=new Image();
+  im.onload=()=>{const k=Math.min(1,max/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
+    c.getContext('2d').drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);c.toBlob(b=>b?ok(b):no(new Error('Couldn’t read that picture.')),'image/jpeg',.82)};
+  im.onerror=()=>{URL.revokeObjectURL(u);no(new Error('That file isn’t a picture this device can read.'))};im.src=u})}
+function JobPictures({data,job}){
+  const live=window.__ffLive;const sb=live&&live.sb;const role=live&&live.role;const me=live&&live.user&&live.user.id;
+  const canUse=['admin','superuser','planner','supervisor'].includes(role);const mgr=role==='admin'||role==='superuser';
+  const [rows,setRows]=useState(null);const [urls,setUrls]=useState({});const [err,setErr]=useState('');const [n,setN]=useState(0);const [up,setUp]=useState(null);const [view,setView]=useState(null);
+  const shifts=[...new Set(data.blocks.filter(b=>b.jobId===job.id&&b.kind==='job').flatMap(b=>shiftDates(b)))].filter(k=>k<=iso(TODAY)).sort().reverse();
+  useEffect(()=>{if(!sb||!canUse)return;let off=false;(async()=>{try{const {data:ps,error}=await sb.from('job_photos').select('*').eq('job_id',job.id);if(error)throw error;if(off)return;setRows(ps||[]);
+      const paths=(ps||[]).map(p=>p.path).filter(x=>!urls[x]);if(paths.length){const {data:su}=await sb.storage.from(PHOTO_BUCKET).createSignedUrls(paths,3600);if(!off&&su)setUrls(u=>({...u,...Object.fromEntries(su.filter(x=>x.signedUrl).map(x=>[x.path,x.signedUrl]))}))}}
+    catch(x){if(!off){setRows([]);setErr(/job_photos|relation|schema cache/.test(errTxt(x))?'Pictures aren’t set up yet: an administrator needs to run supabase/job_photos.sql.':errTxt(x))}}})();return()=>{off=true}},[job.id,n]);
+  if(!sb||!canUse)return null;
+  const keys=[...new Set((rows||[]).map(p=>p.shift_date))].sort().reverse();
+  const crewOn=k=>[...new Set(data.blocks.filter(b=>b.jobId===job.id&&b.kind==='job'&&b.start<=k&&b.end>=k).map(b=>(data.resources.find(r=>r.id===(coverOf(b,k)||b.resourceId))||{}).name).filter(Boolean))].join(', ');
+  const when=t=>new Date(t).toLocaleString('en-AU',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'});
+  const canChange=p=>mgr||p.created_by===me;
+  return html`<section class="panel p-4 grid gap-3 content-start" aria-labelledby="job-pics" id="job-pictures">
+    <div class="flex flex-wrap items-center gap-2"><h3 id="job-pics" class="font-display text-[15px] font-semibold flex-1">Pictures</h3>
+      <button id="job-pic-add" type="button" class="btn btn-primary" disabled=${!shifts.length} title=${shifts.length?'':'No shifts worked yet'} onClick=${()=>setUp({n:Date.now()})}>${Icon.plus} Add pictures</button></div>
+    ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+    ${!rows?html`<div class="text-[12.5px] text-muted">Loading…</div>`:!keys.length?html`<div class="text-[12.5px] text-muted">No pictures yet.${shifts.length?' Add them shift by shift.':''}</div>`
+      :keys.map(k=>html`<div key=${k} class="grid gap-2 job-pic-shift" data-date=${k}>
+        <div class="flex items-baseline gap-2"><span class="text-[13.5px] font-semibold">${WD[parse(k).getDay()]} ${fmtShort(parse(k))} ${parse(k).getFullYear()}</span><span class="text-[12px] text-muted">${crewOn(k)}</span></div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+          ${rows.filter(p=>p.shift_date===k).sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at))).map(p=>html`<button key=${p.id} type="button" class="text-left rounded-lg border border-line overflow-hidden bg-surface job-pic" onClick=${()=>setView({p,label:p.label||''})}>
+            <div class="bg-sunken" style=${{aspectRatio:'4/3'}}>${urls[p.path]&&html`<img src=${urls[p.path]} alt=${p.label||'Job picture'} loading="lazy" class="w-full h-full object-cover"/>`}</div>
+            <div class="px-2 py-1.5 min-w-0"><div class="text-[12.5px] font-medium truncate">${p.label||html`<span class="text-faint font-normal">No label</span>`}</div>
+              <div class="text-[11px] text-muted truncate">${p.created_name||'Someone'} · ${when(p.created_at)}</div></div></button>`)}</div></div>`)}
+    ${up&&html`<${PicUpload} key=${up.n} sb=${sb} job=${job} shifts=${shifts} onClose=${()=>setUp(null)} onDone=${k=>{setUp(null);setN(x=>x+1)}}/>`}
+    ${view&&html`<div class="fixed inset-0 z-[70] bg-black/85 flex flex-col" id="job-pic-view" onClick=${e=>{if(e.target===e.currentTarget)setView(null)}}>
+      <div class="flex items-center gap-2 px-3 py-2 text-white"><div class="min-w-0 flex-1"><div class="text-[13px] font-medium truncate">${view.p.label||'No label'}</div><div class="text-[11.5px] opacity-75">${view.p.created_name||'Someone'} · ${when(view.p.created_at)} · shift ${fmtShort(parse(view.p.shift_date))}</div></div>
+        <button type="button" class="w-9 h-9 inline-flex items-center justify-center rounded-md bg-white/10" aria-label="Close" onClick=${()=>setView(null)}>${Icon.x}</button></div>
+      <div class="flex-1 min-h-0 flex items-center justify-center p-2" onClick=${e=>{if(e.target===e.currentTarget)setView(null)}}>${urls[view.p.path]&&html`<img src=${urls[view.p.path]} alt=${view.p.label||'Job picture'} class="max-w-full max-h-full object-contain rounded"/>`}</div>
+      ${canChange(view.p)&&html`<div class="bg-surface p-3 flex flex-wrap items-center gap-2">
+        <input id="job-pic-label" class="field flex-1 min-w-[160px]" style=${{height:36,fontSize:14}} placeholder="Label, e.g. Before paving" value=${view.label} onInput=${e=>setView({...view,label:e.target.value})}/>
+        <button id="job-pic-save" type="button" class="btn btn-primary" onClick=${async()=>{const {error}=await sb.from('job_photos').update({label:view.label.trim()||null}).eq('id',view.p.id);if(error){setErr(errTxt(error));return}setView(null);setN(x=>x+1)}}>Save label</button>
+        ${view.del?html`<button id="job-pic-del-go" type="button" class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${async()=>{const {error}=await sb.from('job_photos').delete().eq('id',view.p.id);if(error){setErr(errTxt(error));return}try{await sb.storage.from(PHOTO_BUCKET).remove([view.p.path])}catch(x){}setView(null);setN(x=>x+1)}}>Yes, delete</button>`
+          :html`<button id="job-pic-del" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setView({...view,del:true})}>${Icon.trash} Delete</button>`}</div>`}</div>`}
+  </section>`;
+}
+function PicUpload({sb,job,shifts,onClose,onDone}){
+  const [k,setK]=useState(shifts[0]||'');const [label,setLabel]=useState('');const [files,setFiles]=useState([]);const [busy,setBusy]=useState('');const [err,setErr]=useState('');
+  const save=async()=>{setErr('');if(!k){setErr('Pick the shift.');return}if(!files.length){setErr('Choose or take a picture.');return}
+    try{let i=0;for(const f of files){i++;setBusy(`Uploading ${i} of ${files.length}…`);const blob=await shrinkJpeg(f);const path=`jobs/${job.id}/${k}/${Date.now()}-${i}.jpg`;
+        const {error}=await sb.storage.from(PHOTO_BUCKET).upload(path,blob,{contentType:'image/jpeg',upsert:false});if(error)throw error;
+        const {error:e2}=await sb.from('job_photos').insert({job_id:job.id,shift_date:k,label:label.trim()||null,path,size:blob.size});if(e2){try{await sb.storage.from(PHOTO_BUCKET).remove([path])}catch(x){}throw e2}}
+      onDone(k)}catch(x){setErr(/job_photos|relation|schema cache|bucket/i.test(errTxt(x))?'Pictures aren’t set up yet: an administrator needs to run supabase/job_photos.sql.':errTxt(x))}finally{setBusy('')}};
+  return html`<div class="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div class="panel pop w-full sm:max-w-[480px] rounded-b-none sm:rounded-b-xl grid gap-3 p-4" role="dialog" aria-modal="true" aria-label="Add pictures">
+      <div class="flex items-center gap-2"><div class="font-display text-[17px] font-semibold flex-1">Add pictures</div><button type="button" class="w-8 h-8 inline-flex items-center justify-center rounded-md text-muted" aria-label="Close" onClick=${onClose}>${Icon.x}</button></div>
+      <div class="text-[12.5px] text-muted -mt-2">${jobLabel(job)}</div>
+      <label class="grid gap-1"><span class="label">Shift</span><select id="job-pic-shift" class="field" style=${{height:40,fontSize:14}} value=${k} onChange=${e=>setK(e.target.value)}>${shifts.map(d=>html`<option key=${d} value=${d}>${WD[parse(d).getDay()]} ${fmtShort(parse(d))} ${parse(d).getFullYear()}</option>`)}</select></label>
+      <label class="grid gap-1"><span class="label">Label (optional)</span><input id="job-pic-newlabel" class="field" style=${{height:40,fontSize:14}} placeholder="e.g. Before paving, joint at Ch 120" value=${label} onInput=${e=>setLabel(e.target.value)}/></label>
+      <div class="grid grid-cols-2 gap-2">
+        <label class="btn justify-center cursor-pointer" style=${{height:44}}>${Icon.plus} Take a photo<input id="job-pic-camera" type="file" accept="image/*" capture="environment" class="sr-only" onChange=${e=>{setFiles([...files,...e.target.files]);e.target.value=''}}/></label>
+        <label class="btn justify-center cursor-pointer" style=${{height:44}}>${Icon.plus} Choose pictures<input id="job-pic-file" type="file" accept="image/*" multiple class="sr-only" onChange=${e=>{setFiles([...files,...e.target.files]);e.target.value=''}}/></label></div>
+      ${files.length>0&&html`<div class="text-[12.5px]" id="job-pic-count">${files.length} picture${files.length===1?'':'s'} ready <button type="button" class="text-muted underline ml-1" onClick=${()=>setFiles([])}>Clear</button></div>`}
+      ${err&&html`<div id="job-pic-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+      <div class="flex gap-2 justify-end"><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="job-pic-save-new" type="button" class="btn btn-primary" disabled=${!!busy} onClick=${save}>${busy||'Upload'}</button></div>
+    </div></div>`;
 }
 
 /* the job's submitted QA paperwork (qa.js, loaded on first use) */
@@ -2753,7 +2834,7 @@ const screenOK0=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;const admin=r
 /* operators only see Prestarts, once it is released to them */
 const screenOK=(k,role,d)=>screenOK0(k,role,d)&&!(role==='prestart'&&k!=='prestarts'&&k!=='qa'&&k!=='staff'&&screenOK0('prestarts',role,d))
   &&!(role==='prestart'&&k==='staff'&&!screenOK0('prestarts',role,d))   /* operators: Leave (their own leave form) once Prestarts is released to them */
-  &&!(role==='supervisor'&&!['schedule','staff','prestarts','qa'].includes(k))   /* supervisors: the schedule, the leave calendar, prestarts and site QA */
+  &&!(role==='supervisor'&&!['schedule','jobs','staff','prestarts','qa'].includes(k))   /* supervisors: the schedule, jobs (to look at, and pictures), the leave calendar, prestarts and site QA */
   &&!(role==='lab'&&k!=='lab')   /* lab logins: the Lab screen only */
   &&k!=='machines';   /* machines are managed and booked in Fleet (Fleet › Machines and Calendar); the old Machines screen is gone */
 /* Fleet's sections; the Calendar is the machines' schedule board */
