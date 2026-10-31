@@ -2722,7 +2722,7 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
 function JobPaperwork({data,jobId}){const live=window.__ffLive;const [ok,setOk]=useState(!!(window.FFQ&&window.FFQ.JobQaDocs));
   useEffect(()=>{if(!ok&&live&&live.sb)loadMaint().then(()=>setOk(true),()=>{})},[]);
   if(!live||!live.sb)return null;if(!ok||!window.FFQ)return html`<div class="text-[12.5px] text-muted">Loading…</div>`;
-  const C=window.FFQ.JobQaDocs;return html`<${C} key=${jobId} data=${data} jobId=${jobId} sb=${live.sb}/>`}
+  const C=window.FFQ.JobQaDocs;return html`<${C} key=${jobId} data=${data} jobId=${jobId} sb=${live.sb} role=${live.role} me=${live.user&&live.user.id}/>`}
 /* ---------- Fleet & Maintenance and Prestarts: their own files (maint.js, prestart.js, defects.js, reports.js), loaded the first time either screen opens ---------- */
 let maintLoading=null;
 function loadMaint(){

@@ -9,7 +9,7 @@ const {Modal,Fld,fs,errMsg}=window.FFM;
 const BUCKET='lab';
 const n0=v=>{const x=parseFloat(String(v==null?'':v).replace(/,/g,''));return isFinite(x)?x:0};
 const f1=v=>v?fmtN(Math.round(v*10)/10):'–';
-const KINDS=[['asphalt','Asphalt report'],['core','Core report'],['ncr','NCR']];const kindLabel=k=>(KINDS.find(x=>x[0]===k)||[,'Lab report'])[1];
+const KINDS=[['asphalt','Asphalt report'],['core','Core report'],['ncr','NCR']];const kindLabel=k=>k==='qa'?'QA pack (scan)':(KINDS.find(x=>x[0]===k)||[,'Lab report'])[1];
 const UPLOAD_ROLES=['admin','superuser','planner','lab'];
 const ACCEPT='application/pdf,image/jpeg,image/png,image/webp,.xlsx,.xls,.csv,.docx';
 const OK_TYPE=/^(application\/pdf|image\/(jpeg|png|webp)|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document)|application\/vnd\.ms-excel|text\/csv)$/;
