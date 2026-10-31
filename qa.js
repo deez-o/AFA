@@ -273,7 +273,9 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
       ${!inModal&&html`<button type="button" class="btn px-2" onClick=${onBack} aria-label="Back">${Icon.chevL}</button>`}
       <div class="min-w-0 flex-1"><div class="font-display text-[17px] font-semibold leading-tight truncate">${jobLabel(jobOf(data,e.b))}</div>
         <div class="text-[12.5px] text-muted">${crewName(data,e.crewId)} · ${WD[parse(e.k).getDay()]} ${fmtShort(parse(e.k))}${e.b.shift==='night'?' · night':''}</div></div>
-      ${chip(statusOf(p,sigs))}${p.pending&&html`<span class="text-[11.5px]" style=${{color:'hsl(38 90% 40%)'}}>Waiting to send</span>`}
+      <span class="relative inline-flex">${chip(statusOf(p,sigs))}
+        ${/* shown while a change saves; placed under the status so it never moves the form (it wrapped and jumped on phones) */''}
+        <span id="qa-pending" class="absolute right-0 top-full mt-0.5 text-[10.5px] whitespace-nowrap pointer-events-none" style=${{color:'hsl(38 90% 40%)',visibility:p.pending?'visible':'hidden'}}>Waiting to send</span></span>
       ${(canEdit||p.label)&&html`<div class="w-full flex items-center gap-2 pt-1"><span class="label shrink-0">Pack name</span>${canEdit?html`<input id="qa-label" class="field" style=${{...fs,maxWidth:320}} placeholder="e.g. Second work area (optional)" value=${p.label||''} onInput=${ev=>upd(x=>({...x,label:ev.target.value}))}/>`:html`<span class="text-[13px] font-medium">${p.label}</span>`}</div>`}
     </div>
     ${p.status==='submitted'&&html`<div class="rounded-lg px-3 py-2 text-[12.5px]" style=${{background:'hsl(145 50% var(--blk-l))'}}>Submitted${p.submitted_name?' by '+p.submitted_name:''}${p.submitted_at?' · '+fmtDT(p.submitted_at):''}. ${isManager?'Only administrators and superusers can change it: your changes save to the submitted pack.':'Only an administrator or superuser can change it now.'}</div>`}
