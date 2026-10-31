@@ -32,7 +32,7 @@ const RUN = { env: null, http: null };   // this request's settings and fetch, f
 const SM8 = 'https://api.servicem8.com/api_1.0';
 const SM8_HOOKS = 'https://api.servicem8.com/webhook_subscriptions';
 const OAUTH = 'https://go.servicem8.com/oauth';
-const SCOPES = 'read_jobs create_jobs manage_jobs read_schedule read_job_materials read_job_queues read_customers manage_customers read_job_notes publish_job_notes read_attachments read_job_attachments read_job_photos';
+const SCOPES = 'read_jobs create_jobs manage_jobs read_schedule read_job_materials read_job_queues read_customers manage_customers read_job_notes publish_job_notes read_attachments read_job_attachments read_job_photos manage_attachments publish_job_attachments publish_job_photos';
 const HOOK_FIELDS = ['status', 'queue_uuid', 'work_done_description', 'job_description', 'active', 'job_is_scheduled_until_stamp', 'total_invoice_amount'];
 const HOOK_FIELDS_MIN = ['status', 'queue_uuid', 'work_done_description', 'job_description', 'active'];
 const ACTIVITY_FIELDS = ['start_date', 'end_date', 'active', 'activity_was_scheduled', 'activity_was_recorded'];   // bookings and time on a job
@@ -144,6 +144,11 @@ function client(A, http) {
     get: async path => (await go('GET', path)).json(),
     post: async (path, body) => { const r = await go('POST', path, body); return (r.headers && r.headers.get && r.headers.get('x-record-uuid')) || null; },
     bytes: async path => Buffer.from(await (await go('GET', path)).arrayBuffer()),
+    upload: async (path, form) => {   // multipart (fetch sets the boundary)
+      const r = await http(SM8 + path, { method: 'POST', headers: { ...A.headers, Accept: 'application/json' }, body: form });
+      if (!r.ok) { const t = await r.text().catch(() => ''); const e = new Error(`ServiceM8 ${r.status}: ${t.slice(0, 300)}`); e.status = r.status; throw e; }
+      return r;
+    },
   };
 }
 
@@ -393,9 +398,11 @@ async function pullOne(D, S, cfg, link, wo, ctx) {
   const result = await D.rpc('servicem8_apply', { p_wo: wo.id, p_patch: m.patch || {}, p_service: m.service, p_meters: m.meters || [], p_job: m.job });
   // his photos and PDFs (a problem here doesn't stop the rest of the update; it is tried again next time)
   if (yes(job.active) && !['closed', 'cancelled'].includes(wo.status) && env) {
-    let problem = null;
-    try { const r = await syncAttachments(D, S, env, http, wo, link); if (r.skipped.length) problem = 'Not copied (only JPG, PNG, WebP or PDF, up to 15 MB): ' + r.skipped.join(', '); }
-    catch (e) { problem = errText(e); }
+    const problems = [];
+    try { await pushFiles(D, S, env, http, wo, link); } catch (e) { problems.push(errText(e)); }   // files added here → his job
+    try { const r = await syncAttachments(D, S, env, http, wo, link); if (r.skipped.length) problems.push('Not copied (only JPG, PNG, WebP or PDF, up to 15 MB): ' + r.skipped.join(', ')); }
+    catch (e) { problems.push(errText(e)); }
+    const problem = problems.join(' · ') || null;
     if (problem !== (link.files_error || null)) await D.patch(`servicem8_jobs?work_order_id=eq.${wo.id}`, { files_error: problem }).catch(() => null);   // shown on the work order
   }
   return result;
@@ -432,6 +439,35 @@ async function syncAttachments(D, S, env, http, wo, link, limit = 8) {
     n++;
   }
   return { n, skipped };
+}
+
+// files added to the work order in FraserFlow → his ServiceM8 job. The ServiceM8 id is chosen here and recorded
+// before sending, so when the file shows in ServiceM8's own list it is recognised and not copied back.
+async function pushFiles(D, S, env, http, wo, link, limit = 5) {
+  const mine = await D.get(`maintenance_files?work_order_id=eq.${wo.id}&sm8_uuid=is.null&select=*&order=created_at.asc&limit=${limit}`);
+  const storage = (env.SUPABASE_URL || '').replace(/\/$/, '') + '/storage/v1/object/maintenance/';
+  let n = 0;
+  for (const f of mine || []) {
+    const uuid = crypto.randomUUID();
+    const claimed = await D.patch(`maintenance_files?id=eq.${f.id}&sm8_uuid=is.null`, { sm8_uuid: uuid });
+    if (!claimed || !claimed.length) continue;   // another refresh is sending it
+    try {
+      const r = await http(storage + f.path.split('/').map(q).join('/'), { headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + env.SUPABASE_SERVICE_ROLE_KEY } });
+      if (!r.ok) throw new Error(`File store ${r.status} for ${f.name}`);
+      const data = Buffer.from(await r.arrayBuffer());
+      const name = String(f.name || 'file').replace(/^WO \d+ · /, '');
+      const ext = (String(f.path).match(/\.[a-z0-9]+$/i) || [''])[0];
+      const form = new FormData();
+      form.append('uuid', uuid); form.append('related_object', 'job'); form.append('related_object_uuid', link.job_uuid); form.append('attachment_name', name);
+      form.append('file', new Blob([data], { type: f.mime || 'application/octet-stream' }), name.toLowerCase().endsWith(ext.toLowerCase()) ? name : name + ext);
+      await S.upload('/Attachment.json', form);
+      n++;
+    } catch (e) {
+      await D.patch(`maintenance_files?id=eq.${f.id}`, { sm8_uuid: null }).catch(() => null);   // tried again next time
+      throw new Error('Couldn’t send ' + (f.name || 'a file').replace(/^WO \d+ · /, '') + ' to ServiceM8: ' + errText(e));
+    }
+  }
+  return n;
 }
 
 // send what's waiting, pass on changes, and refresh the jobs not heard from for a while

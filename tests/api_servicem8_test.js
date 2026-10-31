@@ -105,6 +105,7 @@ async function http(url, o = {}) {
   if (url.endsWith('/auth/v1/user')) { const u = USERS[h.Authorization.replace('Bearer ', '')]; return u ? json(200, { id: u.id }) : json(401, {}); }
   if (url.includes('.supabase.co/storage/v1/object/maintenance/')) {
     if (h.apikey !== 'service') throw new Error('file store used without the service key');
+    if (m === 'GET') return json(200, 'FILEBYTES');
     db.uploads.push({ path: decodeURIComponent(url.split('/object/maintenance/')[1]), type: h['Content-Type'], size: o.body.length }); return json(200, {});
   }
   if (url.includes('.supabase.co/rest/v1/')) {
@@ -132,6 +133,11 @@ async function http(url, o = {}) {
     if (p.startsWith('meter_readings')) return json(200, p.includes('kind=eq.hours') ? [{ kind: 'hours', value: 4500, read_at: '2026-10-30T00:00:00Z' }] : []);
     if (p.startsWith('defects')) return json(200, []);
     if (p.startsWith('maintenance_files') && m === 'POST') { if (db.filesBroken) return json(400, { message: 'column "work_order_id" does not exist' }); db.files.push(JSON.parse(o.body)); return json(201, null); }
+    if (p.startsWith('maintenance_files') && m === 'PATCH') {
+      const id = p.match(/id=eq\.([^&]+)/)[1]; const hit = db.files.filter(f => f.id === id && (!p.includes('sm8_uuid=is.null') || !f.sm8_uuid));
+      hit.forEach(f => Object.assign(f, JSON.parse(o.body))); return json(200, hit);
+    }
+    if (p.startsWith('maintenance_files') && p.includes('sm8_uuid=is.null')) { const w = p.match(/work_order_id=eq\.([^&]+)/)[1]; return json(200, db.files.filter(f => f.work_order_id === w && !f.sm8_uuid)); }
     if (p.startsWith('maintenance_files')) { const ids = p.match(/sm8_uuid=in\.\(([^)]*)\)/)[1].split(','); return json(200, db.files.filter(f => ids.includes(f.sm8_uuid))); }
     if (p.startsWith('maintenance_audit')) return json(201, null);
     if (p.startsWith('rpc/servicem8_apply')) { const a = JSON.parse(o.body); rpcCalls.push(a); const l = db.links.find(x => x.work_order_id === a.p_wo); if (l) Object.assign(l, { sm8_status: a.p_job.sm8_status, job_no: a.p_job.job_no }); return json(200, (a.p_patch && a.p_patch.status) || 'open'); }
@@ -148,6 +154,11 @@ async function http(url, o = {}) {
     let mm = path.match(/^\/job\/([^.]+)\.json$/);
     if (mm && m === 'GET') return db.jobs[mm[1]] ? json(200, db.jobs[mm[1]]) : json(404, {});
     if (mm && m === 'POST') { Object.assign(db.jobs[mm[1]], JSON.parse(o.body)); return json(200, {}); }
+    if (path === '/Attachment.json' && m === 'POST') {
+      const b = o.body; if (db.attachBroken) return json(403, { message: 'scope' });
+      db.attachments.push({ uuid: b.get('uuid'), related_object: b.get('related_object'), related_object_uuid: b.get('related_object_uuid'), attachment_name: b.get('attachment_name'), file_type: '.' + b.get('file').name.split('.').pop(), active: 1, pushed: true });
+      return json(200, {});
+    }
     if (path.startsWith('/attachment.json')) { const u = path.match(/related_object_uuid eq '([^']+)'/)[1]; return json(200, db.attachments.filter(a => a.related_object_uuid === u)); }
     let mf = path.match(/^\/attachment\/([^./]+)\.file$/);
     if (mf) return json(200, 'JPEGDATA-' + mf[1]);
@@ -267,6 +278,20 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   db.filesBroken = false;
   r = await call({ token: 'tok-mech', body: { action: 'sync', wo: WO1 } });
   ok(db.files.some(f => f.sm8_uuid === '00000000-0000-0000-0000-0000000000d6' && f.mime === 'image/jpeg') && !/work_order_id/.test(db.links[0].files_error || ''), 'a file type given without the dot ("jpeg") is copied, and the problem clears');
+
+  // a file added in FraserFlow goes to his job, and isn't copied back
+  db.filesBroken = false; const before = db.files.length, upBefore = db.uploads.length;
+  db.files.push({ id: 'f-here-1', asset_id: 'm1', kind: 'photo', name: 'WO 1042 · Site photo.jpg', path: 'assets/m1/wo/1-Site photo.jpg', mime: 'image/jpeg', size: 9, work_order_id: WO1, sm8_uuid: null, created_by: 'someone' });
+  db.attachBroken = true;
+  r = await call({ token: 'tok-mech', body: { action: 'sync', wo: WO1 } });
+  ok(db.files.find(f => f.id === 'f-here-1').sm8_uuid === null && /Couldn’t send Site photo\.jpg to ServiceM8: ServiceM8 403/.test(db.links[0].files_error || ''), 'if ServiceM8 refuses a file from here, it says so and tries again next time');
+  db.attachBroken = false;
+  r = await call({ token: 'tok-mech', body: { action: 'sync', wo: WO1 } });
+  const pushed = db.attachments.find(a => a.pushed);
+  ok(pushed && pushed.attachment_name === 'Site photo.jpg' && pushed.related_object_uuid === link.job_uuid && db.files.find(f => f.id === 'f-here-1').sm8_uuid === pushed.uuid, 'a file added in FraserFlow is sent to his job (named without the WO prefix)');
+  ok(db.files.length === before + 1 && db.uploads.length === upBefore, 'it isn’t copied back from ServiceM8 as a second file');
+  r = await call({ token: 'tok-mech', body: { action: 'sync', wo: WO1 } });
+  ok(db.attachments.filter(a => a.pushed).length === 1, 'and it’s sent only once');
 
   // a change made in FraserFlow
   db.links[0].sm8_status = 'Work Order'; db.jobs[link.job_uuid].status = 'Work Order';

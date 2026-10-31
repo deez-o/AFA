@@ -200,9 +200,19 @@ function Sm8Panel({ctx,wo}){
     ${(()=>{const files=(db.maintenance_files||[]).filter(f=>f.work_order_id===wo.id);if(!files.length&&st!=='sent')return null;
       const oldDb=st==='sent'&&!('files_error' in l);   /* servicem8.sql hasn't been run again since photos were added */
       const openFile=async f=>{const w=window.open('','_blank');try{const o=window.FFP?await window.FFP.signedUrls(sb,[f.path]):{};if(o[f.path]){if(w)w.location=o[f.path];else location.href=o[f.path]}else{if(w)w.close();setErr('Couldn’t open that file.')}}catch(e){if(w)w.close();setErr(errMsg(e))}};
-      return html`<div id="wo-sm8-files" class="rounded-md border border-line bg-sunken p-2.5 grid gap-1 content-start"><span class="label">Photos and documents (from ServiceM8)</span>
-        ${files.map(f=>html`<button key=${f.id} type="button" class="text-left text-[13px] hover:underline truncate" style=${{color:'var(--accent)'}} onClick=${()=>openFile(f)}>${f.name.replace(/^WO \d+ · /,'')}</button>`)}
-        ${!files.length&&!oldDb&&!l.files_error&&html`<div class="text-[12.5px] text-muted">None yet. Photos (JPG, PNG) and PDFs he attaches to the job show here.</div>`}
+      /* a file added here: kept with the machine's files, linked to this work order, and sent to his job */
+      const addFile=async file=>{setErr('');if(file.size>15*1024*1024){setErr('That file is over 15 MB.');return}
+        if(!/^(application\/pdf|image\/(jpeg|png|webp))$/.test(file.type)){setErr('Add a PDF or a picture (JPG, PNG).');return}
+        setBusy(true);try{const safe=file.name.replace(/[^\w.\- ]+/g,'_').slice(-80);const path=`assets/${wo.asset_id}/wo/${Date.now()}-${safe}`;
+          const {error}=await sb.storage.from('maintenance').upload(path,file,{contentType:file.type,upsert:false});if(error)throw error;
+          const {error:e2}=await sb.from('maintenance_files').insert({asset_id:wo.asset_id,kind:file.type==='application/pdf'?'document':'photo',name:`${woNo(wo)} · ${file.name}`,path,mime:file.type,size:file.size,work_order_id:wo.id});if(e2)throw e2;
+          await sm8Call(sb,{action:'sync',wo:wo.id});notify(`${file.name} added and sent to ServiceM8`);reload()}
+        catch(e){setErr(errMsg(e));reload()}finally{setBusy(false)}};
+      return html`<div id="wo-sm8-files" class="rounded-md border border-line bg-sunken p-2.5 grid gap-1 content-start"><div class="flex items-center gap-2"><span class="label flex-1">Photos and documents (shared with ServiceM8)</span>
+          ${perms.work&&st==='sent'&&!oldDb&&html`<label class="text-[12px] text-muted hover:text-ink inline-flex items-center gap-1 cursor-pointer">${Icon.plus} ${busy?'Sending…':'Add a file'}<input id="wo-sm8-file" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" class="hidden" disabled=${busy} onChange=${e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(f)addFile(f)}}/></label>`}</div>
+        ${files.map(f=>html`<div key=${f.id} class="flex items-center gap-2 min-w-0"><button type="button" class="text-left text-[13px] hover:underline truncate flex-1 min-w-0" style=${{color:'var(--accent)'}} onClick=${()=>openFile(f)}>${f.name.replace(/^WO \d+ · /,'')}</button>
+          <span class="text-[11.5px] text-muted whitespace-nowrap">${f.created_by?(f.sm8_uuid?'added here · in ServiceM8':'added here · sending…'):'from ServiceM8'}</span></div>`)}
+        ${!files.length&&!oldDb&&!l.files_error&&html`<div class="text-[12.5px] text-muted">None yet. Photos (JPG, PNG) and PDFs added here or on his job show here, and in both places.</div>`}
         ${oldDb&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>To bring his photos across, an administrator runs supabase/servicem8.sql again in Supabase → SQL Editor.</div>`}
         ${l&&l.files_error&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${l.files_error}</div>`}</div>`})()}
     ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
