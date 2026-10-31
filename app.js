@@ -1524,13 +1524,15 @@ function Section({title,id,children,aside}){
   </section>`;
 }
 
-function BookingDetails({f,set,data,rtype,err,changeRes}){
+function BookingDetails({f,set,data,rtype,err,changeRes,resTypes}){
+  /* the Staff calendar books staff only, the Fleet calendar machines only */
+  const curT=(data.resources.find(r=>r.id===f.resourceId)||{}).type;const showT=t=>!resTypes||resTypes.includes(t)||t===curT;
   return html`<div class="grid gap-6">
     ${f.fromMaintenance&&html`<div class="rounded-lg px-3 py-2 text-[12.5px]" style=${{background:'var(--accent-soft)'}}>This downtime comes from a maintenance work order. Change its dates on the work order in Fleet & Maintenance, or they’ll be put back.</div>`}
     <${Section} title="Assignment" id="sec-assign">
-      <label class="grid gap-1"><span class="label">Crew, staff member or machine</span>
+      <label class="grid gap-1"><span class="label">${resTypes&&resTypes.length===1?(resTypes[0]==='person'?'Staff member':resTypes[0]==='machine'?'Machine':'Crew'):'Crew, staff member or machine'}</span>
         <select id="ed-res" class="field" value=${f.resourceId} onChange=${e=>changeRes(e.target.value)}>
-          ${orderOf(data).filter(t=>TYPES[t]).map(t=>html`<optgroup key=${t} label=${TYPES[t].label}>
+          ${orderOf(data).filter(t=>TYPES[t]&&showT(t)).map(t=>html`<optgroup key=${t} label=${TYPES[t].label}>
             ${data.resources.filter(r=>r.type===t).map(r=>html`<option key=${r.id} value=${r.id}>${r.name} · ${r.sub}</option>`)}</optgroup>`)}
         </select></label>
       <div>
@@ -1642,7 +1644,7 @@ function BookingDetails({f,set,data,rtype,err,changeRes}){
   </div>`;
 }
 
-function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify}){
+function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify,resTypes}){
   const [planView,setPlanView]=useState(null);
   const [f,setF]=useState(initial);
   const [confirmDel,setConfirmDel]=useState(false);
@@ -1733,7 +1735,7 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify}){
         ${f.kind==='job'&&active.id==='details'&&(()=>{const pl=planFor(data,f);return pl?html`<div class="mb-4 rounded-lg px-3 py-2.5 flex flex-wrap items-center gap-2" style=${{background:'var(--accent-soft)'}}>
             <span class="text-[13px]"><span class="font-semibold" style=${{color:'var(--accent)'}}>Job plan:</span> ${pl.title||pl.jobName||'Untitled plan'}${pl.appliedAt?'':' (not sent to the schedule yet)'}</span>
             <span class="flex-1"></span><button type="button" class="btn" style=${{height:30}} onClick=${()=>setPlanView(pl)}>View full plan</button></div>`:null})()}
-        ${active.render({f,set,data,rtype,err,changeRes})}
+        ${active.render({f,set,data,rtype,err,changeRes,resTypes})}
         ${planView&&html`<${PlanViewDialog} data=${data} plan=${planView} onClose=${()=>setPlanView(null)} notify=${notify||(()=>{})} onOpenPlan=${id=>{setPlanView(null);onOpenPlan&&onOpenPlan(id)}}/>`}
       </div>
       <div class="px-5 py-3 border-t border-line bg-sunken flex flex-wrap items-center gap-2">
@@ -4420,8 +4422,6 @@ async function buildPlanPdf(data,p,opt={}){
   const idxs=one>=0?[one]:dates.map((_,i)=>i);
   const tot=new Map();if(one<0)sps.forEach(sp=>(sp.lines||[]).filter(lineHas).forEach(l=>{const k=mixLabel(l);const t=tot.get(k)||{t:0,a:0};t.t+=planTonnes(l);t.a+=num(l.area);tot.set(k,t)}));
   if(tot.size){head('Totals');[...tot.entries()].forEach(([k,v])=>{room(5);font(8.5,true);doc.text(clean(k),M,y+3.5);font(8.5,false);doc.text(seal?`${fmtN(v.a)} m2`:`${fmtN(v.t)} t over ${fmtN(v.a)} m2`,M+46,y+3.5);y+=4.6})}
-  if(p.traffic||p.profNotes||p.notes){head('Site rules & notes');if(p.traffic){font(8.5,true,[80,80,80]);room(5);doc.text('Traffic control',M,y+3.5);y+=4.6;bullets(p.traffic)}
-    if(p.profNotes){font(8.5,true,[80,80,80]);room(5);doc.text('Profiling',M,y+3.5);y+=4.6;bullets(p.profNotes)}if(p.notes){font(8.5,true,[80,80,80]);room(5);doc.text('Notes',M,y+3.5);y+=4.6;bullets(p.notes)}}
   if(dates.length){head(one>=0?'This shift':'Shift by shift');
     idxs.forEach(i=>{const sp=sps[i];const k=dates[i];room(14);doc.setFillColor(241,241,244);doc.rect(M,y,W,6,'F');font(9,true);doc.text(`${night?'Night':'Shift'} ${i+1} - ${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`,M+2,y+4.2);
       const st=(sp.lines||[]).reduce((a,l)=>a+(lineHas(l)?planTonnes(l):0),0);const rd=seal?0:spRounds(p,sp);if(st){font(8.5,true,AFA_RED);doc.text(`${fmtN(st)} t${rd?` - ${fmtN(rd)} rounds`:''}`,198-2,y+4.2,{align:'right'})}
@@ -4442,6 +4442,8 @@ async function buildPlanPdf(data,p,opt={}){
   if((p.jobSubs||[]).filter(subHas).length){head('Subcontractors (whole job)');kv((p.jobSubs||[]).filter(subHas).map(s=>[s.name||'-',[s.info,fmtTime(s.time||p.crewOnSite)].filter(Boolean).join(' - ')]))}
   const sl=p.seal||{};if(num(sl.tackArea)||num(sl.sealArea)||sl.onSite){head('Seal crew');kv([['On site',fmtTime(sl.onSite)],['Tack area',num(sl.tackArea)?`${fmtN(num(sl.tackArea))} m2`:''],['Seal area',num(sl.sealArea)?`${fmtN(num(sl.sealArea))} m2`:'']])}
   if((p.hazards||[]).some(h=>h.hazard||h.control)){head('Safety / environmental - hazards and controls');(p.hazards||[]).filter(h=>h.hazard||h.control).forEach(h=>kv([[h.hazard||'-',h.control||'']]))}
+  if(p.traffic||p.profNotes||p.notes){head('Site rules & notes');if(p.traffic){font(8.5,true,[80,80,80]);room(5);doc.text('Traffic control',M,y+3.5);y+=4.6;bullets(p.traffic)}
+    if(p.profNotes){font(8.5,true,[80,80,80]);room(5);doc.text('Profiling',M,y+3.5);y+=4.6;bullets(p.profNotes)}if(p.notes){font(8.5,true,[80,80,80]);room(5);doc.text('Notes',M,y+3.5);y+=4.6;bullets(p.notes)}}
   const n=doc.getNumberOfPages();const cnt=n-firstPage+1;for(let i=firstPage;i<=n;i++){doc.setPage(i);font(7,false,[130,130,130]);doc.text(`${clean(p.title||'Job plan')}${one>=0?` - ${dates[one]?fmtShort(parse(dates[one])):''} plan`:''} - page ${i-firstPage+1} of ${cnt}`,105,292,{align:'center'})}
   return opt.doc?doc:doc.output('blob');
 }
@@ -5473,7 +5475,7 @@ function App({boot,live}){
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${subWorksOpen&&html`<${SubWorksDialog} data=${data} notify=${setToast} onClose=${()=>setSubWorksOpen(false)}/>`}
     ${suggest&&html`<${SuggestDialog} setData=${setData} notify=${setToast} onClose=${()=>setSuggest(false)}/>`}
-    ${editing&&html`<${Editor} initial=${editing} data=${data} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)} notify=${setToast}
+    ${editing&&html`<${Editor} key=${(editing.id||'new')+':'+editing.resourceId+':'+editing.start} initial=${editing} data=${data} resTypes=${screen==='staff'?['person']:fleetCal?['machine']:null} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)} notify=${setToast}
       onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}setEditing(null);goScreen('planning')}}/>`}
     ${toast&&html`<div class="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-[13px] font-medium pop" role="status"
        style=${{bottom:'calc(20px + env(safe-area-inset-bottom, 0px))',background:'var(--ink)',color:'var(--surface)'}}>${toast}</div>`}
