@@ -16,6 +16,7 @@ const CFG0={yardName:'Yard',yardAddr:'187-193 Potassium St, Narangba QLD',gapDay
   loadMin:30,unloadMin:30,slow:1.25,floatStart:'05:00',perLoad:1,driver:'',floatName:'Float',skipCats:null,
   /* when the float driver works: moves are put in his hours, on weekdays, when the window allows */
   arriveBefore:60,   /* the gear is there this long before the shift starts */
+  curfew:true,   /* Qld oversize peak-hour curfew: no loaded float on the road 7–9am and 4–6pm, Monday to Friday */
   driverShift:'day',dayFrom:'06:00',dayTo:'16:00',nightFrom:'18:00',nightTo:'04:00',avoidWeekend:true,
   /* what fits on the float together (AFA's float, Oct 2026): machine numbers (the start of the name, or the rego) */
   alone:['PV010'],
@@ -151,11 +152,18 @@ function inHours(leave,done,cfg){
   const k0=dayOf(leave);const startToday=at(k0,cfg.nightFrom||'18:00');const k=leave>=startToday?k0:iso(addDays(parse(k0),-1));
   const ws=at(k,cfg.nightFrom||'18:00'),we=at(iso(addDays(parse(k),1)),cfg.nightTo||'04:00');return leave>=ws&&done<=we}
 const isWeekend=t=>t.getDay()===0||t.getDay()===6;
+/* the oversize peak-hour curfew (TMR Access Conditions Guide 13.2.2): 7–9am and 4–6pm on weekdays */
+const CURFEW=[['07:00','09:00'],['16:00','18:00']];
+function inCurfew(from,to,cfg){if(!cfg.curfew||to<=from)return false;
+  for(let k=dayOf(from);k<=dayOf(to);k=iso(addDays(parse(k),1))){const d=parse(k).getDay();if(d===0||d===6)continue;
+    if(CURFEW.some(([a,b])=>from<at(k,b)&&to>at(k,a)))return true}return false}
 /* the best time for a trip in its window: on time, in the driver's hours, on a weekday, then as soon as possible */
 function bestPick(t,{clock,dh,cfg,travel,L,U}){
   const n=t.moves.length,tr=travel(t.from,t.to);const ready=clock?addMin(clock,dh.min||0):null;
   const base=new Date(Math.max(t.earliest,ready||0));const span=Math.min(t.latest-base,4*864e5);
   const cands=[base];if(span>0){const st=new Date(base);st.setMinutes(Math.ceil(st.getMinutes()/30)*30,0,0);for(let c=st;c-base<=span;c=addMin(c,30))if(c>base)cands.push(c)}
+  /* loaded and away right as a curfew ends */
+  if(span>0&&cfg.curfew)for(let k=dayOf(base);k<=dayOf(addMin(base,span/6e4));k=iso(addDays(parse(k),1)))CURFEW.forEach(([,b])=>{const c=addMin(at(k,b),-L*n);if(c>base&&c-base<=span)cands.push(c)});
   /* and the start of each of the driver's shifts, allowing for the empty run to get there */
   if(span>0)for(let k=dayOf(addMin(base,-24*60));k<=dayOf(addMin(base,span/6e4));k=iso(addDays(parse(k),1)))[cfg.dayFrom,cfg.nightFrom].forEach(h=>{const c=addMin(at(k,h||'06:00'),dh.min||0);if(c>base&&c-base<=span)cands.push(c)});
   /* the day (or night) before the shift suits best; the same day next; further away less. To the yard: as soon as it can */
@@ -166,8 +174,9 @@ function bestPick(t,{clock,dh,cfg,travel,L,U}){
   const when=c=>t.to.key==='yard'?(c-base)/36e5:(()=>{const d=dayIdx(c);const nightBefore=cfg.driverShift!=='night'&&d===1&&c<at(dayOf(c),'06:00');const h=c.getHours();
     return (d===0||nightBefore?0:d===1?8:Math.abs(d)*30)+((cfg.driverShift==='any'&&(h<6||h>=18))?4:0)+((c-at(shiftDay(c),'12:00'))/36e5)*.02})();   /* within the day before: the morning; within the night before: the start of the night */
   let best=null;cands.forEach(c=>{const leave=addMin(c,-(dh.min||0));const done=addMin(c,L*n+(tr.min||0)+U*n);
-    const lateMin=Math.max(0,(done-t.latest)/6e4);const oh=!inHours(leave,done,cfg);const we=!!cfg.avoidWeekend&&(isWeekend(leave)||isWeekend(done));
-    const score=(lateMin>0?1e4+lateMin:0)+(oh?500:0)+(we?200:0)+when(c);
+    const lateMin=Math.max(0,(done-t.latest)/6e4);const oh=!inHours(leave,done,cfg);
+    const cur=inCurfew(addMin(c,L*n),addMin(c,L*n+(tr.min||0)),cfg);   /* loaded and on the road */const we=!!cfg.avoidWeekend&&(isWeekend(leave)||isWeekend(done));
+    const score=(lateMin>0?1e4+lateMin:0)+(cur?3000:0)+(oh?500:0)+(we?200:0)+when(c);
     if(!best||score<best.score)best={pick:c,score,oh,we}});
   return best}
 function planFloat(trips,cfg,travel,plan,opt={}){
@@ -184,8 +193,8 @@ function planFloat(trips,cfg,travel,plan,opt={}){
     const tr=travel(t.from,t.to);const depart=addMin(pick,L*t.moves.length);const arrive=addMin(depart,tr.min||0);const done=addMin(arrive,U*t.moves.length);
     const leave=addMin(pick,-(dh.min||0));
     const late=done>t.latest,tight=!late&&done>addMin(t.latest,-30),early=pick<t.earliest;
-    const outHours=!inHours(leave,done,cfg),weekend=isWeekend(leave)||isWeekend(done);
-    out.push({...t,pick,leave,depart,arrive,done,drive:tr,deadhead:dh,fixed,late,tight,early,outHours,weekend,fromLoc:loc,
+    const outHours=!inHours(leave,done,cfg),weekend=isWeekend(leave)||isWeekend(done),curfew=inCurfew(depart,arrive,cfg);
+    out.push({...t,pick,leave,depart,arrive,done,drive:tr,deadhead:dh,fixed,late,tight,early,outHours,weekend,curfew,fromLoc:loc,
       ticked:!!(P[t.id]&&P[t.id].done),tickedAt:P[t.id]&&P[t.id].doneAt,note:(P[t.id]&&P[t.id].note)||''});
     clock=done;loc=t.to}
   return {runs:out,skipped}}
@@ -285,6 +294,7 @@ function FloatsScreen({data,setData,notify}){
         <div class="mono text-[20px] sm:text-[22px] font-semibold leading-none">${hm(r.pick)}<span class="text-faint text-[14px] font-normal"> → ${hm(r.done)}</span></div>
         <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:sc,background:sb}}>${sl}</span>
         ${r.fixed&&!r.ticked&&html`<span class="text-[11px] text-muted">time set by hand</span>`}
+        ${r.curfew&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-curfew" style=${{color:'#fff',background:'hsl(0 72% 45%)'}} title="Loaded on the road in the oversize peak-hour curfew (7–9am, 4–6pm weekdays)">In peak-hour curfew</span>`}
         ${r.outHours&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-oh" style=${{color:'hsl(270 45% 38%)',background:'hsl(270 60% 95%)'}} title="Outside the float driver’s hours (Settings)">Outside driver’s hours</span>`}
         ${r.weekend&&!r.ticked&&cfg.avoidWeekend&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:'hsl(30 85% 34%)',background:'hsl(38 95% 92%)'}}>Weekend</span>`}
         ${r.early&&!r.ticked&&html`<span class="text-[11px] font-semibold" style=${{color:'hsl(30 85% 34%)'}}>Before the machine is free (${hm(r.earliest)})</span>`}
@@ -434,8 +444,9 @@ function FloatSettings({data,setData,cfg}){
         ${cfg.driverShift==='night'&&html`<span class="flex items-center gap-2 text-[13px]"><input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightFrom} onChange=${e=>set({nightFrom:e.target.value})} aria-label="Night shift from"/> to <input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightTo} onChange=${e=>set({nightTo:e.target.value})} aria-label="Night shift to"/> (next morning)</span>`}
       </div>
       <label class="inline-flex items-center gap-2 text-[13.5px]">Gear on site <input id="fl-arrive" type="number" min="0" step="15" class="field field-sm mono" style=${{height:32,width:80}} value=${cfg.arriveBefore} onChange=${e=>set({arriveBefore:+e.target.value})}/> min before the shift starts</label>
+      <label class="inline-flex items-center gap-2 text-[13.5px]"><input id="fl-curfew" type="checkbox" class="w-4 h-4" checked=${!!cfg.curfew} onChange=${e=>set({curfew:e.target.checked})}/> Oversize peak-hour curfew: no loaded float on the road 7–9am and 4–6pm, Monday to Friday</label>
       <label class="inline-flex items-center gap-2 text-[13.5px]"><input id="fl-weekdays" type="checkbox" class="w-4 h-4" checked=${!!cfg.avoidWeekend} onChange=${e=>set({avoidWeekend:e.target.checked})}/> Move on weekdays when it can (weekends only when it has to)</label>
-      <span class="text-[12px] text-muted">Each move goes at the best time in its window: on time first, then in the driver’s hours, then on a weekday, then the day (or night) before the shift. Back to the yard goes as soon as it can. A move that can only happen outside his hours is still planned, and marked.</span>
+      <span class="text-[12px] text-muted">Each move goes at the best time in its window: on time first, then out of the curfew, then in the driver’s hours, then on a weekday, then the day (or night) before the shift. Back to the yard goes as soon as it can. A move that can only happen outside his hours is still planned, and marked.</span>
     </div>
     <${FloatLoads} data=${data} cfg=${cfg} set=${set}/>
   </section>`}
@@ -513,9 +524,10 @@ function runSheetText(cfg,runs,k){
     L.push(`   To:   ${r.to.job}${r.to.crew?' – '+r.to.crew:''}${r.to.addr?', '+r.to.addr:''}`);
     L.push(`   Free from ${whenTxt(r.earliest,k)} · ${r.to.yard?'back at the yard by':'needed by'} ${whenTxt(r.latest,k)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km, ':''}${durTxt(r.drive.min)} drive`);
     if(r.deadhead.min>0)L.push(`   Leave ${hm(r.leave)} (${durTxt(r.deadhead.min)} empty from ${r.fromLoc.key==='yard'?cfg.yardName||'the yard':'the last drop'})`);
+    if(r.curfew)L.push('   ! Loaded in the peak-hour curfew (7-9am / 4-6pm weekdays): check the timing');
     if(r.note)L.push(`   Note: ${r.note}`);
     const u=mapsDir(r.from,r.to);if(u)L.push(`   Map: ${u}`);L.push('')});
-  if(!runs.length)L.push('No moves.');return L.join('\n')}
+  if(!runs.length)L.push('No moves.');if(cfg.curfew)L.push('Oversize curfew: no loaded float on the road 7-9am and 4-6pm, Monday to Friday.');return L.join('\n')}
 async function runSheetPdf(data,cfg,runs,k){
   const JsPDF=await loadJsPDF();const doc=new JsPDF({unit:'mm',format:'a4'});const W=210,M=12;let y=M;const d=parse(k);
   const clean=s=>String(s==null?'':s).replace(/[–—]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^\n\x20-\x7E\u00A0-\u00FF]/g,'');
@@ -533,10 +545,12 @@ async function runSheetPdf(data,cfg,runs,k){
     font(8.5,false);doc.setTextColor(90);doc.text(clean(`Leave ${hm(r.leave)} · load ${hm(r.pick)}-${hm(r.depart)} · arrive ${hm(r.arrive)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km, ':''}${durTxt(r.drive.min)}`),W-M-3,y+6,{align:'right'});doc.setTextColor(0);
     font(8,true);doc.text('PICK UP',M+3,y+11.5);doc.text('DROP OFF',M+98,y+11.5);font(9.5,false);doc.text(from,M+3,y+15.5);doc.text(to,M+98,y+15.5);
     const yy=y+15.5+Math.max(from.length,to.length)*4.2;font(8.5,false);doc.setTextColor(40,110,60);doc.text(clean(`Free from ${whenTxt(r.earliest,k)}`),M+3,yy);doc.setTextColor(30,70,140);doc.text(clean(`${r.to.yard?'Back at the yard by':'Needed by'} ${whenTxt(r.latest,k)}`),M+98,yy);
+    if(r.curfew&&!r.late){font(8.5,true);doc.setTextColor(180,20,30);doc.text('IN PEAK-HOUR CURFEW',M+135,yy);font(8.5,false)}
     if(r.late){font(8.5,true);doc.setTextColor(180,20,30);doc.text(clean(`LATE: gets there ${durTxt((r.done-r.latest)/60000)} after`),M+135,yy);font(8.5,false)}doc.setTextColor(0);
     const u=mapsDir(r.from,r.to);if(u){doc.setTextColor(30,70,140);doc.textWithLink('Directions',W-M-20,yy,{url:u});doc.setTextColor(0)}
     if(r.note){font(9,true);doc.text(clean('Note: '+r.note),M+3,yy+5)}
     y+=h+3});
+  if(cfg.curfew){font(8,false);doc.setTextColor(90);doc.text('Oversize curfew: no loaded float on the road 7-9am and 4-6pm, Monday to Friday.',M,287)}
   font(7.5,false);doc.setTextColor(140);doc.text(clean(`Made ${fmtShort(new Date())} ${hm(new Date())} in FraserFlow. Drive times from OpenStreetMap, x${cfg.slow} for the float.`),M,292);
   const blob=doc.output('blob');const dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null;
   const name=`${clean(cfg.floatName||'Float')} run sheet ${k}.pdf`;

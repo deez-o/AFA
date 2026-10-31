@@ -111,18 +111,36 @@ ok(!ctx.FFL.needsFloat({ name: 'SS003', category: 'Bobcats' }, {}, CF) && !ctx.F
   let r = planFloat([trip('2026-11-06 16:00', '2026-11-09 06:00')], cd, tr, {}).runs[0];
   ok(r.pick.getDay() === 0 && hm(r.leave) === '06:00' && !r.outHours, 'Friday 16:00 → needed Monday 06:00: Sunday during the day, the day before (not Friday or Sunday night)');
   r = planFloat([trip('2026-11-09 16:00', '2026-11-11 06:00')], cd, tr, {}).runs[0];
-  ok(r.pick.getDate() === 10 && hm(r.leave) === '06:00' && !r.weekend, 'Monday 16:00 → Wednesday 06:00: Tuesday, the day before, in hours');
+  ok(r.pick.getDate() === 10 && !r.weekend && !r.outHours && !r.curfew, 'Monday 16:00 → Wednesday 06:00: Tuesday, the day before, in hours and out of the curfew');
+  ok(hm(r.depart) === '09:00', '…loaded and away at 09:00, as the morning curfew ends');
   r = planFloat([trip('2026-11-09 16:00', '2026-11-13 05:00')], cd, tr, {}).runs[0];
   ok(r.pick.getDate() === 12, 'Monday → Friday start: Thursday, the day before (not as soon as it’s free)');
   r = planFloat([{ ...trip('2026-11-09 16:00', '2026-11-13 05:00'), to: { key: 'yard' } }], cd, tr, {}).runs[0];
   ok(r.pick.getDate() === 10, 'back to the yard: as soon as it can in hours (Tuesday)');
   r = planFloat([trip('2026-11-05 16:00', '2026-11-09 06:00')], cd, tr, {}).runs[0];
-  ok(r.pick.getDay() === 5 && hm(r.leave) === '06:00', 'Thursday 16:00 → Monday: Friday daytime, not the weekend');
+  ok(r.pick.getDay() === 5 && !r.curfew && !r.outHours, 'Thursday 16:00 → Monday: Friday daytime, not the weekend, clear of the curfew');
   r = planFloat([trip('2026-11-10 04:00', '2026-11-10 06:30')], cd, tr, {}).runs[0];
   ok(hm(r.pick) === '04:00' && r.outHours && !r.late, 'night shift ends 04:00, day starts 06:30: still planned on time, marked outside the driver’s hours');
   r = planFloat([trip('2026-11-09 16:00', '2026-11-11 06:00')], { ...cd, driverShift: 'night' }, tr, {}).runs[0];
   ok(r.pick.getDate() === 10 && hm(r.leave) === '18:00', 'a night driver: the night before (Tuesday 18:00)');
   r = planFloat([trip('2026-11-06 16:00', '2026-11-09 06:00')], { ...cd, avoidWeekend: false, driverShift: 'any' }, tr, {}).runs[0];
   ok(r.pick.getDay() === 0 && hm(r.pick) === '06:00', 'any time, weekends fine: still the day before, in daylight (Sunday 06:00)');
+}
+
+// the oversize peak-hour curfew: no loaded float on the road 7–9am and 4–6pm on weekdays
+{
+  const tr = () => ({ min: 40, km: 30 });
+  const trip = (e, l) => ({ id: 'y', moves: [{ m: 'a', name: 'PV009' }], from: { key: 'A' }, to: { key: 'B' }, earliest: t(e), latest: t(l) });
+  const cd = cfgOf({});
+  let r = planFloat([trip('2026-11-10 07:00', '2026-11-10 15:00')], cd, tr, {}).runs[0];
+  ok(!r.curfew && r.depart >= t('2026-11-10 09:00') && r.arrive <= t('2026-11-10 16:00'), 'free at 7am Tuesday: loaded and away at 9am, there before the 4pm curfew');
+  r = planFloat([trip('2026-11-10 04:00', '2026-11-10 06:30')], cd, tr, {}).runs[0];
+  ok(!r.curfew && r.arrive <= t('2026-11-10 07:00'), 'night shift off at 4am, needed 6:30am: driven before 7am');
+  r = planFloat([trip('2026-11-14 07:00', '2026-11-14 12:00')], { ...cd, avoidWeekend: false }, tr, {}).runs[0];
+  ok(!r.curfew && r.depart < t('2026-11-14 09:00'), 'Saturday: no curfew, so it goes before 9am');
+  r = planFloat([trip('2026-11-10 07:00', '2026-11-10 09:00')], cd, tr, {}).runs[0];
+  ok(r.curfew && !r.late, 'only possible in the curfew (free 7am, needed by 9am): planned on time, and marked');
+  r = planFloat([trip('2026-11-10 07:00', '2026-11-10 15:00')], { ...cd, curfew: false }, tr, {}).runs[0];
+  ok(!r.curfew, 'curfew switched off: not checked');
 }
 console.log(fails ? `${fails} FAILED` : 'ALL FLOAT TESTS PASSED'); process.exit(fails ? 1 : 0);
