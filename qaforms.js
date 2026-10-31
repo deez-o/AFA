@@ -388,9 +388,9 @@ function LayingEditor({f}){
     </div>
     ${err&&html`<div id="qa-lay-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
     ${f.canEdit&&html`<div class="flex flex-wrap items-center gap-2">
-      <label class=${'btn btn-primary '+(canAdd&&open<0?'cursor-pointer':'opacity-50 pointer-events-none')} style=${{height:42}} id="qa-lay-scan">${busy||html`${Icon.plus} Scan docket`}
-        <input ref=${fileRef} id="qa-lay-file" type="file" accept="image/*" capture="environment" class="sr-only" disabled=${!(canAdd&&open<0)} onChange=${e=>{const fl=e.target.files&&e.target.files[0];e.target.value='';scan(fl)}}/></label>
-      <button id="qa-lay-add" type="button" class="btn" style=${{height:42}} disabled=${!(canAdd&&open<0)} onClick=${()=>addRow(layRow())}>Add without scanning</button>
+      ${/* docket scanning is switched off while it's being improved: dockets are typed in */''}
+      <span class="btn opacity-50 pointer-events-none select-none" style=${{height:42}} id="qa-lay-scan" aria-disabled="true" title="Docket scanning is under construction">${Icon.plus} Scan docket <span class="text-[10.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style=${{background:'hsl(38 95% 50% / .2)',color:'hsl(30 90% 32%)'}}>Under construction</span></span>
+      <button id="qa-lay-add" type="button" class="btn btn-primary" style=${{height:42}} disabled=${!(canAdd&&open<0)} onClick=${()=>addRow(layRow())}>${Icon.plus} Add docket</button>
       ${blocker>=0&&open<0&&html`<span class="text-[12px]" style=${{color:'hsl(30 90% 38%)'}}>Finish load ${blocker+1} (${blank(rows[blocker].temp)?'temperature':'docket and tonnes'}) before adding another.</span>`}</div>`}
     <div class="text-[13.5px] font-semibold" id="qa-lay-total">Total: ${fmt2((tot))} t</div><//>`;
 }
