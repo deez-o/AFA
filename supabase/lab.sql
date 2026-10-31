@@ -88,3 +88,34 @@ begin
     alter publication supabase_realtime add table public.lab_reports;
   end if;
 end $$;
+
+-- a shift the lab has finished with (asphalt report and core report in): it moves to Complete in Lab
+create table if not exists public.lab_done (
+  job_id     text not null,
+  shift_date date not null,
+  done_at    timestamptz not null default now(),
+  done_by    uuid default auth.uid(),
+  done_name  text,
+  primary key (job_id, shift_date)
+);
+create or replace function public.lab_done_rules()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.lab_reports where job_id = new.job_id and shift_date = new.shift_date and kind = 'asphalt')
+     or not exists (select 1 from public.lab_reports where job_id = new.job_id and shift_date = new.shift_date and kind = 'core') then
+    raise exception 'A shift is done once it has an asphalt report and a core report' using errcode = '22023';
+  end if;
+  new.done_at = now();
+  if auth.uid() is not null then new.done_by = auth.uid(); new.done_name = public.my_name(); end if;
+  return new;
+end; $$;
+drop trigger if exists lab_done_rules on public.lab_done;
+create trigger lab_done_rules before insert on public.lab_done for each row execute function public.lab_done_rules();
+alter table public.lab_done enable row level security;
+grant select, insert, delete on public.lab_done to authenticated;
+drop policy if exists "lab and office read" on public.lab_done;
+create policy "lab and office read" on public.lab_done for select to authenticated using (public.lab_can_see());
+drop policy if exists "lab marks done" on public.lab_done;
+create policy "lab marks done" on public.lab_done for insert to authenticated with check (public.lab_can_upload());
+drop policy if exists "lab reopens" on public.lab_done;
+create policy "lab reopens" on public.lab_done for delete to authenticated using (public.lab_can_upload());
