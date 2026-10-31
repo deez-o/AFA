@@ -7,6 +7,7 @@ const AREAS=[
   {mod:'Schedule',items:[['schedule','Schedule board','See the crews’ schedule; change: make, move and edit bookings'],['schedule.settings','Settings','Crews, plant, mixes, seal lists, trucks and subbies'],['schedule.exports','Exports & daily program','Excel, PDFs and the daily program',1],['schedule.forecast','Forecast','The tonnes forecast',1]]},
   {mod:'Projects',items:[['jobs','Projects','See projects and their bookings; change: add, edit, complete and delete projects'],['jobs.paperwork','Paperwork','QA PDFs and reports; change: upload documents'],['jobs.pictures','Pictures','See pictures; change: add and relabel their own'],['jobs.manage','Remove anyone’s paperwork and pictures','',2]]},
   {mod:'Planning',items:[['planning','Job planning','See plans; change: make plans and send them to the schedule']]},
+  {mod:'Floats',items:[['floats','Floats','See the float’s moves and run sheet; change: pick-up times, ticking off and float settings']]},
   {mod:'Staff & leave',items:[['staff.leave','Leave calendar','See leave; change: put leave straight on the calendar'],['staff.request','Request leave for anyone','Goes to an approver first',2],['staff.approve','Approve or decline leave','',2],['staff.myleave','Own leave form','A form for their own leave (instead of the calendar)',2],['staff.people','People','The staff list; change: add and edit staff members'],['staff.logins','Logins','Create logins, reset passwords, set roles',2]]},
   {mod:'Fleet & Maintenance',items:[['fleet','Fleet','The Fleet section and dashboard',1],['fleet.machines','Machines','See machines; change: add, edit and delete them'],['fleet.calendar','Machine calendar','See where machines are; change: book them'],['fleet.workorders','Work orders, services, readings & defects','See them; change: raise, update and complete'],['fleet.verify','Verify & close','Verify work orders and defects, restrict machines',2],['fleet.manage','Fleet admin','Service plans, checklists, corrections, deleting readings and finished work orders, ServiceM8',2],['fleet.reports','Reports','Fleet reports',1]]},
   {mod:'Prestarts',items:[['prestarts','Prestarts','Do prestarts on the phone',2]]},
@@ -18,10 +19,10 @@ const AREA_KEYS=AREAS.flatMap(m=>m.items.map(i=>i[0]));
 const P=o=>o;
 const DEFAULT_ROLES=[
   {key:'admin',label:'Admin',description:'Everything, always. Only the administrator manages roles.',built_in:true,sort:0,perms:{},opts:{}},
-  {key:'superuser',label:'Superuser',description:'Everything except Ideas and managing roles.',built_in:true,sort:10,perms:P({schedule:2,'schedule.settings':2,'schedule.exports':2,'schedule.forecast':2,jobs:2,'jobs.paperwork':2,'jobs.pictures':2,'jobs.manage':2,planning:2,'staff.leave':2,'staff.request':2,'staff.approve':2,'staff.people':2,'staff.logins':2,fleet:2,'fleet.machines':2,'fleet.calendar':2,'fleet.workorders':2,'fleet.verify':2,'fleet.manage':2,'fleet.reports':1,prestarts:2,qa:2,'qa.fill':2,'qa.manage':2,'qa.all':1,lab:1,'lab.upload':2,'lab.manage':2,notify:1}),opts:{}},
-  {key:'planner',label:'Planner',description:'Plans and books the work; sees Fleet.',built_in:true,sort:20,perms:P({schedule:2,'schedule.settings':2,'schedule.exports':2,'schedule.forecast':2,jobs:2,'jobs.paperwork':2,'jobs.pictures':2,planning:2,'staff.leave':2,'staff.request':2,'staff.people':2,fleet:1,'fleet.machines':2,'fleet.calendar':2,'fleet.workorders':1,'fleet.reports':1,prestarts:2,qa:2,'qa.fill':2,'qa.all':1,lab:1,'lab.upload':2,notify:1}),opts:{}},
+  {key:'superuser',label:'Superuser',description:'Everything except Ideas and managing roles.',built_in:true,sort:10,perms:P({floats:2,schedule:2,'schedule.settings':2,'schedule.exports':2,'schedule.forecast':2,jobs:2,'jobs.paperwork':2,'jobs.pictures':2,'jobs.manage':2,planning:2,'staff.leave':2,'staff.request':2,'staff.approve':2,'staff.people':2,'staff.logins':2,fleet:2,'fleet.machines':2,'fleet.calendar':2,'fleet.workorders':2,'fleet.verify':2,'fleet.manage':2,'fleet.reports':1,prestarts:2,qa:2,'qa.fill':2,'qa.manage':2,'qa.all':1,lab:1,'lab.upload':2,'lab.manage':2,notify:1}),opts:{}},
+  {key:'planner',label:'Planner',description:'Plans and books the work; sees Fleet.',built_in:true,sort:20,perms:P({floats:2,schedule:2,'schedule.settings':2,'schedule.exports':2,'schedule.forecast':2,jobs:2,'jobs.paperwork':2,'jobs.pictures':2,planning:2,'staff.leave':2,'staff.request':2,'staff.people':2,fleet:1,'fleet.machines':2,'fleet.calendar':2,'fleet.workorders':1,'fleet.reports':1,prestarts:2,qa:2,'qa.fill':2,'qa.all':1,lab:1,'lab.upload':2,notify:1}),opts:{}},
   {key:'supervisor',label:'Supervisor',description:'On site: the crews’ schedule, jobs and pictures, leave, prestarts and QA.',built_in:true,sort:30,perms:P({schedule:1,jobs:1,'jobs.paperwork':1,'jobs.pictures':2,'staff.leave':1,'staff.request':2,'fleet.workorders':2,'fleet.verify':2,prestarts:2,qa:2,'qa.fill':2,lab:1}),opts:{simple:true}},
-  {key:'mechanic',label:'Mechanic',description:'Fleet & Maintenance in full; the schedule to look at.',built_in:true,sort:40,perms:P({schedule:1,jobs:1,planning:1,'staff.leave':1,'staff.people':1,fleet:2,'fleet.machines':1,'fleet.calendar':1,'fleet.workorders':2,'fleet.verify':2,'fleet.manage':2,'fleet.reports':1,prestarts:2,notify:1}),opts:{}},
+  {key:'mechanic',label:'Mechanic',description:'Fleet & Maintenance in full; the schedule to look at.',built_in:true,sort:40,perms:P({floats:1,schedule:1,jobs:1,planning:1,'staff.leave':1,'staff.people':1,fleet:2,'fleet.machines':1,'fleet.calendar':1,'fleet.workorders':2,'fleet.verify':2,'fleet.manage':2,'fleet.reports':1,prestarts:2,notify:1}),opts:{}},
   {key:'prestart',label:'Prestart (operator)',description:'Prestarts on their phone, signing QA, and their own leave.',built_in:true,sort:50,perms:P({prestarts:2,qa:1,'staff.myleave':2}),opts:{home:'prestarts',app_only:true}},
   {key:'lab',label:'Lab',description:'The Lab screen: reports and QA for each shift.',built_in:true,sort:60,perms:P({lab:1,'lab.upload':2}),opts:{home:'lab'}},
   {key:'viewer',label:'Viewer',description:'Looks at the schedule, jobs, plans and leave.',built_in:true,sort:70,perms:P({schedule:1,jobs:1,planning:1,'staff.leave':1,'staff.people':1,notify:1}),opts:{}}];
@@ -31,7 +32,7 @@ const setMyRole=(role,roles)=>{FF_ROLES=roles&&roles.length?roles:DEFAULT_ROLES;
 const can=(area,lvl=1)=>FF_PERM.role==='admin'||((FF_PERM.perms||{})[area]||0)>=lvl;
 const roleOpt=k=>(FF_PERM.opts||{})[k];
 const roleLabel=k=>(FF_ROLES.find(r=>r.key===k)||DEFAULT_ROLES.find(r=>r.key===k)||{label:k}).label;
-const canRoster=()=>['schedule','schedule.settings','jobs','planning','fleet.machines','fleet.calendar','staff.people','staff.leave','staff.approve','ideas'].some(a=>can(a,2));
+const canRoster=()=>['schedule','schedule.settings','jobs','planning','floats','fleet.machines','fleet.calendar','staff.people','staff.leave','staff.approve','ideas'].some(a=>can(a,2));
 window.ffCan=can;window.ffRoleOpt=roleOpt;
 
 /* ---------- dates ---------- */
@@ -2907,6 +2908,16 @@ function loadMaint(){
   maintLoading=(window.FleetScreen?Promise.resolve():one('maint.js')).then(()=>window.PrestartScreen?null:one('prestart.js')).then(()=>window.FFD?null:one('defects.js')).then(()=>window.FFR?null:one('reports.js')).then(()=>window.QaScreen?null:one('qa.js')).then(()=>window.FFQF?null:one('qaforms.js')).then(()=>window.LabScreen?null:one('lab.js')).catch(e=>{maintLoading=null;throw e});
   return maintLoading;
 }
+/* Floats: its own file, loaded the first time the screen opens */
+let floatsLoading=null;
+function LazyFloats(props){
+  const [ok,setOk]=useState(!!window.FloatsScreen);const [err,setErr]=useState('');
+  useEffect(()=>{if(ok)return;const v=((document.querySelector('script[src*="/app.js"]')||{}).src||'').split('?v=')[1]||Date.now();
+    floatsLoading=floatsLoading||new Promise((res,rej)=>{const s=document.createElement('script');s.src='/floats.js?v='+v;s.onload=res;s.onerror=()=>{floatsLoading=null;rej()};document.body.appendChild(s)});
+    floatsLoading.then(()=>setOk(true),()=>setErr('Couldn’t load Floats. Check the connection and reload.'))},[]);
+  if(err)return html`<div class="panel p-6 text-[13px]" style=${{color:'var(--bad)'}}>${err}</div>`;
+  if(!ok||!window.FloatsScreen)return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;
+  return html`<${window.FloatsScreen} ...${props}/>`}
 function LazyFleet(props){
   const comp=props.comp||'FleetScreen';
   const [ok,setOk]=useState(!!(window.FleetScreen&&window.PrestartScreen&&window.FFD&&window.FFR&&window.QaScreen&&window.FFQF&&window.LabScreen));const [err,setErr]=useState('');
@@ -2920,10 +2931,10 @@ function LazyFleet(props){
 const PREVIEW_DEFAULT=['fleet','prestarts','qa','lab'];
 const previewKeys=()=>Object.keys(SCREENS).filter(k=>SCREENS[k].preview);
 /* a feature added after the admin last changed these switches starts out in progress too */
-const previewOf=d=>{if(!d||!Array.isArray(d.previewOnly))return PREVIEW_DEFAULT;const known=Array.isArray(d.previewKnown)?d.previewKnown:['fleet'];
+const previewOf=d=>{if(!d||!Array.isArray(d.previewOnly))return [...new Set([...PREVIEW_DEFAULT,...previewKeys()])];const known=Array.isArray(d.previewKnown)?d.previewKnown:['fleet'];
   return [...d.previewOnly,...previewKeys().filter(k=>!known.includes(k)&&!d.previewOnly.includes(k))]};
 /* which areas open each screen (Admin › Roles) */
-const SCREEN_AREAS={schedule:['schedule'],jobs:['jobs'],planning:['planning'],staff:['staff.leave','staff.people','staff.myleave'],fleet:['fleet'],prestarts:['prestarts'],qa:['qa'],lab:['lab'],ideas:['ideas'],admin:[]};
+const SCREEN_AREAS={schedule:['schedule'],jobs:['jobs'],planning:['planning'],floats:['floats'],staff:['staff.leave','staff.people','staff.myleave'],fleet:['fleet'],prestarts:['prestarts'],qa:['qa'],lab:['lab'],ideas:['ideas'],admin:[]};
 const screenOK0=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;
   if(k==='admin')return FF_PERM.role==='admin';
   return (SCREEN_AREAS[k]||[]).some(a=>can(a,1))&&(!s.preview||FF_PERM.role==='admin'||!previewOf(d).includes(k))};
@@ -2940,6 +2951,7 @@ const SCREENS={
   schedule:{label:'Schedule',title:'Schedule',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   jobs:{label:'Projects',title:'Projects',only:[],legend:[],head:''},
   planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
+  floats:{label:'Floats',title:'Floats',only:[],legend:[],head:'',preview:true},   /* moving machines between jobs on the float (floats.js) */
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
   fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',tab:'machine'},   /* maintenance: not for operators or viewers */
@@ -2952,6 +2964,7 @@ const SCREENS={
 /* only their own leave form: the menu says "Leave" */
 const staffIsLeave=()=>!can('staff.leave',1)&&!can('staff.people',1)&&can('staff.myleave',1);
 const NAV_ICON={
+  floats:svg(html`<path d="M1.5 11.5h13M3 11.5V9.5h7.5l2 2" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/><path d="M4.5 9.5V6.5h3.5l1.2 3" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/><circle cx="4" cy="13" r="1.2" stroke="currentColor" stroke-width="1.2"/><circle cx="11.5" cy="13" r="1.2" stroke="currentColor" stroke-width="1.2"/>`),
   admin:svg(html`<circle cx="8" cy="5.2" r="2.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M2.8 14.2c.4-2.7 2.6-4.4 5.2-4.4s4.8 1.7 5.2 4.4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M12.6 2.2l.5 1 1.1.2-.8.8.2 1.1-1-.5-1 .5.2-1.1-.8-.8 1.1-.2z" fill="currentColor"/>`,20),
   lab:svg(html`<path d="M6.2 1.8h3.6M6.8 1.8v4.4L3 12.6c-.5.9.1 1.9 1.1 1.9h7.8c1 0 1.6-1 1.1-1.9L9.2 6.2V1.8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round" stroke-linecap="round"/><path d="M4.6 10h6.8" stroke="currentColor" stroke-width="1.5"/>`,20),
   qa:svg(html`<path d="M8 1.6l5 2v4.1c0 3.2-2.1 5.6-5 6.7-2.9-1.1-5-3.5-5-6.7V3.6z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M5.6 8l1.7 1.7 3.2-3.4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,20),
@@ -5608,7 +5621,7 @@ function App({boot,live}){
   const setFleetTab=v=>{setFleetTab0(v);try{localStorage.setItem(KEY+':fleet-tab',v)}catch(e){}};
   const [fleetCounts,setFleetCounts]=useState({});const [fleetAsset,setFleetAsset]=useState(null);
   const fleetCal=screen==='fleet'&&fleetTab==='cal';
-  const boardScreen=screen!=='planning'&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='lab'&&screen!=='admin'&&!peopleView&&!myLeaveView;   /* the date controls and + Booking belong to the board screens */
+  const boardScreen=screen!=='planning'&&screen!=='floats'&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='lab'&&screen!=='admin'&&!peopleView&&!myLeaveView;   /* the date controls and + Booking belong to the board screens */
   const goScreen=k=>{setScreen(k);try{localStorage.setItem(KEY+':screen',k)}catch(e){}
     const t=SCREENS[k].tab;if(t)setTab(t);else if(tab==='person'||tab==='machine')setTab('crew')};
   useEffect(()=>{const t=SCREENS[screen].tab;if(t&&tab!==t)setTab(t);else if(!t&&(tab==='person'||tab==='machine'))setTab('crew')},[screen,tab]);
@@ -5791,7 +5804,7 @@ function App({boot,live}){
       ${leaveDlg&&html`<${LeaveDialog} data=${data} setData=${setData} notify=${setToast} personId=${leaveDlg.personId} start=${leaveDlg.start} end=${leaveDlg.end} request=${leaveReqOnly?sendLeave:null} onClose=${()=>setLeaveDlg(null)}/>`}
       ${leaveReq&&html`<${LeaveRequestDialog} key=${leaveReq.id} r=${leaveReq} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onClose=${()=>setLeaveReq(null)}/>`}
       ${screen==='staff'&&!peopleView&&!myLeaveView&&html`<${LeaveRequests} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onOpen=${setLeaveReq}/>`}
-      ${myLeaveView?html`<${MyLeave} live=${live} data=${data} LR=${LR} notify=${setToast}/>`:peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:(screen==='fleet'&&!fleetCal)||screen==='prestarts'||screen==='qa'||screen==='lab'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':screen==='qa'?'QaScreen':screen==='lab'?'LabScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast} setData=${setData} tab=${fleetTab} onCounts=${setFleetCounts} assetReq=${fleetAsset} onImportMachines=${()=>setMachImport(true)}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='admin'?html`<${AdminScreen} live=${live} data=${data} notify=${setToast}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
+      ${myLeaveView?html`<${MyLeave} live=${live} data=${data} LR=${LR} notify=${setToast}/>`:peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:(screen==='fleet'&&!fleetCal)||screen==='prestarts'||screen==='qa'||screen==='lab'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':screen==='qa'?'QaScreen':screen==='lab'?'LabScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast} setData=${setData} tab=${fleetTab} onCounts=${setFleetCounts} assetReq=${fleetAsset} onImportMachines=${()=>setMachImport(true)}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='admin'?html`<${AdminScreen} live=${live} data=${data} notify=${setToast}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='floats'?html`<${LazyFloats} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
       ${screen==='staff'?(()=>{const L=leaveStats(data);return html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3" id="leave-stats">
         <${Stat} k="Away today" v=${L.today.length} sub=${L.today.length?L.today.map(x=>`${x.p.name.split(' ')[0]} (back ${fmtShort(addDays(parse(x.b.end),1))})`).join(', '):'everyone in'} tone=${L.today.length?'var(--warn)':null}/>
         <${Stat} k="Away this week" v=${L.week.length} sub=${L.week.length?`${L.weekDays} staff-day${L.weekDays===1?'':'s'} · ${L.week.map(p=>p.name.split(' ')[0]).join(', ')}`:'no leave this week'}/>
@@ -5853,7 +5866,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion'],['ideas','idea'],['plans','plan'],['planImgs','plan_img']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','fleetTruckHide','fleetTruckShow','machineCats','ideasVault','ideasPub','previewOnly','previewKnown','planQuick','planSteps'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','fleetTruckHide','fleetTruckShow','machineCats','ideasVault','ideasPub','previewOnly','previewKnown','planQuick','planSteps','floatCfg','floatPlan','floatGeo'];
 const LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};

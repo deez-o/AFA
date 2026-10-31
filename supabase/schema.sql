@@ -140,14 +140,19 @@ create table if not exists public.roles (
 -- the starting roles: the same access as before roles could be changed
 insert into public.roles (key, label, description, built_in, sort, perms, opts) values
  ('admin','Admin','Everything, always. Only the administrator manages roles.',true,0,'{}'::jsonb,'{}'::jsonb),
- ('superuser','Superuser','Everything except Ideas and managing roles.',true,10,'{"schedule":2,"schedule.settings":2,"schedule.exports":2,"schedule.forecast":2,"jobs":2,"jobs.paperwork":2,"jobs.pictures":2,"jobs.manage":2,"planning":2,"staff.leave":2,"staff.request":2,"staff.approve":2,"staff.people":2,"staff.logins":2,"fleet":2,"fleet.machines":2,"fleet.calendar":2,"fleet.workorders":2,"fleet.verify":2,"fleet.manage":2,"fleet.reports":1,"prestarts":2,"qa":2,"qa.fill":2,"qa.manage":2,"qa.all":1,"lab":1,"lab.upload":2,"lab.manage":2,"notify":1}'::jsonb,'{}'::jsonb),
- ('planner','Planner','Plans and books the work; sees Fleet.',true,20,'{"schedule":2,"schedule.settings":2,"schedule.exports":2,"schedule.forecast":2,"jobs":2,"jobs.paperwork":2,"jobs.pictures":2,"planning":2,"staff.leave":2,"staff.request":2,"staff.people":2,"fleet":1,"fleet.machines":2,"fleet.calendar":2,"fleet.workorders":1,"fleet.reports":1,"prestarts":2,"qa":2,"qa.fill":2,"qa.all":1,"lab":1,"lab.upload":2,"notify":1}'::jsonb,'{}'::jsonb),
+ ('superuser','Superuser','Everything except Ideas and managing roles.',true,10,'{"floats":2,"schedule":2,"schedule.settings":2,"schedule.exports":2,"schedule.forecast":2,"jobs":2,"jobs.paperwork":2,"jobs.pictures":2,"jobs.manage":2,"planning":2,"staff.leave":2,"staff.request":2,"staff.approve":2,"staff.people":2,"staff.logins":2,"fleet":2,"fleet.machines":2,"fleet.calendar":2,"fleet.workorders":2,"fleet.verify":2,"fleet.manage":2,"fleet.reports":1,"prestarts":2,"qa":2,"qa.fill":2,"qa.manage":2,"qa.all":1,"lab":1,"lab.upload":2,"lab.manage":2,"notify":1}'::jsonb,'{}'::jsonb),
+ ('planner','Planner','Plans and books the work; sees Fleet.',true,20,'{"floats":2,"schedule":2,"schedule.settings":2,"schedule.exports":2,"schedule.forecast":2,"jobs":2,"jobs.paperwork":2,"jobs.pictures":2,"planning":2,"staff.leave":2,"staff.request":2,"staff.people":2,"fleet":1,"fleet.machines":2,"fleet.calendar":2,"fleet.workorders":1,"fleet.reports":1,"prestarts":2,"qa":2,"qa.fill":2,"qa.all":1,"lab":1,"lab.upload":2,"notify":1}'::jsonb,'{}'::jsonb),
  ('supervisor','Supervisor','On site: the crews’ schedule, jobs and pictures, leave, prestarts and QA.',true,30,'{"schedule":1,"jobs":1,"jobs.paperwork":1,"jobs.pictures":2,"staff.leave":1,"staff.request":2,"fleet.workorders":2,"fleet.verify":2,"prestarts":2,"qa":2,"qa.fill":2,"lab":1}'::jsonb,'{"simple":true}'::jsonb),
- ('mechanic','Mechanic','Fleet & Maintenance in full; the schedule to look at.',true,40,'{"schedule":1,"jobs":1,"planning":1,"staff.leave":1,"staff.people":1,"fleet":2,"fleet.machines":1,"fleet.calendar":1,"fleet.workorders":2,"fleet.verify":2,"fleet.manage":2,"fleet.reports":1,"prestarts":2,"notify":1}'::jsonb,'{}'::jsonb),
+ ('mechanic','Mechanic','Fleet & Maintenance in full; the schedule to look at.',true,40,'{"floats":1,"schedule":1,"jobs":1,"planning":1,"staff.leave":1,"staff.people":1,"fleet":2,"fleet.machines":1,"fleet.calendar":1,"fleet.workorders":2,"fleet.verify":2,"fleet.manage":2,"fleet.reports":1,"prestarts":2,"notify":1}'::jsonb,'{}'::jsonb),
  ('prestart','Prestart (operator)','Prestarts on their phone, signing QA, and their own leave.',true,50,'{"prestarts":2,"qa":1,"staff.myleave":2}'::jsonb,'{"home":"prestarts","app_only":true}'::jsonb),
  ('lab','Lab','The Lab screen: reports and QA for each shift.',true,60,'{"lab":1,"lab.upload":2}'::jsonb,'{"home":"lab"}'::jsonb),
  ('viewer','Viewer','Looks at the schedule, jobs, plans and leave.',true,70,'{"schedule":1,"jobs":1,"planning":1,"staff.leave":1,"staff.people":1,"notify":1}'::jsonb,'{}'::jsonb)
 on conflict (key) do nothing;
+
+-- Floats (added later): the built-in roles get it once; your own changes to it are kept after that
+update public.roles set perms = perms || '{"floats":2}'::jsonb where key in ('superuser','planner') and not (perms ? 'floats') and not (opts ? 'floats_added');
+update public.roles set perms = perms || '{"floats":1}'::jsonb where key = 'mechanic' and not (perms ? 'floats') and not (opts ? 'floats_added');
+update public.roles set opts = opts || '{"floats_added":true}'::jsonb where key in ('superuser','planner','mechanic') and not (opts ? 'floats_added');
 
 -- can the signed-in person do this?  can('qa.fill', 2) = can change; can('qa', 1) = can see
 create or replace function public.can(area text, lvl int default 1)
@@ -248,7 +253,7 @@ returns boolean language sql stable security definer set search_path = public as
     when k = 'job' then public.can('jobs', 2) or public.can('schedule', 2) or public.can('planning', 2)
     when k in ('plan','plan_img') then public.can('planning', 2)
     when k = 'resource' then public.can('schedule.settings', 2) or public.can('fleet.machines', 2) or public.can('staff.people', 2)
-    when k = 'setting' then public.can('schedule.settings', 2) or public.can('fleet.machines', 2) or public.can('planning', 2) or public.can('ideas', 2)
+    when k = 'setting' then public.can('schedule.settings', 2) or public.can('fleet.machines', 2) or public.can('planning', 2) or public.can('ideas', 2) or public.can('floats', 2)
     else public.can('schedule', 2) or public.can('schedule.settings', 2) or public.can('jobs', 2) or public.can('planning', 2)
       or public.can('fleet.machines', 2) or public.can('fleet.calendar', 2) or public.can('staff.people', 2) or public.can('staff.leave', 2) or public.can('staff.approve', 2) end
 $$;
