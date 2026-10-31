@@ -49,8 +49,11 @@ function send(res, status, body) {
 function sendText(res, status, text) { res.statusCode = status; res.setHeader('Content-Type', 'text/plain'); res.end(text); }
 function redirect(res, to) { res.statusCode = 302; res.setHeader('Location', to); res.end(); }
 async function readBody(req) {
-  if (req.body && typeof req.body === 'object') return req.body;
-  let raw = typeof req.body === 'string' ? req.body : null;
+  if (req._ffBody) return req._ffBody;   // already read once
+  let parsed;
+  try { parsed = req.body; } catch (e) { return { _unreadable: errText(e) }; }   // Vercel's parser can throw on an odd body
+  if (parsed && typeof parsed === 'object' && !Buffer.isBuffer(parsed)) return parsed;
+  let raw = typeof parsed === 'string' ? parsed : Buffer.isBuffer(parsed) ? parsed.toString('utf8') : null;
   if (raw == null) { const chunks = []; for await (const c of req) chunks.push(c); raw = Buffer.concat(chunks).toString('utf8'); }
   raw = raw || '';
   try { return JSON.parse(raw || '{}'); } catch (e) { return Object.fromEntries(new URLSearchParams(raw)); }
@@ -83,6 +86,7 @@ function database(env, http) {
     one: async path => ((await go(path)) || [])[0] || null,
     patch: (path, body) => go(path, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(body) }),
     rpc: (fn, args) => go('rpc/' + fn, { method: 'POST', body: JSON.stringify(args) }),
+    post: (path, body) => go(path, { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(body) }),
   };
 }
 
@@ -332,6 +336,16 @@ async function handler(req, res, env = process.env, http = fetch) {
   const D = database(env, http);
   const Q = queryOf(req);
 
+  // 0. ServiceM8's address check can also arrive at the add-on's own Callback URL (no key there): answer it anywhere
+  if (!req.headers.authorization && Q.hook == null && !/servicem8-hook/.test(String(req.url || '')) && !(req.method === 'GET' && (Q.action === 'callback' || Q.cron != null))) {
+    const b = req.method === 'POST' ? (req._ffBody = await readBody(req)) : {};
+    const challenge = b.challenge || b['hub.challenge'] || Q.challenge || Q['hub.challenge'];
+    await D.post('maintenance_audit', { tbl: 'servicem8_hook', action: 'call', new: { method: req.method, type: String(req.headers['content-type'] || ''), keyOk: false,
+      keyExtra: 'at ' + String(req.url || '').split('?')[0], query: Q, body: JSON.stringify(b).slice(0, 600), answered: 200, reply: challenge ? String(challenge).slice(0, 100) : 'ok' } }).catch(() => null);
+    if (challenge) return sendText(res, 200, String(challenge));
+    if (req.method === 'POST' && (b.object || b.entry || b.eventName || b.event)) return sendText(res, 200, 'ok');   // an event sent to the add-on address: acknowledged
+  }
+
   // 1. ServiceM8 reporting a change to a job (the key is in the path: /api/servicem8-hook/<key>, see vercel.json)
   const hookKey = Q.hook != null ? Q.hook : (String(req.url || '').match(/\/servicem8-hook\/([0-9a-f]+)/i) || [])[1];
   if (hookKey != null) {
@@ -339,12 +353,20 @@ async function handler(req, res, env = process.env, http = fetch) {
     const key = (sec && sec.webhook_key) || '';
     const given = String(hookKey).match(/^[0-9a-f]*/i)[0];   // ignore anything ServiceM8 tacks on after the key
     const h = v => crypto.createHash('sha256').update(String(v)).digest();
-    if (!key || !crypto.timingSafeEqual(h(given), h(key))) return sendText(res, 403, 'Unknown');
-    // the check when subscribing: answer with the challenge, however it is sent (query or body, GET or POST)
     const b = req.method === 'POST' ? await readBody(req) : {};
-    const challenge = b.challenge || Q.challenge || (String(hookKey).match(/challenge=([^&]+)/) || [])[1];
-    if (challenge && !b.object) return sendText(res, 200, decodeURIComponent(String(challenge)));
-    if (req.method !== 'POST') return sendText(res, 200, 'ok');
+    // what ServiceM8 sent, for working out setup problems (kept in the maintenance audit log, without the key)
+    const seen = { method: req.method, type: String(req.headers['content-type'] || ''), keyOk: !!key && crypto.timingSafeEqual(h(given), h(key)),
+      keyExtra: String(hookKey).slice(given.length).slice(0, 200), query: Object.fromEntries(Object.entries(Q).filter(([k]) => k !== 'hook')),
+      body: JSON.stringify(b).slice(0, 600) };
+    const answer = async (status, text) => {
+      if (status !== 200 || !b.object) await D.post('maintenance_audit', { tbl: 'servicem8_hook', action: 'call', new: { ...seen, answered: status, reply: String(text).slice(0, 100) } }).catch(() => null);
+      return sendText(res, status, text);
+    };
+    if (!seen.keyOk) return answer(403, 'Unknown');
+    // the check when subscribing: answer with the challenge, however it is sent (query or body, GET or POST)
+    const challenge = b.challenge || b.Challenge || b['hub.challenge'] || Q.challenge || Q['hub.challenge'] || (String(hookKey).match(/challenge=([^&]+)/) || [])[1];
+    if (challenge && !b.object) return answer(200, decodeURIComponent(String(challenge)));
+    if (req.method !== 'POST' || !b.object) return answer(200, 'ok');
     if (b.object !== 'job') return sendText(res, 200, 'ignored');
     const ids = (Array.isArray(b.entry) ? b.entry : []).map(e => e && e.uuid).filter(safeId);
     if (!ids.length) return sendText(res, 200, 'ok');
@@ -440,7 +462,15 @@ async function handler(req, res, env = process.env, http = fetch) {
       if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`ServiceM8 ${r.status}: ${t.slice(0, 200)}`); }
     };
     let hooks = 'full';
-    try { await hook(HOOK_FIELDS); } catch (e) { hooks = 'basic'; await hook(HOOK_FIELDS_MIN); }
+    const started = new Date(Date.now() - 2000).toISOString();
+    try {
+      try { await hook(HOOK_FIELDS); } catch (e) { hooks = 'basic'; await hook(HOOK_FIELDS_MIN); }
+    } catch (e) {
+      const calls = await D.get(`maintenance_audit?tbl=eq.servicem8_hook&at=gt.${q(started)}&select=new&order=at.desc&limit=3`).catch(() => []);
+      const what = (calls || []).map(c => { const n = c.new || {}; return `${n.method} ${n.type || '(no type)'}${n.keyOk ? '' : ' KEY NOT RECOGNISED'}${n.keyExtra ? ' extra after key: ' + n.keyExtra : ''} query ${JSON.stringify(n.query)} body ${n.body} → answered ${n.answered} "${n.reply}"`; });
+      throw new Error(errText(e) + ' | ' + (what.length ? 'What ServiceM8 sent: ' + what.join(' || ')
+        : `ServiceM8's check never reached FraserFlow at ${origin(req, env)}/api/servicem8-hook/… (is the site behind Vercel Deployment Protection?)`));
+    }
     await D.patch('servicem8_settings?id=eq.1', { hooks_on_at: new Date().toISOString() });
     return send(res, 200, { company_uuid: company, hooks });
   }

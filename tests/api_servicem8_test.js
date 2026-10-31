@@ -170,6 +170,8 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   ok(r.statusCode === 200 && r.raw === 'c08f57bd', 'ServiceM8’s challenge is answered (tacked onto the address after the key)');
   r = await call({ method: 'POST', query: { hook: key }, body: { challenge: 'zz9' } });
   ok(r.statusCode === 200 && r.raw === 'zz9', 'ServiceM8’s challenge is answered (no mode given)');
+  r = await call({ method: 'POST', query: {}, body: { mode: 'subscribe', challenge: 'addon1' }, url: '/api/servicem8' });
+  ok(r.statusCode === 200 && r.raw === 'addon1', 'the check is answered at the add-on’s own address too (no key)');
   r = await call({ method: 'POST', headers: {}, query: {}, body: { challenge: 'p1' }, url: '/api/servicem8-hook/' + key });
   ok(r.statusCode === 200 && r.raw === 'p1', 'the key can come in the path');
   sm8Calls.length = 0;
