@@ -56,7 +56,28 @@ async function readBody(req) {
   let raw = typeof parsed === 'string' ? parsed : Buffer.isBuffer(parsed) ? parsed.toString('utf8') : null;
   if (raw == null) { const chunks = []; for await (const c of req) chunks.push(c); raw = Buffer.concat(chunks).toString('utf8'); }
   raw = raw || '';
+  const type = String((req.headers && req.headers['content-type']) || '');
+  if (/multipart\/form-data/i.test(type)) return parseMultipart(raw, type);   // how ServiceM8 sends its address check
   try { return JSON.parse(raw || '{}'); } catch (e) { return Object.fromEntries(new URLSearchParams(raw)); }
+}
+// the text fields of a multipart/form-data body ({ mode: 'subscribe', challenge: '…' })
+function parseMultipart(raw, type) {
+  const m = type.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  const boundary = m ? (m[1] || m[2]).trim() : (raw.match(/^--([^\r\n]+)/) || [])[1];
+  const out = {};
+  if (!boundary) return out;
+  for (const part of raw.split('--' + boundary)) {
+    const i = part.indexOf('\r\n\r\n');
+    if (i < 0) continue;
+    const name = (part.slice(0, i).match(/name="([^"]*)"/i) || [])[1];
+    if (name == null) continue;
+    let v = part.slice(i + 4);
+    if (v.endsWith('\r\n')) v = v.slice(0, -2);
+    out[name] = v;
+  }
+  if (typeof out.data === 'string') { try { Object.assign(out, JSON.parse(out.data)); } catch (e) { /* not JSON */ } }
+  if (typeof out.entry === 'string') { try { out.entry = JSON.parse(out.entry); } catch (e) { /* not JSON */ } }
+  return out;
 }
 function queryOf(req) {
   if (req.query && typeof req.query === 'object') return req.query;
@@ -341,7 +362,7 @@ async function handler(req, res, env = process.env, http = fetch) {
     const b = req.method === 'POST' ? (req._ffBody = await readBody(req)) : {};
     const challenge = b.challenge || b['hub.challenge'] || Q.challenge || Q['hub.challenge'];
     await D.post('maintenance_audit', { tbl: 'servicem8_hook', action: 'call', new: { method: req.method, type: String(req.headers['content-type'] || ''), keyOk: false,
-      keyExtra: 'at ' + String(req.url || '').split('?')[0], query: Q, body: JSON.stringify(b).slice(0, 600), answered: 200, reply: challenge ? String(challenge).slice(0, 100) : 'ok' } }).catch(() => null);
+      keyExtra: 'at ' + String(req.url || '').split('?')[0], query: Object.fromEntries(Object.entries(Q).filter(([k]) => k !== 'hook' && k !== 'key')), body: JSON.stringify(b).slice(0, 600), answered: 200, reply: challenge ? String(challenge).slice(0, 100) : 'ok' } }).catch(() => null);
     if (challenge) return sendText(res, 200, String(challenge));
     if (req.method === 'POST' && (b.object || b.entry || b.eventName || b.event)) return sendText(res, 200, 'ok');   // an event sent to the add-on address: acknowledged
   }
@@ -356,7 +377,7 @@ async function handler(req, res, env = process.env, http = fetch) {
     const b = req.method === 'POST' ? await readBody(req) : {};
     // what ServiceM8 sent, for working out setup problems (kept in the maintenance audit log, without the key)
     const seen = { method: req.method, type: String(req.headers['content-type'] || ''), keyOk: !!key && crypto.timingSafeEqual(h(given), h(key)),
-      keyExtra: String(hookKey).slice(given.length).slice(0, 200), query: Object.fromEntries(Object.entries(Q).filter(([k]) => k !== 'hook')),
+      keyExtra: String(hookKey).slice(given.length).slice(0, 200), query: Object.fromEntries(Object.entries(Q).filter(([k]) => k !== 'hook' && k !== 'key')),
       body: JSON.stringify(b).slice(0, 600) };
     const answer = async (status, text) => {
       if (status !== 200 || !b.object) await D.post('maintenance_audit', { tbl: 'servicem8_hook', action: 'call', new: { ...seen, answered: status, reply: String(text).slice(0, 100) } }).catch(() => null);
@@ -454,8 +475,8 @@ async function handler(req, res, env = process.env, http = fetch) {
     if (!mgr) return send(res, 403, { error: 'Only administrators can do this.' });
     const company = await ensureCompany(D, S, cfg);
     const sec = await D.one('servicem8_secrets?id=eq.1&select=webhook_key');
-    let key = sec && sec.webhook_key;
-    if (!key) { key = crypto.randomBytes(24).toString('hex'); await D.patch('servicem8_secrets?id=eq.1', { webhook_key: key, updated_at: new Date().toISOString() }); }
+    const key = crypto.randomBytes(24).toString('hex');   // a fresh one each time it is set up
+    await D.patch('servicem8_secrets?id=eq.1', { webhook_key: key, updated_at: new Date().toISOString() });
     const hook = async fields => {
       const r = await http(SM8_HOOKS, { method: 'POST', headers: { ...A.headers, 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
         body: new URLSearchParams({ object: 'job', fields: fields.join(','), callback_url: origin(req, env) + '/api/servicem8-hook/' + key, unique_id: 'fraserflow' }).toString() });
