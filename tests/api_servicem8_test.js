@@ -121,6 +121,8 @@ async function http(url, o = {}) {
     let mm = path.match(/^\/job\/([^.]+)\.json$/);
     if (mm && m === 'GET') return db.jobs[mm[1]] ? json(200, db.jobs[mm[1]]) : json(404, {});
     if (mm && m === 'POST') { Object.assign(db.jobs[mm[1]], JSON.parse(o.body)); return json(200, {}); }
+    let ma = path.match(/^\/jobactivity\/([^.]+)\.json$/);
+    if (ma) return (db.activities || {})[ma[1]] ? json(200, db.activities[ma[1]]) : json(404, {});
     if (path.startsWith('/jobactivity.json')) return json(200, []);
     if (path.startsWith('/jobmaterial.json')) return json(200, []);
     if (path === '/note.json') return json(200, {});
@@ -195,6 +197,15 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   r = await call({ method: 'POST', query: { hook: 'ü'.repeat(24) }, body: {} });
   ok(r.statusCode === 403, 'an odd key (other characters, other length) is refused, not an error');
 
+  // a booking changed (reported as a job activity)
+  db.jobs[link.job_uuid].status = 'Work Order'; db.wos[0].status = 'open'; rpcCalls.length = 0; sm8Calls.length = 0;
+  db.activities = { '00000000-0000-0000-0000-0000000000b1': { uuid: '00000000-0000-0000-0000-0000000000b1', job_uuid: link.job_uuid }, '00000000-0000-0000-0000-0000000000b2': { uuid: '00000000-0000-0000-0000-0000000000b2', job_uuid: JOB_OTHER } };
+  r = await call({ method: 'POST', query: { hook: key }, body: { object: 'JobActivity', entry: [{ uuid: '00000000-0000-0000-0000-0000000000b1' }] } });
+  ok(r.statusCode === 200 && rpcCalls.length === 1 && rpcCalls[0].p_wo === WO1, 'a booking made in ServiceM8 refreshes its work order');
+  rpcCalls.length = 0; sm8Calls.length = 0;
+  r = await call({ method: 'POST', query: { hook: key }, body: { object: 'jobactivity', entry: [{ uuid: '00000000-0000-0000-0000-0000000000b2' }] } });
+  ok(r.statusCode === 200 && !rpcCalls.length && !sm8Calls.some(c => c.url.includes('/job/')), 'a booking on another client’s job: only its job link is read, then dropped');
+
   // a change made in FraserFlow
   db.links[0].sm8_status = 'Work Order'; db.jobs[link.job_uuid].status = 'Work Order';
   db.wos[0].status = 'cancelled'; db.links[0].dirty = true;
@@ -214,10 +225,11 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   reset(); db.companies.push({ uuid: '00000000-0000-0000-0000-0000000000e7', name: 'AFA' });
   r = await call({ token: 'tok-admin', body: { action: 'setup' } });
   const sub = sm8Calls.find(c => c.url.includes('webhook_subscriptions'));
-  ok(r.statusCode === 200 && db.settings.company_uuid === '00000000-0000-0000-0000-0000000000e7' && sub && sub.body.includes('object=job') && sub.body.includes(encodeURIComponent('https://ff.example.com/api/servicem8-hook/' + db.secrets.webhook_key)),
+  ok(r.statusCode === 200 && r.body.bookings === true && sm8Calls.some(c => c.url.includes('webhook_subscriptions') && c.body.includes('object=jobactivity')) && db.settings.company_uuid === '00000000-0000-0000-0000-0000000000e7' && sub && sub.body.includes('object=job') && sub.body.includes(encodeURIComponent('https://ff.example.com/api/servicem8-hook/' + db.secrets.webhook_key)),
     'setup: finds the existing AFA client and tells ServiceM8 where to report job changes');
   r = await call({ method: 'GET', query: { cron: '1' }, headers: { authorization: 'Bearer nope' } }); ok(r.statusCode === 401, 'the daily check needs CRON_SECRET');
   r = await call({ method: 'GET', query: { cron: '1' }, headers: { authorization: 'Bearer cron' } }); ok(r.statusCode === 200 && r.body.sent === 1, 'the daily check sends anything still waiting');
+  r = await call({ method: 'GET', query: { cron: '1', all: '1' }, headers: { authorization: 'Bearer cron' } }); ok(r.statusCode === 200 && r.body.errors.length === 0, 'the 10-minute schedule runs');
   db.settings.enabled = false; r = await call({ token: 'tok-mech', body: { action: 'flush' } }); ok(r.body.off === true, 'switched off: nothing is sent');
 
   console.log(fails ? `${fails} FAILED` : 'ALL SERVICEM8 FUNCTION TESTS PASSED'); process.exit(fails ? 1 : 0);

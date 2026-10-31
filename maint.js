@@ -210,7 +210,7 @@ function Sm8Settings({ctx,onClose}){
   const connect=()=>run('connect',async()=>{const r=await sm8Call(sb,{action:'connect'});window.location.href=r.url});
   const disconnect=()=>run('disconnect',async()=>{if(!confirm('Disconnect ServiceM8? Work orders stop going to it until it is connected again.'))return;await sm8Call(sb,{action:'disconnect'});setF({...f,enabled:false});setSt({...st,connected:false});reload();notify('ServiceM8 disconnected')});
   const setup=()=>run('setup',async()=>{await store({enabled:c0.enabled&&f.enabled});const r=await sm8Call(sb,{action:'setup'});setSt({...st,hooksOn:true});reload();
-    notify(r.hooks==='full'?'ServiceM8 is set up':'ServiceM8 is set up (bookings and parts are picked up by the regular check, not the moment they change)')});
+    notify(r.hooks==='full'&&r.bookings!==false?'ServiceM8 is set up':'ServiceM8 is set up (some changes are picked up by the regular refresh, not the moment they happen)')});
   const loadQ=()=>run('q',async()=>{const r=await sm8Call(sb,{action:'queues'});setQueues(r.queues||[])});
   const conn=!st?'Checking…':st.mode==='?'?st.error:st.mode==='key'?(st.connected?'Connected with an API key from his ServiceM8.':'API key set, but ServiceM8 refused it.')
     :st.mode==='oauth'?(st.connected?'Connected.':st.error||'Not connected yet.')
@@ -222,6 +222,7 @@ function Sm8Settings({ctx,onClose}){
     <div class="grid gap-4">
       <section class="grid gap-1.5"><div class="font-semibold text-[13.5px]">1. Connect his ServiceM8</div>
         <div id="sm8-conn" class="text-[13px]">${conn}</div>
+        ${st&&st.connected&&html`<div id="sm8-last" class="text-[12px] text-muted">${st.lastHook?`Last report from ServiceM8: ${agoTxt(st.lastHook.at)}${st.lastHook.what?' ('+st.lastHook.what+')':''}.`:'No reports from ServiceM8 yet.'}</div>`}
         ${st&&st.mode==='oauth'&&!st.connected&&html`<div class="text-[12px] text-muted">He signs in to his own ServiceM8 on the next page and approves FraserFlow. He can disconnect it from ServiceM8 at any time.</div>
           <div><button id="sm8-connect" type="button" class="btn" disabled=${!!busy} onClick=${connect}>Connect ServiceM8</button></div>`}
         ${st&&st.mode==='oauth'&&st.connected&&html`<div><button id="sm8-disconnect" type="button" class="btn" style=${{color:'var(--bad)'}} disabled=${!!busy} onClick=${disconnect}>Disconnect</button></div>`}
@@ -849,6 +850,9 @@ function FleetScreen({data,live,notify,setData,tab:tab0,onCounts,assetReq,onImpo
   const sb=live.sb;const role=live.role;
   const perms={work:['admin','superuser','supervisor','mechanic'].includes(role),verify:['admin','superuser','supervisor'].includes(role),mgr:role==='admin'||role==='superuser'};
   const {db,err,reload}=useMaint(sb);
+  /* while Fleet is open: every 5 minutes, send what's waiting and refresh outstanding work orders from ServiceM8 */
+  const sm8Ref=useRef(null);sm8Ref.current=db&&perms.work?{db,sb}:null;
+  useEffect(()=>{const t=setInterval(()=>{const c=sm8Ref.current;if(c&&!document.hidden)sm8Flush(c)},5*60e3);return()=>clearInterval(t)},[]);
   const tab=tab0||'dash';
   const [dlg,setDlg]=useState(null);const [asset,setAsset]=useState(null);
   useEffect(()=>{try{const id=localStorage.getItem(KEY+':fleetAsset');if(id){localStorage.removeItem(KEY+':fleetAsset');setAsset(id)}}catch(e){}},[]);
