@@ -5931,6 +5931,7 @@ function App({boot,live}){
           ${!live.canEdit&&!sup&&live.role!=='prestart'&&screen!=='prestarts'&&screen!=='qa'&&(screen!=='fleet'||fleetCal)&&!peopleView&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted" title="You can look but not change the schedule">View only</span>`}
         </div>
         <div class="flex-1"></div>
+        ${/* people who can only request leave can't draw on the board, so they keep a button for it */boardScreen&&screen==='staff'&&leaveReqOnly&&!(live.canEdit&&can('staff.leave',2))&&html`<button id="btn-add-leave" class="btn btn-primary" onClick=${()=>setLeaveDlg({})}>${Icon.plus} Request leave</button>`}
         ${boardScreen&&html`${!narrow&&html`<div class="seg" role="group" aria-label="View length">
           <button aria-pressed=${view===7} onClick=${()=>pickView(7)}>Week</button>
           <button aria-pressed=${view===14} onClick=${()=>pickView(14)}>14 days</button>
@@ -5943,8 +5944,6 @@ function App({boot,live}){
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>`}
         ${can('notify',1)&&!sup&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${screenOK('fleet',live.role,data)} onMaint=${openFleetAsset} onCompleteJob=${live.canEdit?(id=>{setData(d=>({...d,jobs:d.jobs.map(j=>j.id===id?{...j,completed:true,completedAt:iso(TODAY)}:j)}));const j=data.jobs.find(x=>x.id===id);setToast(`${j?jobLabel(j):'Job'} marked complete`)}):null} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
-        ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary" disabled=${!(live.canEdit&&can('staff.leave',2))&&!leaveReqOnly} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Add leave</button>`}
-        ${boardScreen&&screen!=='staff'&&screen!=='schedule'&&!sup&&can(fleetCal?'fleet.calendar':'schedule',2)&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'||screen==='fleet'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&!sup&&can('schedule.forecast',1)&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
         <div class="flex items-center gap-2 shrink-0 ml-auto">
           ${/* the lightbulb: everyone can suggest an idea, supervisors and operators too */html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
