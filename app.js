@@ -1683,7 +1683,7 @@ function BookingDetails({f,set,data,rtype,err,changeRes,resTypes}){
             </div>
             ${f.inductionReq&&html`<span class="text-[11.5px] text-faint">The bar shows a ${f.inductionDone?'green':'red'} induction icon${f.inductionDone?': paperwork sent.':' until the paperwork is sent.'}</span>`}
           </div>
-          ${isSealCrew(res)&&html`<div class="grid gap-1">
+          ${f.kind==='job'&&isSealCrew(data.resources.find(r=>r.id===f.resourceId))&&html`<div class="grid gap-1">
             <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-spreader" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${f.spreader!==false} onChange=${e=>set({spreader:e.target.checked?undefined:false})}/>Subcontractor spreader</label>
             <span class="text-[11.5px] text-faint">${f.spreader!==false?'A spreader is added to every shift in the Subcontractors tab. Pick the company there and tick Booked once it’s booked in.':'No spreader is added to this booking.'}</span></div>`}
           <label class="grid gap-1"><span class="label">Notes</span>
