@@ -88,14 +88,18 @@ function reset() {
     secrets: { id: 1, webhook_key: 'ab'.repeat(24) },
     links: [{ work_order_id: WO1, state: 'pending', dirty: false, job_uuid: null, attempts: 0, updated_at: '2026-10-31T00:00:00+00:00' }],
     wos: [{ id: WO1, number: 1042, asset_id: 'm1', wo_type: 'breakdown', priority: 'high', title: 'Hose burst', description: 'Left boom', status: 'open' }],
-    jobs: {}, companies: [],
+    jobs: {}, companies: [], attachments: [], files: [], uploads: [],
   };
   sm8Calls = []; rpcCalls = [];
 }
-const json = (status, body, headers = {}) => ({ ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body), headers: { get: k => headers[k.toLowerCase()] || null } });
+const json = (status, body, headers = {}) => ({ ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body), arrayBuffer: async () => Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)), headers: { get: k => headers[k.toLowerCase()] || null } });
 async function http(url, o = {}) {
   const h = o.headers || {}, m = o.method || 'GET';
   if (url.endsWith('/auth/v1/user')) { const u = USERS[h.Authorization.replace('Bearer ', '')]; return u ? json(200, { id: u.id }) : json(401, {}); }
+  if (url.includes('.supabase.co/storage/v1/object/maintenance/')) {
+    if (h.apikey !== 'service') throw new Error('file store used without the service key');
+    db.uploads.push({ path: decodeURIComponent(url.split('/object/maintenance/')[1]), type: h['Content-Type'], size: o.body.length }); return json(200, {});
+  }
   if (url.includes('.supabase.co/rest/v1/')) {
     if (h.apikey !== 'service') throw new Error('database used without the service key');
     const p = decodeURIComponent(url.split('/rest/v1/')[1]);
@@ -120,6 +124,9 @@ async function http(url, o = {}) {
     if (p.startsWith('asset_profiles')) return json(200, [{ meter_type: 'hours' }]);
     if (p.startsWith('meter_readings')) return json(200, p.includes('kind=eq.hours') ? [{ kind: 'hours', value: 4500, read_at: '2026-10-30T00:00:00Z' }] : []);
     if (p.startsWith('defects')) return json(200, []);
+    if (p.startsWith('maintenance_files') && m === 'POST') { db.files.push(JSON.parse(o.body)); return json(201, null); }
+    if (p.startsWith('maintenance_files')) { const ids = p.match(/sm8_uuid=in\.\(([^)]*)\)/)[1].split(','); return json(200, db.files.filter(f => ids.includes(f.sm8_uuid))); }
+    if (p.startsWith('maintenance_audit')) return json(201, null);
     if (p.startsWith('rpc/servicem8_apply')) { const a = JSON.parse(o.body); rpcCalls.push(a); const l = db.links.find(x => x.work_order_id === a.p_wo); if (l) Object.assign(l, { sm8_status: a.p_job.sm8_status, job_no: a.p_job.job_no }); return json(200, (a.p_patch && a.p_patch.status) || 'open'); }
     throw new Error('unexpected database call ' + p);
   }
@@ -134,6 +141,11 @@ async function http(url, o = {}) {
     let mm = path.match(/^\/job\/([^.]+)\.json$/);
     if (mm && m === 'GET') return db.jobs[mm[1]] ? json(200, db.jobs[mm[1]]) : json(404, {});
     if (mm && m === 'POST') { Object.assign(db.jobs[mm[1]], JSON.parse(o.body)); return json(200, {}); }
+    if (path.startsWith('/attachment.json')) { const u = path.match(/related_object_uuid eq '([^']+)'/)[1]; return json(200, db.attachments.filter(a => a.related_object_uuid === u)); }
+    let mf = path.match(/^\/attachment\/([^./]+)\.file$/);
+    if (mf) return json(200, 'JPEGDATA-' + mf[1]);
+    mf = path.match(/^\/attachment\/([^./]+)\.json$/);
+    if (mf) { const a = db.attachments.find(x => x.uuid === mf[1]); return a ? json(200, a) : json(404, {}); }
     let ma = path.match(/^\/jobactivity\/([^.]+)\.json$/);
     if (ma) return (db.activities || {})[ma[1]] ? json(200, db.activities[ma[1]]) : json(404, {});
     if (path.startsWith('/jobactivity.json')) return json(200, []);
@@ -218,6 +230,27 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   rpcCalls.length = 0; sm8Calls.length = 0;
   r = await call({ method: 'POST', query: { hook: key }, body: { object: 'jobactivity', entry: [{ uuid: '00000000-0000-0000-0000-0000000000b2' }] } });
   ok(r.statusCode === 200 && !rpcCalls.length && !sm8Calls.some(c => c.url.includes('/job/')), 'a booking on another client’s job: only its job link is read, then dropped');
+
+  // his photos and PDFs
+  db.wos[0].status = 'in_progress'; db.jobs[link.job_uuid].status = 'Work Order';
+  db.attachments = [
+    { uuid: '00000000-0000-0000-0000-0000000000d1', related_object: 'job', related_object_uuid: link.job_uuid, attachment_name: 'Burst hose', file_type: '.JPG', active: 1 },
+    { uuid: '00000000-0000-0000-0000-0000000000d2', related_object: 'job', related_object_uuid: link.job_uuid, attachment_name: 'Pirtek invoice.pdf', file_type: '.pdf', active: 1 },
+    { uuid: '00000000-0000-0000-0000-0000000000d3', related_object: 'job', related_object_uuid: link.job_uuid, attachment_name: 'Clip', file_type: '.mov', active: 1 },
+    { uuid: '00000000-0000-0000-0000-0000000000d4', related_object: 'job', related_object_uuid: JOB_OTHER, attachment_name: 'Someone else', file_type: '.jpg', active: 1 }];
+  r = await call({ token: 'tok-mech', body: { action: 'sync', wo: WO1 } });
+  ok(r.statusCode === 200 && db.files.length === 2 && db.uploads.length === 2, 'his photo and PDF are copied in (a video is skipped)');
+  const ph = db.files.find(f => f.sm8_uuid === '00000000-0000-0000-0000-0000000000d1'), pdf = db.files.find(f => f.sm8_uuid === '00000000-0000-0000-0000-0000000000d2');
+  ok(ph && ph.kind === 'photo' && ph.mime === 'image/jpeg' && ph.name === 'WO 1042 · Burst hose.jpg' && ph.work_order_id === WO1 && ph.path === 'assets/m1/sm8/00000000-0000-0000-0000-0000000000d1.jpg'
+    && pdf && pdf.kind === 'document' && pdf.name === 'WO 1042 · Pirtek invoice.pdf', 'they’re kept with the machine’s files, linked to the work order, named with the WO number');
+  r = await call({ token: 'tok-mech', body: { action: 'sync', wo: WO1 } });
+  ok(db.files.length === 2 && db.uploads.length === 2, 'refreshing again doesn’t copy them twice');
+  sm8Calls.length = 0; rpcCalls.length = 0;
+  r = await call({ method: 'POST', query: { hook: key }, body: { object: 'attachment', entry: [{ uuid: '00000000-0000-0000-0000-0000000000d4' }] } });
+  ok(r.statusCode === 200 && !rpcCalls.length && !sm8Calls.some(c => c.url.includes('.file')), 'a photo on another client’s job: its link is read, nothing is copied');
+  db.attachments.push({ uuid: '00000000-0000-0000-0000-0000000000d5', related_object: 'job', related_object_uuid: link.job_uuid, attachment_name: 'After', file_type: '.png', active: 1 });
+  r = await call({ method: 'POST', query: { hook: key }, body: { object: 'attachment', entry: [{ uuid: '00000000-0000-0000-0000-0000000000d5' }] } });
+  ok(r.statusCode === 200 && db.files.length === 3 && db.files[2].mime === 'image/png', 'a photo he adds later arrives as soon as ServiceM8 reports it');
 
   // a change made in FraserFlow
   db.links[0].sm8_status = 'Work Order'; db.jobs[link.job_uuid].status = 'Work Order';

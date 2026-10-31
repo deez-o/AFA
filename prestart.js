@@ -516,5 +516,5 @@ function FilesSection({ctx,a}){
 }
 
 window.PrestartScreen=PrestartScreen;
-window.FFP={useSigned,PrestartsTab,ChecklistsTab,ChecklistDialog,PrestartView,AssetPrestarts,FilesSection,tplFor,RES};
+window.FFP={useSigned,signedUrls,PrestartsTab,ChecklistsTab,ChecklistDialog,PrestartView,AssetPrestarts,FilesSection,tplFor,RES};
 })();
