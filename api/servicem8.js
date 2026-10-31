@@ -27,11 +27,12 @@
 //   GET  /api/servicem8?cron=1&all=1  (same)   refresh every outstanding work order (supabase/servicem8_schedule.sql runs it every 10 minutes)
 
 const crypto = require('crypto');
+const RUN = { env: null, http: null };   // this request's settings and fetch, for the file copies
 
 const SM8 = 'https://api.servicem8.com/api_1.0';
 const SM8_HOOKS = 'https://api.servicem8.com/webhook_subscriptions';
 const OAUTH = 'https://go.servicem8.com/oauth';
-const SCOPES = 'read_jobs create_jobs manage_jobs read_schedule read_job_materials read_job_queues read_customers manage_customers read_job_notes publish_job_notes';
+const SCOPES = 'read_jobs create_jobs manage_jobs read_schedule read_job_materials read_job_queues read_customers manage_customers read_job_notes publish_job_notes read_attachments read_job_attachments read_job_photos';
 const HOOK_FIELDS = ['status', 'queue_uuid', 'work_done_description', 'active', 'job_is_scheduled_until_stamp', 'total_invoice_amount'];
 const HOOK_FIELDS_MIN = ['status', 'queue_uuid', 'work_done_description', 'active'];
 const ACTIVITY_FIELDS = ['start_date', 'end_date', 'active', 'activity_was_scheduled', 'activity_was_recorded'];   // bookings and time on a job
@@ -142,6 +143,7 @@ function client(A, http) {
   return {
     get: async path => (await go('GET', path)).json(),
     post: async (path, body) => { const r = await go('POST', path, body); return (r.headers && r.headers.get && r.headers.get('x-record-uuid')) || null; },
+    bytes: async path => Buffer.from(await (await go('GET', path)).arrayBuffer()),
   };
 }
 
@@ -320,6 +322,7 @@ async function pushChange(D, S, cfg, link) {
 
 // his job → the work order
 async function pullOne(D, S, cfg, link, wo, ctx) {
+  const { env, http } = RUN;
   wo = wo || await D.one(`work_orders?id=eq.${link.work_order_id}&select=*`);
   if (!wo) return null;
   let job;
@@ -334,7 +337,38 @@ async function pullOne(D, S, cfg, link, wo, ctx) {
     notes = await S.get(`/note.json?${filt(`related_object_uuid eq '${link.job_uuid}' and active eq 1`)}`).catch(() => null);   // needs read_job_notes
   }
   const m = mapJob({ job, activities, materials, wo, cfg, profile: ctx.profile, latest: ctx.latest, prev: link, notes, sent: describeJob({ wo, ...ctx }) });
-  return D.rpc('servicem8_apply', { p_wo: wo.id, p_patch: m.patch || {}, p_service: m.service, p_meters: m.meters || [], p_job: m.job });
+  const result = await D.rpc('servicem8_apply', { p_wo: wo.id, p_patch: m.patch || {}, p_service: m.service, p_meters: m.meters || [], p_job: m.job });
+  // his photos and PDFs (a problem here doesn't stop the rest of the update; it is tried again next time)
+  if (yes(job.active) && !['closed', 'cancelled'].includes(wo.status) && env) await syncAttachments(D, S, env, http, wo, link).catch(() => null);
+  return result;
+}
+
+// his photos and PDFs on the job → the machine's files, linked to the work order (each copied once)
+const FILE_TYPES = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.pdf': 'application/pdf' };
+async function syncAttachments(D, S, env, http, wo, link, limit = 8) {
+  const list = await S.get(`/attachment.json?${filt(`related_object_uuid eq '${link.job_uuid}' and active eq 1`)}`);
+  const want = (list || []).filter(a => safeId(a.uuid) && FILE_TYPES[String(a.file_type || '').toLowerCase()]);
+  if (!want.length) return 0;
+  const have = new Set(((await D.get(`maintenance_files?sm8_uuid=in.(${want.map(a => q(a.uuid)).join(',')})&select=sm8_uuid`)) || []).map(f => f.sm8_uuid));
+  const storage = (env.SUPABASE_URL || '').replace(/\/$/, '') + '/storage/v1/object/maintenance/';
+  let n = 0;
+  for (const a of want.filter(x => !have.has(x.uuid)).slice(0, limit)) {
+    const ext = String(a.file_type).toLowerCase(), mime = FILE_TYPES[ext];
+    let data;
+    try { data = await S.bytes(`/attachment/${a.uuid}.file`); }
+    catch (e) { data = await S.bytes(`/attachment/${a.uuid}/download`); }
+    if (!data || !data.length || data.length > 15 * 1024 * 1024) continue;   // the store takes files up to 15 MB
+    const path = `assets/${wo.asset_id}/sm8/${a.uuid}${ext}`;
+    const up = await http(storage + path.split('/').map(q).join('/'), { method: 'POST', body: data,
+      headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + env.SUPABASE_SERVICE_ROLE_KEY, 'Content-Type': mime, 'x-upsert': 'true' } });
+    if (!up.ok) { const t = await up.text().catch(() => ''); throw new Error(`File store ${up.status}: ${t.slice(0, 200)}`); }
+    let name = String(a.attachment_name || 'ServiceM8 ' + (mime === 'application/pdf' ? 'document' : 'photo')).trim().slice(0, 120);
+    if (!name.toLowerCase().endsWith(ext)) name += ext;
+    await D.post('maintenance_files', { asset_id: wo.asset_id, kind: mime === 'application/pdf' ? 'document' : 'photo', name: `WO ${wo.number} · ${name}`,
+      path, mime, size: data.length, work_order_id: wo.id, sm8_uuid: a.uuid });
+    n++;
+  }
+  return n;
 }
 
 // send what's waiting, pass on changes, and refresh the jobs not heard from for a while
@@ -379,6 +413,7 @@ async function handler(req, res, env = process.env, http = fetch) {
   if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return send(res, 500, { error: 'The app isn’t connected to its database yet.' });
   if (!env.SUPABASE_SERVICE_ROLE_KEY) return send(res, 501, { error: 'The ServiceM8 link needs SUPABASE_SERVICE_ROLE_KEY in Vercel → Settings → Environment Variables.' });
   const D = database(env, http);
+  RUN.env = env; RUN.http = http;
   const Q = queryOf(req);
 
   // 0. ServiceM8's address check can also arrive at the add-on's own Callback URL (no key there): answer it anywhere
@@ -413,17 +448,17 @@ async function handler(req, res, env = process.env, http = fetch) {
     if (challenge && !b.object) return answer(200, decodeURIComponent(String(challenge)));
     if (req.method !== 'POST' || !b.object) return answer(200, 'ok');
     const obj = String(b.object || '').toLowerCase().replace(/[^a-z]/g, '');
-    if (obj !== 'job' && obj !== 'jobactivity') return answer(200, 'ignored');
+    if (obj !== 'job' && obj !== 'jobactivity' && obj !== 'attachment') return answer(200, 'ignored');
     const ids = (Array.isArray(b.entry) ? b.entry : []).map(e => e && e.uuid).filter(safeId);
     if (!ids.length) return answer(200, 'ok');
     const cfg = await settings(D);
     if (!cfg.enabled) return answer(200, 'switched off');
     let jobIds = ids, S = null;
     const connect = async () => { const A = await credentials(env, D, http); if (!A.ok) return null; return (S = client(A, http)); };
-    if (obj === 'jobactivity') {
-      // a booking or time changed: which job is it on? (only that one field is used; other clients' bookings are dropped)
+    if (obj === 'jobactivity' || obj === 'attachment') {
+      // a booking, time or attachment changed: which job is it on? (only that is used; anything not on an AFA job is dropped)
       if (!(await connect())) return answer(503, 'not connected');
-      jobIds = (await Promise.all(ids.map(id => S.get(`/jobactivity/${id}.json`).then(a => a && a.job_uuid, () => null)))).filter(safeId);
+      jobIds = (await Promise.all(ids.map(id => S.get(`/${obj}/${id}.json`).then(a => a && (a.job_uuid || (a.related_object === 'job' ? a.related_object_uuid : null)), () => null)))).filter(safeId);
       if (!jobIds.length) return answer(200, 'not ours');
     }
     const links = await D.get(`servicem8_jobs?state=eq.sent&job_uuid=in.(${jobIds.map(q).join(',')})&select=*`);
@@ -528,7 +563,8 @@ async function handler(req, res, env = process.env, http = fetch) {
         : `ServiceM8's check never reached FraserFlow at ${origin(req, env)}/api/servicem8-hook/… (is the site behind Vercel Deployment Protection?)`));
     }
     let bookings = true;
-    try { await hook(ACTIVITY_FIELDS, 'jobactivity'); } catch (e) { bookings = false; }   // without it, bookings arrive with the regular refresh
+    try { await hook(ACTIVITY_FIELDS, 'jobactivity'); } catch (e) { bookings = false; }
+    try { await hook(['active', 'attachment_name'], 'attachment'); } catch (e) { /* photos then arrive with the regular refresh */ }   // without it, bookings arrive with the regular refresh
     await D.patch('servicem8_settings?id=eq.1', { hooks_on_at: new Date().toISOString() });
     return send(res, 200, { company_uuid: company, hooks, bookings });
   }

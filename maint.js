@@ -190,6 +190,10 @@ function Sm8Panel({ctx,wo}){
       :st==='removed'?'The job was deleted in ServiceM8. Send it again, or carry on here.'
       :st==='pending'||st==='sending'?'It goes to ServiceM8 in a moment.'
       :open&&cfg.enabled?'This work order is handled here, not in ServiceM8.':''}</div>
+    ${(()=>{const files=(db.maintenance_files||[]).filter(f=>f.work_order_id===wo.id);if(!files.length)return null;
+      const openFile=async f=>{const w=window.open('','_blank');try{const o=window.FFP?await window.FFP.signedUrls(sb,[f.path]):{};if(o[f.path]){if(w)w.location=o[f.path];else location.href=o[f.path]}else{if(w)w.close();setErr('Couldn’t open that file.')}}catch(e){if(w)w.close();setErr(errMsg(e))}};
+      return html`<div id="wo-sm8-files" class="grid gap-1 pt-1"><span class="label">His photos and documents</span>
+        ${files.map(f=>html`<button key=${f.id} type="button" class="text-left text-[13px] hover:underline truncate" style=${{color:'var(--accent)'}} onClick=${()=>openFile(f)}>${f.name.replace(/^WO \d+ · /,'')}</button>`)}</div>`})()}
     ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
   </div>`;
 }

@@ -65,6 +65,12 @@ create table if not exists public.servicem8_jobs (
 alter table public.servicem8_jobs add column if not exists sm8_queue text;
 create index if not exists servicem8_jobs_todo on public.servicem8_jobs (state) where state in ('pending','sending','error') or dirty;
 
+-- his photos and PDFs from a ServiceM8 job are copied into the machine's files (Storage bucket "maintenance"),
+-- linked to the work order; sm8_uuid stops one being copied twice. (Needs prestarts.sql, which makes maintenance_files.)
+alter table public.maintenance_files add column if not exists work_order_id uuid references public.work_orders(id) on delete set null;
+alter table public.maintenance_files add column if not exists sm8_uuid text unique;
+create index if not exists maintenance_files_wo on public.maintenance_files (work_order_id) where work_order_id is not null;
+
 -- 4. New work orders queue themselves to be sent ---------------------------------------------
 create or replace function public.servicem8_queue_new()
 returns trigger language plpgsql security definer set search_path = public as $$
