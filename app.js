@@ -1259,12 +1259,13 @@ function PlantPicker({f,set,data}){
     return al;
   };
   const b2s=b=>b.start===b.end?fmtShort(parse(b.start)):`${fmtShort(parse(b.start))}–${fmtShort(parse(b.end))}`;
-  return html`<section class="grid gap-3 md:grid-cols-[minmax(0,1fr)_300px] md:items-start">
+  return html`<section class="grid gap-3 grid-cols-[minmax(0,1fr)]">
     ${restrictedIn(data,f.plantIds).length>0&&html`<div class="md:col-span-2"><${RestrictedNote} data=${data} ids=${f.plantIds} what="this booking"/></div>`}
     <div class="flex items-center gap-2 md:col-span-2">
       <h3 class="font-display text-[15px] font-semibold">Machines</h3>
       <span class="mono text-[11px] text-faint">${picked.size} assigned${one?' this shift':per?' on every shift':''}</span>
       <span class="flex-1"></span>
+      ${picked.size>0&&html`<button id="pm-clear" type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${()=>apply(()=>[])}>Clear all</button>`}
       ${one&&ds.length>1&&html`<button id="pm-copy-all" type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${copyAll}>Copy to all shifts</button>`}
       ${own.length>0&&own.some(m=>!picked.has(m.id))&&html`<button type="button" class="text-[12px] font-medium underline underline-offset-2 text-muted hover:text-ink" onClick=${addOwn}>Add ${crew?.name||'crew'}'s plant</button>`}
     </div>
@@ -1287,26 +1288,6 @@ function PlantPicker({f,set,data}){
               <div class="min-w-0 flex-1 text-[12px] leading-tight truncate"><span class="font-semibold mono">${m.name}</span> <span class="text-muted">${m.sub}</span></div>
               ${st&&html`<span class="w-2 h-2 rounded-full shrink-0" style=${{background:st.tone}}></span>`}</label>`})}</div></div>`)}
       </div>`}
-    ${machines.length>0&&(()=>{const sel=machines.filter(m=>picked.has(m.id)||(!one&&onSome(m.id)));const warn=sel.filter(m=>status(m)).length;
-      return html`<div class="rounded-lg border border-line bg-sunken p-2.5 grid gap-2 content-start md:col-start-2 md:row-start-2 md:row-span-3 md:sticky md:top-0" aria-label="Machines selected for this job">
-        <div class="flex items-center gap-2">
-          <span class="label" style=${{color:'var(--ink)'}}>${one?`Selected for ${WD[parse(one).getDay()]} ${fmtShort(parse(one))}`:'Selected for this job'}</span><span class="mono text-[11px] text-faint">${sel.length}</span>
-          ${warn>0&&html`<span class="text-[11.5px] font-medium" style=${{color:'var(--warn)'}}>${warn} need${warn===1?'s':''} checking</span>`}
-          <span class="flex-1"></span>
-          ${sel.length>0&&html`<button type="button" class="text-[12px] font-medium text-muted hover:text-ink underline underline-offset-2" onClick=${()=>apply(()=>[])}>Clear all</button>`}
-        </div>
-        ${sel.length===0&&html`<div class="text-[12.5px] text-muted py-2">Nothing selected yet. Tick machines in the list.</div>`}
-        ${groupMachines(sel,data).map(g=>html`<div key=${g.key} class="grid gap-1">
-          <div class="text-[11.5px] font-semibold text-muted">${g.label} <span class="mono text-faint">${g.rows.length}</span></div>
-          <div class="flex flex-wrap gap-1.5">
-            ${g.rows.map(m=>{const st=status(m);return html`<span key=${m.id} class="inline-flex items-center gap-1.5 rounded-md bg-surface border pl-2 pr-1 py-0.5 text-[12px] max-w-full"
-                style=${{borderColor:st?st.tone:'var(--line)'}} title=${[m.name,m.sub,m.rego,st&&st.text].filter(Boolean).join(' · ')}>
-              <span class="font-semibold mono shrink-0">${m.name}</span><span class="text-muted truncate">${m.sub||''}</span>${!one&&per&&!onAll(m.id)?html`<span class="text-[11px] shrink-0" style=${{color:'var(--warn)'}}>${ds.filter(k=>machinesOn(f,k).includes(m.id)).length}/${ds.length} shifts</span>`:''}
-              ${st&&html`<span class="shrink-0 inline-flex" style=${{color:st.tone}}>${Icon.alert}</span>`}
-              <button type="button" class="w-5 h-5 shrink-0 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken" onClick=${()=>picked.has(m.id)?toggle(m.id):apply((k,ids)=>ids.filter(x=>x!==m.id))} aria-label=${'Remove '+m.name+' from this job'}>${Icon.x}</button>
-            </span>`})}
-          </div></div>`)}
-      </div>`})()}
   </section>`;
 }
 
