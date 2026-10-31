@@ -4086,6 +4086,11 @@ function loadSheetJS(){
 }
 /* The fleet list: a heading on its own row starts a category (headings further left are parent groups,
    e.g. "Narangba Transport" › "Trucks"); a machine row has the rego, then the description that starts with the machine #. */
+/* extra columns a machine list can carry (headings matched loosely); they fill in the machine's details in Fleet */
+const FLEET_XCOLS=[[/^year$/,'year'],[/^make$/,'make'],[/^model/,'model'],[/vin|chassis|serial/,'serial'],[/^meter/,'meter'],
+  [/^last hours|^hours$/,'hours'],[/^hours date/,'hoursAt'],[/^last km|^km$|^odometer/,'km'],[/^km date/,'kmAt'],
+  [/^rego status/,'regoStatus'],[/^rego expiry|^registration expiry/,'regoExpiry'],[/^purpose/,'purpose'],[/^gvm/,'gvm'],[/^gcm/,'gcm'],[/^atm/,'atm'],[/^tare/,'tare'],
+  [/charging code/,'nhvc'],[/^coi number|^inspection number/,'coi'],[/^coi due|^inspection due/,'coiDue'],[/^notes?$/,'notes']];
 function parseFleetRows(rows){
   const out=[];let stack=[];let cols=null;
   rows.forEach((row,ri)=>{
@@ -4094,11 +4099,14 @@ function parseFleetRows(rows){
     /* a table with headings (e.g. this planner's own export): Category, Machine #, Description, Rego */
     const low=cells.map(x=>x.v.toLowerCase());
     if(low.includes('rego')&&low.some(v=>/^(machine\s*#?|machine no\.?|fleet no\.?)$/.test(v))){
-      cols={};cells.forEach(x=>{const v=x.v.toLowerCase();if(v==='rego')cols.rego=x.c;else if(/^(machine|fleet)/.test(v))cols.name=x.c;else if(v==='description')cols.desc=x.c;else if(v==='category')cols.cat=x.c});return}
+      cols={};cells.forEach(x=>{const v=x.v.toLowerCase();if(v==='rego')cols.rego=x.c;else if(/^(machine|fleet)/.test(v))cols.name=x.c;else if(v==='description')cols.desc=x.c;else if(v==='category')cols.cat=x.c;
+        /* optional extra columns (e.g. the rego-checked fleet list): machine details, last readings, rego and inspection */
+        else{const k=FLEET_XCOLS.find(([re])=>re.test(v));if(k&&cols[k[1]]==null)cols[k[1]]=x.c}});return}
     if(cols){const g=c=>c==null?'':String((row||[])[c]??'').replace(/\s+/g,' ').trim();const name=g(cols.name);
       if(!name||!g(cols.rego)&&!g(cols.desc)){return}
+      const xt={};FLEET_XCOLS.forEach(([,k])=>{if(cols[k]!=null&&g(cols[k]))xt[k]=g(cols[k])});
       out.push({row:ri+1,rego:g(cols.rego).toUpperCase(),code:name.toUpperCase(),name:name.toUpperCase(),desc:g(cols.desc),full:`${name} ${g(cols.desc)}`.trim(),category:g(cols.cat),
-        retired:/no longer in use|retired|\bsold\b|written off/i.test(g(cols.desc))});return}
+        retired:/no longer in use|retired|\bsold\b|written off/i.test(g(cols.desc)+' '+(xt.notes||'')),...(Object.keys(xt).length?{xt}:{})});return}
     if(cells.length===1){const h=cells[0];stack=stack.filter(x=>x.c<h.c);stack.push(h);return}
     const rego=cells[0],desc=cells[cells.length-1];
     const category=stack.filter(x=>x.c<rego.c).map(x=>x.v).join(' – ');
@@ -4152,7 +4160,39 @@ function applyMachineImport(d,list){
   const cats=[...(d.machineCats||[])];list.forEach(x=>{if(x.category&&!cats.some(c=>c.toLowerCase()===x.category.toLowerCase()))cats.push(x.category)});
   return {data:{...d,resources:res,machineCats:cats},added,updated};
 }
-function MachineImport({data,setData,onClose,notify}){
+/* the extra columns: Fleet machine details (make, model, year, serial / VIN, meters, and a rego & inspection note)
+   and each machine's last hours / km reading. Waits for the new machines to reach the database first. */
+const xNum=v=>{const n=parseFloat(String(v||'').replace(/[^\d.]/g,''));return isFinite(n)?n:null};
+const xDate=v=>{const m=/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/.exec(String(v||'').trim());if(m){const y=+m[3]<100?2000+ +m[3]:+m[3];return `${y}-${pad(+m[2])}-${pad(+m[1])}`}
+  const m2=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v||''));return m2?m2[0]:null};
+async function importMachineExtras(sb,getData,list){
+  for(let t=0;t<50&&!getData();t++)await new Promise(r=>setTimeout(r,100));
+  if(!getData())throw new Error('the machine list wasn’t saved');
+  const idOf=x=>{const d=getData();const i=machineMatch(d.resources,x);return i>=0?d.resources[i].id:null};
+  const ids=[...new Set(list.map(idOf).filter(Boolean))];
+  for(let t=0;t<20;t++){const {data:have}=await sb.from('items').select('id').eq('kind','resource').in('id',ids);if((have||[]).length>=ids.length)break;await new Promise(r=>setTimeout(r,1000))}
+  const {data:profs}=await sb.from('asset_profiles').select('*').in('asset_id',ids);const P=new Map((profs||[]).map(p=>[p.asset_id,p]));
+  const {data:reads}=await sb.from('meter_readings').select('asset_id,kind,value').in('asset_id',ids);
+  let nP=0,nR=0;const bad=[];
+  for(const x of list){const id=idOf(x);if(!id)continue;const X=x.xt;
+    const kg=v=>xNum(v)?`${fmtN(xNum(v))} kg`:'';
+    const rego=[X.regoStatus&&`Rego ${X.regoStatus.toLowerCase()}${X.regoExpiry?' until '+X.regoExpiry:''}`,!X.regoStatus&&X.regoExpiry&&`Rego expires ${X.regoExpiry}`,
+      X.coi&&`COI ${X.coi}${X.coiDue?' due '+X.coiDue:''}`,!X.coi&&X.coiDue&&`Inspection due ${X.coiDue}`,
+      [X.gvm&&'GVM '+kg(X.gvm),X.gcm&&'GCM '+kg(X.gcm),X.atm&&'ATM '+kg(X.atm),X.tare&&'Tare '+kg(X.tare)].filter(Boolean).join(', '),X.purpose&&`${X.purpose} use`].filter(Boolean).join(' · ');
+    const old=P.get(id);const keepNotes=old&&old.notes?String(old.notes).split('\n').filter(l=>!/^Rego |^COI |^Inspection due/.test(l)).join('\n').trim():'';
+    const notes=[keepNotes,rego,X.notes].filter(Boolean).join('\n')||null;
+    const mt=/both/i.test(X.meter||'')?'both':/^k/i.test(X.meter||'')?'km':/^h/i.test(X.meter||'')?'hours':null;
+    const row={...(X.make?{make:X.make}:{}),...(X.model?{model:X.model}:{}),...(xNum(X.year)?{year:Math.round(xNum(X.year))}:{}),...(X.serial?{serial:X.serial}:{}),...(mt?{meter_type:mt}:{}),notes,...(x.retired?{retired:true}:{})};
+    try{const {error}=old?await sb.from('asset_profiles').update(row).eq('asset_id',id):await sb.from('asset_profiles').insert({asset_id:id,...row});if(error)throw error;nP++}
+    catch(e){bad.push(`${x.name}: ${e.message||e}`)}
+    for(const [kind,v,at] of [['hours',X.hours,X.hoursAt],['km',X.km,X.kmAt]]){const n=xNum(v),day=xDate(at);if(n==null||n<=0||!day)continue;
+      if((reads||[]).some(r=>r.asset_id===id&&r.kind===kind&&+r.value===n))continue;
+      try{const {error}=await sb.from('meter_readings').insert({asset_id:id,kind,value:n,read_at:day+'T12:00:00+10:00',source:'manual',note:'Imported from the machine list'});if(error)throw error;nR++}
+      catch(e){bad.push(`${x.name} ${kind}: ${e.message||e}`)}}}
+  if(bad.length)console.warn('Machine import:',bad);
+  return `Machine details: ${nP} updated, ${nR} reading${nR===1?'':'s'} added${bad.length?` · ${bad.length} couldn’t be saved (${bad[0]}${bad.length>1?'…':''})`:''}`;
+}
+function MachineImport({data,setData,onClose,notify,sb}){
   const [rows,setRows]=useState(null);const [off,setOff]=useState({});const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
   useEffect(()=>{const h=e=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
   const pick=async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;setBusy(true);setErr('');
@@ -4161,7 +4201,10 @@ function MachineImport({data,setData,onClose,notify}){
     catch(x){setErr(x.message||'Couldn’t read that file.')}finally{setBusy(false);e.target.value=''}};
   const chosen=(rows||[]).filter((_,i)=>!off[i]);
   const groups=[];(rows||[]).forEach((x,i)=>{let g=groups.find(y=>y.cat===x.category);if(!g){g={cat:x.category,items:[]};groups.push(g)}g.items.push({x,i})});
-  const run=()=>{setData(d=>{const r=applyMachineImport(d,chosen);setTimeout(()=>notify(`Machines imported: ${r.added} new, ${r.updated} updated`),0);return r.data});onClose()};
+  const run=()=>{let after=null;setData(d=>{const r=applyMachineImport(d,chosen);after=r.data;setTimeout(()=>notify(`Machines imported: ${r.added} new, ${r.updated} updated`),0);return r.data});
+    /* rows with extra columns: machine details and last readings go into Fleet once the machines are saved */
+    const extra=chosen.filter(x=>x.xt);if(sb&&extra.length)setTimeout(()=>importMachineExtras(sb,()=>after,extra).then(m=>notify(m),e=>notify('Machine details: '+(e.message||e))),0);
+    onClose()};
   const setGroup=(g,on)=>setOff(o=>{const n={...o};g.items.forEach(({i})=>{n[i]=!on});return n});
   return html`<div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
     <div class=${'panel pop w-full flex flex-col max-h-full overflow-hidden '+(rows?'max-w-[720px]':'max-w-[460px]')} role="dialog" aria-modal="true" aria-labelledby="mi-title">
@@ -5938,7 +5981,7 @@ function App({boot,live}){
     ${program&&html`<${DailyProgramDialog} data=${data} onClose=${()=>setProgram(false)} notify=${setToast}/>`}
     ${importing&&html`<${TeamCalImport} data=${data} setData=${setData} onClose=${()=>setImporting(false)} notify=${setToast}/>`}
     ${merging&&html`<${MergeSplits} data=${data} setData=${setData} onClose=${()=>setMerging(false)} notify=${setToast}/>`}
-    ${machImport&&html`<${MachineImport} data=${data} setData=${setData} onClose=${()=>setMachImport(false)} notify=${setToast}/>`}
+    ${machImport&&html`<${MachineImport} sb=${live.sb} data=${data} setData=${setData} onClose=${()=>setMachImport(false)} notify=${setToast}/>`}
     ${logOpen&&html`<${ChangeLogDialog} data=${data} onClose=${()=>setLogOpen(false)} onOpen=${b=>setEditing(b)}/>`}
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${subWorksOpen&&html`<${SubWorksDialog} data=${data} notify=${setToast} onClose=${()=>setSubWorksOpen(false)}/>`}
