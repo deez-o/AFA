@@ -177,8 +177,10 @@ function bestPick(t,{clock,dh,cfg,travel,L,U,drv}){
   /* a night driver's hours after midnight belong to the night they started */
   const shiftDay=c=>cfg.driverShift==='night'&&c.getHours()<12?iso(addDays(parse(dayOf(c)),-1)):dayOf(c);
   const dayIdx=c=>Math.round((parse(shiftDay(c))-parse(want))/864e5);
-  const when=c=>t.to.key==='yard'?(c-base)/36e5:(()=>{const d=dayIdx(c);const nightBefore=cfg.driverShift!=='night'&&d===1&&c<at(dayOf(c),'06:00');const h=c.getHours();
-    return (d===0||nightBefore?0:d===1?8:Math.abs(d)*30)+((cfg.driverShift==='any'&&(h<6||h>=18))?4:0)+((c-at(shiftDay(c),'12:00'))/36e5)*.02})();   /* within the day before: the morning; within the night before: the start of the night */
+  /* "any time": daylight (6am–6pm) unless it has to be dark; the night before only counts for a night-shift driver */
+  const dark=c=>{const h=c.getHours();return cfg.driverShift==='any'&&(h<6||h>=18)?40:0};
+  const when=c=>t.to.key==='yard'?(c-base)/36e5+dark(c):(()=>{const d=dayIdx(c);
+    return (d===0?0:d===1?8:Math.abs(d)*30)+dark(c)+((c-at(shiftDay(c),'12:00'))/36e5)*.02})();   /* within the day: the morning; within the night before: the start of the night */
   /* the next shift can start 10 hours after the last finish */
   if(drv&&drv.lastDone){const c=addMin(drv.lastDone,REST_MIN+(dh.min||0));if(c>base)cands.push(c);
     /* and the earliest shift start (in his hours) after that */

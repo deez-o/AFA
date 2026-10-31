@@ -174,4 +174,14 @@ ok(!ctx.FFL.needsFloat({ name: 'SS003', category: 'Bobcats' }, {}, CF) && !ctx.F
   const R = planFloat([mk('a', '2026-10-31 07:00', '2026-10-31 15:00'), mk('b', '2026-11-01 04:00', '2026-11-01 05:30'), mk('c', '2026-11-01 04:00', '2026-11-01 05:30')], cfgOf({}), tr, {}).runs;
   ok(R.every(r => r.pick >= r.earliest), 'every pick-up is at or after the machine is free');
 }
+
+// needed Monday 5pm (free since the weekend): Monday morning after the curfew, not midnight
+{
+  const tr = () => ({ min: 40, km: 30 });
+  const trip = { id: 'z', moves: [{ m: 'z', name: 'MT009' }], from: { key: 'A' }, to: { key: 'B' }, earliest: t('2026-10-31 16:00'), latest: t('2026-11-02 17:00') };
+  for (const mode of ['any', 'day']) {
+    const r = planFloat([trip], { ...cfgOf({}), driverShift: mode }, tr, {}).runs[0];
+    ok(r.pick.getDate() === 2 && r.leave >= t('2026-11-02 09:00') && r.done <= t('2026-11-02 16:00') && !r.curfew, `${mode === 'any' ? 'any hours' : 'day driver'}: Monday after 9am (${hm(r.leave)}), there before 5pm, not at midnight`);
+  }
+}
 console.log(fails ? `${fails} FAILED` : 'ALL FLOAT TESTS PASSED'); process.exit(fails ? 1 : 0);
