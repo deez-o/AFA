@@ -271,6 +271,7 @@ function parseDocket(t){
   const fix=v=>v.replace(/[Oo]/g,'0').replace(/[Il|]/g,'1').replace(/[Ss](?=\d)/g,'5');
   /* the docket number: "Delivery No: 1234567" (also "Delivery Number", "Delivery Docket No", "Del No") */
   const dn=t.match(/\bDel(?:iv\w*)?\s*(?:Docket\s*)?(?:No\.?|Number|#)\s*[:.,\-]?\s*\n?\s*([A-Z]{0,3}[0-9OIl|]{3,14}(?: [0-9OIl|]{2,8})?)/i)||t.match(/\bDeliv\w*[^\n0-9]{0,12}([0-9OIl|]{4,14})/i);
+  if(dn&&/ /.test(dn[1]))out.docketGapAt=dn[1].indexOf(' ');   /* a space read into the number: likely the printer's gap */
   if(dn)out.docket=fix(dn[1].replace(/ /g,'')).replace(/^([A-Z]{0,3})/i,(m)=>m.toUpperCase());
   /* the tonnes: "Net Weight 17.160 Tonnes" (OCR often garbles "Weight": "Net Veleit «17.160 Tomes"), "Net Weight 25,480 kg" → 25.48;
      if the net line can't be read, Gross − Tare */
@@ -290,10 +291,25 @@ function parseDocket(t){
   const ld=t.match(/Load\s*No\s*[:.,]?\s*(\d{1,5})/i);if(ld)out.load=String(+ld[1]);
   return out}
 window.__parseDocket=parseDocket;
+/* The docket printer can leave a blank column (a dead strip on its head), so one digit of the delivery number isn't on
+   the paper at all. Dockets are 9 digits (or the usual length of this record's other loads): when one comes back a digit
+   short, the gap is filled from an earlier load that shares the start of the number (to be checked), or marked "?" to type. */
+const DOCKET_GAP_AT=4;   /* where the dead strip falls on the Alex Fraser dockets seen so far: the 5th digit */
+function fillDocketGap(doc,others,gapAt){
+  doc=String(doc||'');if(!/^\d+$/.test(doc))return {docket:doc};
+  const prev=(others||[]).map(x=>String(x||'')).filter(x=>/^\d+$/.test(x));
+  const lens={};prev.forEach(x=>{lens[x.length]=(lens[x.length]||0)+1});
+  const want=+(Object.entries(lens).sort((a,b)=>b[1]-a[1])[0]||[9])[0];
+  if(doc.length!==want-1)return {docket:doc,odd:doc.length!==want};   /* not the usual length: to be checked */
+  let best=null;   /* the earlier docket sharing the longest start: the missing digit is where they part */
+  prev.filter(x=>x.length===want).forEach(q=>{let j=0;while(j<doc.length&&doc[j]===q[j])j++;if(gapAt!=null&&j>=gapAt)j=gapAt;else if(gapAt!=null)return;if(j>=3&&(!best||j>best.j))best={q,j}});
+  if(best){const d=best.q[best.j];return {docket:doc.slice(0,best.j)+d+doc.slice(best.j),guess:{at:best.j,digit:d,from:best.q}}}
+  const at=Math.min(gapAt!=null?gapAt:DOCKET_GAP_AT,doc.length);return {docket:doc.slice(0,at)+'?'+doc.slice(at),guess:{at,digit:null}};
+}
 const fmt2=n=>(Math.round(n*100)/100).toLocaleString('en-AU',{maximumFractionDigits:2});
 const layRow=()=>({docket:'',rego:'',time:hhmm(),temp:'',tonnes:'',ch_start:'',ch_finish:'',comments:''});
 const LAY_NEED=[['docket','Docket number'],['rego','Truck rego'],['time','Time in'],['temp','Temperature'],['tonnes','Tonnes'],['ch_start','Chainage start'],['ch_finish','Chainage finish'],['comments','Run location / comments']];
-const layMissing=r=>LAY_NEED.filter(([k])=>k==='tonnes'?!(n0(r.tonnes)>0):blank(r[k]));
+const layMissing=r=>LAY_NEED.filter(([k])=>k==='tonnes'?!(n0(r.tonnes)>0):k==='docket'?(blank(r.docket)||/\?/.test(r.docket)):blank(r[k]));
 const rowDone=r=>!layMissing(r).length;
 function LayingEditor({f}){
   const d=f.pack.forms.laying;const set=p=>f.set('laying',x=>({...x,...p}));const rows=d.rows||[];
@@ -305,8 +321,14 @@ function LayingEditor({f}){
   const addRow=r=>{f.set('laying',x=>{const l=x.rows||[];const prev=l.length?l[l.length-1].comments:'';return {...x,rows:[...l,{...r,comments:blank(r.comments)?(prev||''):r.comments}]}});setTried(-1);setOpen(rows.length)};
   const scan=async file=>{if(!file)return;setErr('');setBusy('Reading the docket…');const time=hhmm();
     try{const [w,c]=await Promise.all([loadOcr(),prepDocket(file)]);const {data}=await w.recognize(c);const got=parseDocket(data.text||'');
-      addRow({...layRow(),time,docket:got.docket||'',rego:got.rego||'',tonnes:got.tonnes||'',product:got.product||'',docket_load:got.load||'',scanned:true});
-      if(!got.docket||!got.tonnes)setErr('Some of the docket couldn’t be read. Check it and fill in what’s missing.')}
+      const gap=fillDocketGap(got.docket,rows.map(r=>r.docket),got.docketGapAt);
+      const odd=!gap.guess&&!!got.docket&&gap.odd;
+      addRow({...layRow(),time,docket:gap.docket||'',rego:got.rego||'',tonnes:got.tonnes||'',product:got.product||'',docket_load:got.load||'',scanned:true,docket_check:!!gap.guess||odd});
+      if(gap.guess){const k=gap.guess.digit!=null?rows.findIndex(r=>r.docket===gap.guess.from):-1;
+        setErr(gap.guess.digit!=null?`One digit of the docket number wasn’t printed (the printer leaves a gap). It’s been filled in as ${gap.guess.digit} from load ${k+1}: check it against the docket.`
+          :'One digit of the docket number wasn’t printed (the printer leaves a gap). Type the missing digit in place of the “?”.')}
+      else if(odd)setErr('The docket number didn’t read cleanly (it isn’t the usual length): check it against the docket.')
+      else if(!got.docket||!got.tonnes)setErr('Some of the docket couldn’t be read. Check it and fill in what’s missing.')}
     catch(e){addRow({...layRow(),time});setErr((e&&e.message)||'The docket couldn’t be read. Type the details in.')}
     finally{setBusy('')}};
   const close=i=>{const miss=layMissing(rows[i]);if(miss.length){setTried(i);setErr('Fill in: '+miss.map(([,l])=>l).join(', ')+'.');return}setTried(-1);setErr('');setOpen(-1)};
@@ -320,9 +342,10 @@ function LayingEditor({f}){
         return isOpen?html`<div key=${i} class=${rowStyle+' qa-row-laying qa-lay-open'} style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
             <div class="flex items-center gap-2 text-[12.5px]"><span class="font-semibold whitespace-nowrap">Load ${i+1}</span><span class="text-muted">${r.scanned?'from the docket · ':''}progressive total ${fmt2((run))} t</span></div>
             ${(()=>{const k=rows.findIndex((x,j)=>j!==i&&!blank(r.docket)&&x.docket===r.docket);return k>=0&&html`<div id="qa-lay-dup" class="text-[12.5px] font-medium rounded-md px-2 py-1" style=${{background:'hsl(38 90% var(--blk-l))'}}>Docket ${r.docket} is already on load ${k+1}. Scanned twice?</div>`})()}
-            ${(()=>{const box=(k,id,extra)=>html`<input id=${id} class="field" style=${{...fs,...(bad(i,k)||{})}} value=${r[k]==null?'':r[k]} onInput=${e=>setRow(i,{[k]:k==='rego'?e.target.value.toUpperCase():e.target.value})} ...${extra||{}}/>`;
+            ${(()=>{const box=(k,id,extra)=>html`<input id=${id} class="field" style=${{...fs,...(k==='docket'&&r.docket_check&&!bad(i,k)?{boxShadow:'inset 0 0 0 1.5px hsl(38 90% 48%)',borderColor:'hsl(38 90% 48%)'}:{}),...(bad(i,k)||{})}} value=${r[k]==null?'':r[k]}
+                onInput=${e=>setRow(i,{[k]:k==='rego'?e.target.value.toUpperCase():e.target.value,...(k==='docket'?{docket_check:false}:{})})} ...${extra||{}}/>`;
               return html`<div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                <${Fld} label="Docket number">${box('docket','qa-lay-docket')}<//><${Fld} label="Truck rego">${box('rego','qa-lay-rego')}<//>
+                <${Fld} label=${r.docket_check?'Docket number (check)':'Docket number'}>${box('docket','qa-lay-docket')}<//><${Fld} label="Truck rego">${box('rego','qa-lay-rego')}<//>
                 <${Fld} label="Time in">${box('time','qa-lay-time',{type:'time'})}<//>
                 <${Fld} label="Temperature °C">${box('temp','qa-lay-temp',{type:'number',inputmode:'decimal'})}<//>
                 <${Fld} label="Tonnes">${box('tonnes','qa-lay-tonnes',{inputmode:'decimal'})}<//></div>
