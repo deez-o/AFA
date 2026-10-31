@@ -3015,9 +3015,9 @@ const SCREENS={
   jobs:{label:'Projects',title:'Projects',only:[],legend:[],head:''},
   planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
   floats:{label:'Floats',title:'Floats',only:[],legend:[],head:'',preview:true},   /* moving machines between jobs on the float (floats.js) */
+  fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',tab:'machine'},   /* maintenance: not for operators or viewers */
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
-  fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',tab:'machine'},   /* maintenance: not for operators or viewers */
   qa:{get label(){return signOnRole()?'Sign on':'QA'},get title(){return signOnRole()?'Sign on':'Site QA'},only:[],legend:[],head:''},   /* JSA and toolbox meetings per booking shift: supervisors fill them in, the crew sign */
   lab:{label:'Lab',title:'Lab',only:[],legend:[],head:''},   /* past shifts by job: laid from the QA, QA PDFs, lab reports */
   prestarts:{label:'Prestarts',title:'Prestarts',only:[],legend:[],head:''},   /* the phone checklist; the only screen operators see */
