@@ -583,24 +583,40 @@ async function costsPdf(data,e,p,sigs,opt={}){
   if(opt.blob)return {blob:doc.output('blob'),name};doc.save(name);
 }
 
-/* the job's paperwork (Jobs › a job): every submitted QA pack, with its PDF and the external costs PDF */
+/* the job's paperwork (Jobs › a job), shift by shift: submitted QA packs (QA, toolbox, external costs PDFs)
+   and the lab's asphalt reports, core reports and NCRs */
+const LAB_KINDS=[['asphalt','Asphalt Report'],['core','Core Report'],['ncr','NCR']];
 function JobQaDocs({data,jobId,sb}){
-  const [v,setV]=useState(null);const [err,setErr]=useState('');const [busy,setBusy]=useState('');
-  useEffect(()=>{let off=false;setV(null);(async()=>{try{const {data:ps,error}=await sb.from('qa_packs').select('*').eq('job_id',jobId).eq('status','submitted');if(error)throw error;if(!off)setV(ps||[])}catch(x){if(!off){setErr(errMsg(x));setV([])}}})();return()=>{off=true}},[jobId]);
+  const [v,setV]=useState(null);const [lab,setLab]=useState([]);const [err,setErr]=useState('');const [busy,setBusy]=useState('');
+  useEffect(()=>{let off=false;setV(null);setLab([]);(async()=>{
+    try{const ids=data.blocks.filter(b=>b.jobId===jobId).map(b=>b.id);   /* by the job's bookings (a pack's job_id can be empty) */
+      const {data:ps,error}=ids.length?await sb.from('qa_packs').select('*').in('block_id',ids).eq('status','submitted'):{data:[]};if(error)throw error;if(!off)setV(ps||[])}catch(x){if(!off){setErr(errMsg(x));setV([])}}
+    try{const {data:rs,error}=await sb.from('lab_reports').select('*').eq('job_id',jobId);if(!error&&!off)setLab(rs||[])}catch(x){}})();return()=>{off=true}},[jobId]);
   const entryOf=p=>{const b=data.blocks.find(x=>x.id===p.block_id);return b?{b,k:p.shift_date,crewId:coverOf(b,p.shift_date)||b.resourceId}:null};
   const run=async(p,kind)=>{const e=entryOf(p);if(!e){setErr('That booking is no longer on the schedule.');return}setBusy(p.id+kind);setErr('');
     try{const {data:sg,error}=await sb.from('qa_signatures').select('*').eq('pack_id',p.id);if(error)throw error;await (kind==='costs'?costsPdf:kind==='tb'?toolboxPdf:packPdf)(data,e,p,sg||[])}catch(x){setErr(errMsg(x))}finally{setBusy('')}};
+  const openFile=async r=>{const w=window.open('','_blank');try{const {data:d,error}=await sb.storage.from('lab').createSignedUrl(r.path,600);if(error||!d)throw error||new Error('Couldn’t open that file.');if(w)w.location=d.signedUrl;else location.href=d.signedUrl}catch(x){if(w)w.close();setErr(errMsg(x))}};
   if(!v)return html`<div class="text-[12.5px] text-muted">Loading…</div>`;
-  const list=[...v].sort((a,b)=>String(b.shift_date).localeCompare(String(a.shift_date)));
-  return html`<div class="grid gap-1.5" id="job-qa-docs">
+  /* every shift with something on it, newest first; old lab reports with no shift go under "Whole job" */
+  const keys=[...new Set([...v.map(p=>p.shift_date),...lab.map(r=>r.shift_date||'')])].sort((a,b)=>!a?1:!b?-1:b.localeCompare(a));
+  const crewOn=k=>{const ns=[...new Set(data.blocks.filter(b=>b.jobId===jobId&&b.kind==='job'&&b.start<=k&&b.end>=k).map(b=>(data.resources.find(r=>r.id===(coverOf(b,k)||b.resourceId))||{}).name).filter(Boolean))];return ns.join(', ')};
+  const btn=(cls,label,on,key)=>html`<button type="button" class=${'btn '+cls} style=${{height:28,fontSize:12}} disabled=${!!busy} onClick=${on}>${Icon.download} ${busy===key?'…':label}</button>`;
+  const none=html`<div class="text-[12px] text-faint">None yet</div>`;
+  const sec=(title,body,id)=>html`<div class="rounded-lg border border-line p-2.5 grid gap-1.5 content-start job-pw-sec" data-sec=${id}><div class="label" style=${{color:'var(--ink)'}}>${title}</div>${body}</div>`;
+  return html`<div class="grid gap-3" id="job-qa-docs">
     ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
-    ${!list.length?html`<div class="text-[12.5px] text-muted">No QA packs submitted for this job yet. They appear here once submitted.</div>`
-      :list.map(p=>{const e=entryOf(p);const crew=e&&data.resources.find(r=>r.id===e.crewId);return html`<div key=${p.id} class="flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2 job-qa-doc">
-        <div class="min-w-0 flex-1"><div class="text-[13px] font-medium">QA pack · ${WD[parse(p.shift_date).getDay()]} ${fmtShort(parse(p.shift_date))}${p.label?' · '+p.label:''}</div>
-          <div class="text-[11.5px] text-muted">${[crew&&crew.name,p.submitted_at&&'submitted '+fmtDT(p.submitted_at),p.submitted_name].filter(Boolean).join(' · ')}</div></div>
-        <button type="button" class="btn job-qa-pdf" style=${{height:28,fontSize:12}} disabled=${!!busy} onClick=${()=>run(p,'qa')}>${Icon.download} ${busy===p.id+'qa'?'…':'QA PDF'}</button>
-        ${p.toolbox&&html`<button type="button" class="btn job-tb-pdf" style=${{height:28,fontSize:12}} disabled=${!!busy} onClick=${()=>run(p,'tb')}>${Icon.download} ${busy===p.id+'tb'?'…':'Toolbox meeting'}</button>`}
-        ${(p.forms||{}).costs&&html`<button type="button" class="btn job-costs-pdf" style=${{height:28,fontSize:12}} disabled=${!!busy} title="Office use only" onClick=${()=>run(p,'costs')}>${Icon.download} ${busy===p.id+'costs'?'…':'External costs'}</button>`}</div>`})}</div>`;
+    ${!keys.length&&html`<div class="text-[12.5px] text-muted">Nothing yet. Submitted QA packs and the lab’s reports appear here, shift by shift.</div>`}
+    ${keys.map(k=>{const ps=v.filter(p=>p.shift_date===k).sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||'')));const rs=lab.filter(r=>(r.shift_date||'')===k);
+      return html`<div key=${k||'job'} class="grid gap-2 job-pw-shift" data-date=${k}>
+        <div class="flex items-baseline gap-2"><span class="text-[13.5px] font-semibold">${k?`${WD[parse(k).getDay()]} ${fmtShort(parse(k))} ${parse(k).getFullYear()}`:'Whole job'}</span><span class="text-[12px] text-muted">${k?crewOn(k):''}</span></div>
+        <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          ${sec('QA',ps.length?ps.map(p=>html`<div key=${p.id} class="grid gap-1 job-qa-doc"><div class="text-[12.5px] font-medium">${p.label||'QA pack'} <span class="text-[11.5px] text-muted font-normal">${[p.submitted_name,p.submitted_at&&fmtDT(p.submitted_at)].filter(Boolean).join(' · ')}</span></div>
+              <div class="flex flex-wrap gap-1.5">${btn('job-qa-pdf','QA PDF',()=>run(p,'qa'),p.id+'qa')}${p.toolbox&&btn('job-tb-pdf','Toolbox meeting',()=>run(p,'tb'),p.id+'tb')}${(p.forms||{}).costs&&btn('job-costs-pdf','External costs',()=>run(p,'costs'),p.id+'costs')}</div></div>`):none,'qa')}
+          ${LAB_KINDS.map(([kk,l])=>{const list=rs.filter(r=>r.kind===kk);
+            return html`<span key=${kk} class="contents">${sec(l,list.length?list.map(r=>html`<div key=${r.id} class="flex items-center gap-1.5 text-[12.5px] job-lab-doc"><span class="text-muted shrink-0">${Icon.download}</span>
+              <button type="button" class="hover:underline text-left min-w-0 flex-1 truncate" title=${r.name} onClick=${()=>openFile(r)}>${r.name}</button>${r.note&&html`<span class="text-[11px] text-muted truncate max-w-[100px]" title=${r.note}>${r.note}</span>`}</div>`):none,kk)}</span>`})}
+          ${(o=>o.length>0&&sec('Other lab reports',o.map(r=>html`<div key=${r.id} class="flex items-center gap-1.5 text-[12.5px] job-lab-doc"><span class="text-muted shrink-0">${Icon.download}</span><button type="button" class="hover:underline text-left min-w-0 flex-1 truncate" onClick=${()=>openFile(r)}>${r.name}</button></div>`),'other'))(rs.filter(r=>!LAB_KINDS.some(([x])=>x===r.kind)))}
+        </div></div>`})}</div>`;
 }
 
 window.QaScreen=QaScreen;

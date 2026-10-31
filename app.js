@@ -1530,7 +1530,7 @@ function BookingDetails({f,set,data,rtype,err,changeRes,resTypes}){
   return html`<div class="grid gap-6">
     ${f.fromMaintenance&&html`<div class="rounded-lg px-3 py-2 text-[12.5px]" style=${{background:'var(--accent-soft)'}}>This downtime comes from a maintenance work order. Change its dates on the work order in Fleet & Maintenance, or they’ll be put back.</div>`}
     <${Section} title="Assignment" id="sec-assign">
-      <label class="grid gap-1"><span class="label">${resTypes&&resTypes.length===1?(resTypes[0]==='person'?'Staff member':resTypes[0]==='machine'?'Machine':'Crew'):'Crew, staff member or machine'}</span>
+      <label class="grid gap-1"><span class="label">${resTypes&&resTypes.length===1?(resTypes[0]==='person'?'Staff member':resTypes[0]==='machine'?'Machine':resTypes[0]==='aplant'?'Asphalt plant':'Crew'):'Crew, staff member or machine'}</span>
         <select id="ed-res" class="field" value=${f.resourceId} onChange=${e=>changeRes(e.target.value)}>
           ${orderOf(data).filter(t=>TYPES[t]&&showT(t)).map(t=>html`<optgroup key=${t} label=${TYPES[t].label}>
             ${data.resources.filter(r=>r.type===t).map(r=>html`<option key=${r.id} value=${r.id}>${r.name} · ${r.sub}</option>`)}</optgroup>`)}
@@ -2703,12 +2703,16 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
                     <div class="text-[11.5px] text-muted">${p.status==='scheduled'?'On the schedule':p.status==='ready'?'Ready':'Draft'}${p.appliedAt?' · sent '+new Date(p.appliedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'}):''}</div></div>
                   <button type="button" class="btn" style=${{height:30}} onClick=${()=>onOpenPlan(p.id)}>Open</button></div>`)}
           </section>
-          <section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-paper">
-            <h3 id="job-paper" class="font-display text-[15px] font-semibold">Paperwork</h3>
-            <div class="text-[12px] text-muted">Site QA packs and external costs summaries, once submitted.</div>
-            <${JobPaperwork} data=${data} jobId=${job.id}/>
+          <section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-pics" id="job-pictures" style=${{borderStyle:'dashed'}}>
+            <h3 id="job-pics" class="font-display text-[15px] font-semibold">Pictures</h3>
+            <div class="text-[12.5px] text-muted">Coming soon: the job’s photos will be kept here.</div>
           </section>
         </div>
+        <section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-paper">
+          <h3 id="job-paper" class="font-display text-[15px] font-semibold">Paperwork</h3>
+          <div class="text-[12px] text-muted">Shift by shift: submitted QA packs, and the lab’s asphalt reports, core reports and NCRs.</div>
+          <${JobPaperwork} data=${data} jobId=${job.id}/>
+        </section>
       </div>`}
     </div>
   </div>`;
@@ -5475,7 +5479,7 @@ function App({boot,live}){
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${subWorksOpen&&html`<${SubWorksDialog} data=${data} notify=${setToast} onClose=${()=>setSubWorksOpen(false)}/>`}
     ${suggest&&html`<${SuggestDialog} setData=${setData} notify=${setToast} onClose=${()=>setSuggest(false)}/>`}
-    ${editing&&html`<${Editor} key=${(editing.id||'new')+':'+editing.resourceId+':'+editing.start} initial=${editing} data=${data} resTypes=${screen==='staff'?['person']:fleetCal?['machine']:null} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)} notify=${setToast}
+    ${editing&&html`<${Editor} key=${(editing.id||'new')+':'+editing.resourceId+':'+editing.start} initial=${editing} data=${data} resTypes=${screen==='staff'?['person']:fleetCal?['machine']:screen==='schedule'?((data.resources.find(r=>r.id===editing.resourceId)||{}).type==='aplant'?['aplant']:['crew']):null} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)} notify=${setToast}
       onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}setEditing(null);goScreen('planning')}}/>`}
     ${toast&&html`<div class="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-[13px] font-medium pop" role="status"
        style=${{bottom:'calc(20px + env(safe-area-inset-bottom, 0px))',background:'var(--ink)',color:'var(--surface)'}}>${toast}</div>`}
