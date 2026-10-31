@@ -249,6 +249,17 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   r = await call({ method: 'POST', query: { hook: key }, body: { object: 'jobactivity', entry: [{ uuid: '00000000-0000-0000-0000-0000000000b2' }] } });
   ok(r.statusCode === 200 && !rpcCalls.length && !sm8Calls.some(c => c.url.includes('/job/')), 'a booking on another client’s job: only its job link is read, then dropped');
 
+  {   // his note, word for word, as it was written
+    const { parseParts } = mod;
+    const p = parseParts('ork completed \nDie grind bolts\nChange tyres\n\nUsed \n2 x Tyres \n3 x Drill bits\n4900 x Bolts and nuts');
+    ok(JSON.stringify(p) === JSON.stringify([{ part: 'Tyres', qty: '2' }, { part: 'Drill bits', qty: '3' }, { part: 'Bolts and nuts', qty: '4900' }]),
+      'a "Used" list, one part per line: Tyres 2, Drill bits 3, Bolts and nuts 4900 (not split at "and"; "Change tyres" takes the stated 2)');
+    ok(JSON.stringify(parseParts('Parts: oil filter, 2 x fuel filter')) === JSON.stringify([{ part: 'Oil filter', qty: '1' }, { part: 'Fuel filter', qty: '2' }]), '"Parts: a, 2 x b" on one line');
+    ok(JSON.stringify(parseParts('Parts used:\nGrease\nAir filter\n\nChecked brakes, all good')) === JSON.stringify([{ part: 'Grease', qty: '1' }, { part: 'Air filter', qty: '1' }]), 'a list ends at a blank line');
+    ok(JSON.stringify(parseParts('Replaced steering wheel')) === JSON.stringify([{ part: 'Steering wheel', qty: '1' }]) && !parseParts('Took 3 hours. Replaced it.').length && !parseParts('the new hose leaks').length,
+      'sentences still work, and non-parts aren’t picked up');
+  }
+
   // his photos and PDFs
   db.wos[0].status = 'in_progress'; db.jobs[link.job_uuid].status = 'Work Order';
   db.attachments = [
