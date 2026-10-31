@@ -3332,18 +3332,20 @@ function TrucksManager({data,setData}){
    (restricted, in for maintenance that day, service due, open defects, already on another job) */
 const TRUCKISH=/truck|tipper|prime ?mover|semi|float|trailer|tanker|spray|water ?cart|bogie|ute/i;
 function FleetTrucks({data,setData}){
-  const [all,setAll]=useState(false);
   const machines=data.resources.filter(r=>r.type==='machine').sort((a,b)=>String(a.rego||a.name).localeCompare(String(b.rego||b.name),undefined,{numeric:true}));
   const isTruck=m=>TRUCKISH.test([machCatOf(m),m.name,m.sub].join(' '));
   const list=truckCosOf(data);const defs=truckDefsOf(data);
   const nameFor=id=>Object.keys(defs).find(k=>defs[k]&&defs[k].assetId===id&&list.some(x=>x.toLowerCase()===k.toLowerCase()))||null;
-  /* removed with the X (shared): hidden unless “Show all machines” is ticked */
-  const hidden=new Set(Array.isArray(data.fleetTruckHide)?data.fleetTruckHide:[]);
-  const shown=machines.filter(m=>all||((isTruck(m)||nameFor(m.id))&&!hidden.has(m.id)));
-  const hide=m=>setData(d=>{const h=Array.isArray(d.fleetTruckHide)?d.fleetTruckHide:[];if(h.includes(m.id))return d;
+  /* shown: machines that look like trucks, linked ones, and any added from the list below; removed with the X (all shared) */
+  const arr=v=>Array.isArray(v)?v:[];
+  const hidden=new Set(arr(data.fleetTruckHide)),added=new Set(arr(data.fleetTruckShow));
+  const shown=machines.filter(m=>(isTruck(m)||nameFor(m.id)||added.has(m.id))&&!hidden.has(m.id));
+  const others=machines.filter(m=>!shown.includes(m));
+  const hide=m=>setData(d=>{const h=arr(d.fleetTruckHide);
     const t={...truckDefsOf(d)};Object.keys(t).forEach(k=>{if(t[k]&&t[k].assetId===m.id){const {assetId,...rest}=t[k];if(rest.driver||rest.w)t[k]=rest;else delete t[k]}});   /* and its link goes */
-    return {...d,fleetTruckHide:[...h,m.id],truckDefs:t}});
-  const unhide=m=>setData(d=>({...d,fleetTruckHide:(Array.isArray(d.fleetTruckHide)?d.fleetTruckHide:[]).filter(x=>x!==m.id)}));
+    return {...d,fleetTruckHide:h.includes(m.id)?h:[...h,m.id],fleetTruckShow:arr(d.fleetTruckShow).filter(x=>x!==m.id),truckDefs:t}});
+  const include=id=>setData(d=>{const sh=arr(d.fleetTruckShow);return {...d,fleetTruckHide:arr(d.fleetTruckHide).filter(x=>x!==id),fleetTruckShow:sh.includes(id)?sh:[...sh,id]}});
+  const mLabel=m=>[m.rego||m.name,m.sub,m.rego?`(${m.name})`:''].filter(Boolean).join(' · ');
   const link=(id,name)=>setData(d=>{const m={...truckDefsOf(d)};Object.keys(m).forEach(k=>{if(m[k]&&m[k].assetId===id){const {assetId,...rest}=m[k];if(rest.driver||rest.w)m[k]=rest;else delete m[k]}});
     if(name)m[name]={...(m[name]||{}),assetId:id};return {...d,truckDefs:m}});
   const addNew=mc=>setData(d=>{const l=[...truckCosOf(d)];let nm=String(mc.rego||mc.name).trim();if(l.some(x=>x.toLowerCase()===nm.toLowerCase())&&!nameFor(mc.id))nm=`${nm} ${mc.sub||''}`.trim();
@@ -3355,18 +3357,19 @@ function FleetTrucks({data,setData}){
     <div class="flex flex-wrap items-center gap-2"><h3 class="font-display text-[15px] font-semibold flex-1">Trucks in Fleet</h3>
       ${nNew>0&&html`<button id="ft-add-all" type="button" class="btn btn-primary" style=${{height:30,fontSize:12.5}} onClick=${addAll}>${Icon.plus} Add all ${nNew} to the list</button>`}</div>
     <p class="text-[12px] text-muted">Link each of your transport trucks to its name on the truck list. A linked truck booked on a job then warns like a machine: restricted, in for maintenance that day, service due, open defects, or already on another job.</p>
-    ${!shown.length&&html`<div class="text-[12.5px] text-muted">No trucks found in Fleet. ${machines.length?'Tick “Show all machines” to pick from every machine.':'Add them in Fleet › Machines first.'}</div>`}
+    ${!shown.length&&html`<div class="text-[12.5px] text-muted">No trucks found in Fleet. ${machines.length?'Add one from the list below.':'Add them in Fleet › Machines first.'}</div>`}
     <div class="grid gap-1">${shown.map(m=>{const nm=nameFor(m.id);const al=typeof machAlert==='function'?machAlert(data,m.id):null;
       return html`<div key=${m.id} class="flex flex-wrap items-center gap-2 py-1 border-b border-line fleet-truck" data-id=${m.id}>
         <div class="min-w-0 flex-1"><div class="text-[13px] font-medium truncate">${m.rego?html`<span class="mono">${m.rego}</span>`:html`${m.name} <span class="text-[11.5px] text-muted font-normal">(no rego)</span>`} <span class="text-muted font-normal">${m.sub||''}</span></div>
           ${al&&html`<div class="text-[11.5px] font-medium" style=${{color:al.tone}}>${al.text}</div>`}</div>
         <select class="field field-sm" style=${{width:'auto',maxWidth:200,height:30,fontSize:12.5}} value=${nm||''} onChange=${e=>link(m.id,e.target.value||null)} aria-label=${`Truck list name for ${m.rego||m.name}`}>
           <option value="">Not linked</option>${list.map(x=>html`<option key=${x} value=${x}>${x}</option>`)}</select>
-        ${hidden.has(m.id)?html`<span class="text-[11.5px] text-muted">Removed</span><button type="button" class="btn" style=${{height:30,fontSize:12.5}} onClick=${()=>unhide(m)}>Show again</button>`
-          :html`${!nm&&html`<button type="button" class="btn" style=${{height:30,fontSize:12.5}} onClick=${()=>addNew(m)}>${Icon.plus} Add to list</button>`}
-          <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken ft-remove" onClick=${()=>hide(m)} aria-label=${`Remove ${m.rego||m.name} from Trucks in Fleet`} title="Remove from this list (it stays in Fleet)">${Icon.x}</button>`}
+        ${!nm&&html`<button type="button" class="btn" style=${{height:30,fontSize:12.5}} onClick=${()=>addNew(m)}>${Icon.plus} Add to list</button>`}
+        <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken ft-remove" onClick=${()=>hide(m)} aria-label=${`Remove ${m.rego||m.name} from Trucks in Fleet`} title="Remove from this list (it stays in Fleet)">${Icon.x}</button>
       </div>`})}</div>
-    <label class="flex items-center gap-2 text-[12px] text-muted cursor-pointer"><input type="checkbox" class="w-3.5 h-3.5" checked=${all} onChange=${e=>setAll(e.target.checked)}/> Show all machines (not just ones that look like trucks, and any removed)</label>
+    ${others.length>0&&html`<label class="flex flex-wrap items-center gap-2 text-[12.5px]"><span class="text-muted">Another machine:</span>
+      <select id="ft-add-machine" class="field field-sm" style=${{width:'auto',maxWidth:'100%',height:30,fontSize:12.5}} value="" onChange=${e=>{const v=e.target.value;e.target.value='';if(v)include(v)}} aria-label="Add a machine to Trucks in Fleet">
+        <option value="">Add a machine…</option>${others.map(m=>html`<option key=${m.id} value=${m.id}>${mLabel(m)}${hidden.has(m.id)?' (removed)':''}</option>`)}</select></label>`}
   </section>`;
 }
 function SubsManager({data,setData}){
@@ -5813,7 +5816,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion'],['ideas','idea'],['plans','plan'],['planImgs','plan_img']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','fleetTruckHide','machineCats','ideasVault','ideasPub','previewOnly','previewKnown','planQuick','planSteps'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','fleetTruckHide','fleetTruckShow','machineCats','ideasVault','ideasPub','previewOnly','previewKnown','planQuick','planSteps'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
