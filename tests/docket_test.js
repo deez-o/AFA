@@ -12,6 +12,11 @@ ok(parseDocket(real.replace(/Net Veleit.*\n/, '')).tonnes === '17.16', 'no net l
 ok(parseDocket('Delivery No: 1477 7629').docket === '14777629', 'a docket number read with a space in it');
 ok(parseDocket('Net Weight\n25.48').tonnes === '25.48' && parseDocket('Net Weight 25,480 kg').tonnes === '25.48', 'weight on the next line; kilograms → tonnes');
 ok(parseDocket('Truck Rego 123 ABC').rego === '123ABC' && !parseDocket('Trailer: Trailer Rego:\nCustomer No: 211296').rego, '"123 ABC" joined; an empty Trailer Rego picks up nothing');
+// a third docket (147769241, net 12.880 t): the dead strip cuts the 6, and the phone's reading loses the last digit too
+const r3 = parseDocket(fs.readFileSync(path.join(__dirname, 'fixtures/docket_ocr_3.txt'), 'utf8'));
+ok(r3.tonnes === '12.88', 'docket 3: tonnes read (12.880)');
+ok(r3.docket !== '147769241' && fillDocketGap(r3.docket, ['147769000']).odd === true, 'docket 3: the number reads badly ("1477324"), so it is marked to check, not accepted');
+ok(fillDocketGap('14779241', ['147769000']).docket === '147769241', 'docket 3 with only the printer’s gap: filled from an earlier load that night (147769241)');
 // the printer's dead strip: one digit of the delivery number isn't printed
 let g = fillDocketGap('14777629', ['147757000', '147757311']);
 ok(g.docket === '147757629' && g.guess.digit === '5', 'a digit short: filled from an earlier load sharing the start (14777629 → 147757629), flagged to check');
