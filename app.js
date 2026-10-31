@@ -1207,8 +1207,11 @@ function Board({data,days,view,narrow,tall=narrow,onMore,readOnly,onCreate,onEdi
 function useMachineAlerts(live,setRaw){
   useEffect(()=>{if(!live||!live.sb)return;const sb=live.sb;let off=false,t=null,ch=null;
     const load=async()=>{try{const {data:rows,error}=await sb.from('machine_alerts').select('*');if(error)throw error;
-      const o={};(rows||[]).forEach(r=>{o[r.asset_id]=r});
-      if(!off)setRaw(d=>JSON.stringify(d.alerts||{})===JSON.stringify(o)?d:{...d,alerts:o})}catch(e){}   /* not set up yet: no alerts */
+      const o0={};(rows||[]).forEach(r=>{o0[r.asset_id]=r});
+      /* a trailer hooked up to a restricted truck (Fleet: "Hooked up to") is restricted too */
+      if(!off)setRaw(d=>{const o={...o0};(d.resources||[]).forEach(r=>{const t=r.type==='machine'&&r.towedBy&&o0[r.towedBy];if(!t||!t.restricted||(o[r.id]&&o[r.id].restricted))return;
+          const tr=(d.resources||[]).find(x=>x.id===r.towedBy);o[r.id]={...(o[r.id]||{asset_id:r.id}),restricted:true,restriction:`its truck ${tr?tr.name:''} is off the road${t.restriction?' ('+t.restriction+')':''}`}});
+        return JSON.stringify(d.alerts||{})===JSON.stringify(o)?d:{...d,alerts:o}})}catch(e){}   /* not set up yet: no alerts */
       if(can('fleet',1))try{const {data:ev,error}=await sb.from('maintenance_feed').select('*');if(error)throw error;
         if(!off)setRaw(d=>JSON.stringify(d.mfeed||[])===JSON.stringify(ev||[])?d:{...d,mfeed:ev||[]})}catch(e){}};
     load();const iv=setInterval(load,5*60e3);

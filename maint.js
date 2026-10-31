@@ -116,7 +116,12 @@ function buildModel(data,db){
     const rd=readsBy.get(m.id)||{hours:[],km:[]};
     return {m,p,mt:meterType(m),cur:meters.get(m.id)||{},reads:rd,use:{hours:usageOf(rd.hours),km:usageOf(rd.km)},plans,wos,open,status,next,crew,retired:!!(p&&p.retired),ps:lastPs.get(m.id)||null,restr,defects,
       overdue:plans.filter(x=>x.state==='overdue').length,soon:plans.filter(x=>x.state==='soon').length,last:recs.find(r=>r.asset_id===m.id)||null}});
-  return {assets,byId:new Map(assets.map(a=>[a.m.id,a])),recs,meters,today}
+  /* a trailer hooked up to a truck (machine field towedBy): when the truck is out of service or being serviced, so is the trailer */
+  const byId0=new Map(assets.map(a=>[a.m.id,a]));const RANK={ok:0,due:1,service:2,out:3};
+  assets.forEach(a=>{const t=a.m.towedBy&&byId0.get(a.m.towedBy);if(!t)return;a.truck=t;
+    if((t.status==='out'||t.status==='service')&&RANK[t.status]>RANK[a.status]){a.status=t.status;a.withTruck=true}});
+  assets.forEach(a=>{a.trailers=assets.filter(x=>x.truck===a)});
+  return {assets,byId:byId0,recs,meters,today}
 }
 /* average use per year from a meter's readings (since its last replacement): needs two readings at least 30 days apart */
 function usageOf(rs){
@@ -632,7 +637,7 @@ function AssetPanel({ctx,a,onClose,open,behind}){
   const IC={svc:'hsl(145 55% 36%)',wo:'var(--accent)',done:'hsl(212 75% 48%)',ok:'hsl(145 55% 36%)',meter:'var(--faint)',down:'hsl(252 60% 55%)',ps:'hsl(30 90% 46%)',unsafe:'hsl(0 72% 47%)'};
   const p=a.p||{};
   return html`<${Modal} wide=${true} noEsc=${behind} title=${html`<span class="inline-flex items-center gap-2 flex-wrap">${a.m.name} <span class="text-muted font-normal text-[15px]">${a.m.sub||''}</span> ${stChip(a.status)}</span>`}
-    sub=${[machCatOf(a.m)||'No category',a.m.rego&&'Rego '+a.m.rego,a.crew&&a.crew.name,a.retired&&'Retired'].filter(Boolean).join(' · ')} onClose=${onClose}
+    sub=${html`${[machCatOf(a.m)||'No category',a.m.rego&&'Rego '+a.m.rego,a.crew&&a.crew.name,a.retired&&'Retired'].filter(Boolean).join(' · ')}${a.truck?html` · <span class="ap-towed" style=${a.withTruck?{color:ST[a.status][1],fontWeight:600}:null}>Hooked up to ${a.truck.m.name}${a.truck.m.rego?' ('+a.truck.m.rego+')':''}${a.withTruck?`: ${ST[a.status][0].toLowerCase()} with its truck`:''}</span>`:''}${a.trailers&&a.trailers.length?` · Towing ${a.trailers.map(x=>x.m.name).join(', ')}`:''}`} onClose=${onClose}
     foot=${html`${window.FFR&&html`<button id="ap-pdf" type="button" class="btn" disabled=${!!pdfBusy} onClick=${async()=>{setPdfBusy(true);try{await window.FFR.machinePdf(ctx,a)}catch(e){ctx.notify(errMsg(e))}finally{setPdfBusy(false)}}}>${Icon.download} ${pdfBusy?'Making PDF…':'History PDF'}</button>`}<span class="text-[12px] text-muted mr-auto">${a.open.length} open work order${a.open.length===1?'':'s'}</span>
       ${perms.work&&html`<button id="ap-breakdown" type="button" class="btn" style=${{color:'hsl(0 72% 47%)'}} onClick=${()=>open({k:'breakdown',a})}>${Icon.alert} Report breakdown</button>
         <button id="ap-newwo" type="button" class="btn btn-primary" onClick=${()=>open({k:'wo',init:{asset_id:a.m.id}})}>${Icon.plus} Work order</button>`}`}>
@@ -887,11 +892,14 @@ const REG_FIELDS=[['rego_expiry','Rego expiry','date'],['coi_due','Inspection (C
 const regVal=(t,v)=>{v=String(v??'').trim();if(!v)return null;if(t==='int'){const n=parseInt(v.replace(/[^\d]/g,''),10);return isFinite(n)?n:null}return v};
 /* how soon a date is: past (red), within 30 days (amber), or fine */
 const dueTone=d=>{if(!d)return null;const n=diffDays(TODAY,parse(String(d).slice(0,10)));return n<0?{c:'var(--bad)',t:'overdue'}:n<=30?{c:'hsl(30 90% 38%)',t:`in ${n} day${n===1?'':'s'}`}:null};
+/* trailers and the trucks that tow them */
+const isTrailerish=(cat,sub)=>/trailer|dolly|float|low loader/i.test(`${cat||''} ${sub||''}`);
+const isTruckish=r=>/truck|prime mover|tipper|mover/i.test(`${r.category||''} ${r.sub||''}`)?1:0;
 /* add or change a machine: its schedule details (planners and administrators) and its fleet details (maintenance staff) in one place */
 function MachineDialog({ctx,a,isNew,startDel,onClose}){
   const {sb,data,setData,perms,canEdit,notify,reload}=ctx;const m=a?a.m:{};const p=a&&a.p||{};
   const crews=data.resources.filter(r=>r.type==='crew');const cats=machineCatsOf(data);
-  const [f,setF]=useState({name:m.name||'',sub:m.sub||'',category:m.category||'',rego:m.rego||'',crewId:m.crewId||'',
+  const [f,setF]=useState({name:m.name||'',sub:m.sub||'',category:m.category||'',rego:m.rego||'',crewId:m.crewId||'',towedBy:m.towedBy||'',
     make:p.make||'',model:p.model||'',year:p.year?String(p.year):'',serial:p.serial||'',meter_type:a?a.mt:'hours',retired:!!p.retired,notes:p.notes||'',
     ...Object.fromEntries(REG_FIELDS.map(([k])=>[k,p[k]==null?'':String(p[k]).slice(0,k.endsWith('_expiry')||k.endsWith('_due')?10:99)]))});
   const [err,setErr]=useState('');const [busy,setBusy]=useState(false);const [del,setDel]=useState(!!startDel);
@@ -913,9 +921,9 @@ function MachineDialog({ctx,a,isNew,startDel,onClose}){
     if(canR){if(!name){setErr('Enter the machine’s fleet number.');return}
       if(data.resources.some(r=>r.type==='machine'&&r.id!==m.id&&r.name.trim().toLowerCase()===name.toLowerCase())){setErr(`There’s already a machine called ${name}.`);return}}
     const id=isNew?'m'+uid():m.id;
-    if(canR){const ros={name,sub:f.sub.trim()||'Machine',category:f.category.trim(),rego:f.rego.trim().toUpperCase(),crewId:f.crewId||null};
+    if(canR){const ros={name,sub:f.sub.trim()||'Machine',category:f.category.trim(),rego:f.rego.trim().toUpperCase(),crewId:f.crewId||null,towedBy:f.towedBy||null};
       if(isNew)setData(d=>({...d,resources:[...d.resources,{id,type:'machine',...ros,hue:HUES[d.resources.length%HUES.length],visible:true}]}));
-      else if(['name','sub','category','rego','crewId'].some(k=>(m[k]||'')!==(ros[k]||'')))setData(d=>({...d,resources:d.resources.map(r=>r.id===id?{...r,...ros}:r)}))}
+      else if(['name','sub','category','rego','crewId','towedBy'].some(k=>(m[k]||'')!==(ros[k]||'')))setData(d=>({...d,resources:d.resources.map(r=>r.id===id?{...r,...ros}:r)}))}
     if(canP&&profChanged()){setBusy(true);const e=await saveProf(id);
       /* an inspection date: make sure the machine has its yearly COI plan (only administrators can add plans) */
       if(!e&&f.coi_due&&perms.mgr&&window.ensureCoiPlan)try{if(await window.ensureCoiPlan(sb,id,f.coi_due)==='added')notify('Yearly COI inspection plan set up')}catch(x){}
@@ -941,6 +949,7 @@ function MachineDialog({ctx,a,isNew,startDel,onClose}){
         <${Fld} label="Category"><input id="mc-cat" list="mc-cats" class="field" style=${fs} placeholder="e.g. Pavers" value=${f.category} disabled=${!canR} onInput=${e=>setF({...f,category:e.target.value})}/><datalist id="mc-cats">${cats.map(c=>html`<option key=${c} value=${c}/>`)}</datalist><//>
         ${T('mc-rego','Rego','rego','e.g. 123ABC','mono uppercase')}
         <${Fld} label="Crew"><select id="mc-crew" class="field" style=${fs} value=${f.crewId} disabled=${!canR} onChange=${e=>setF({...f,crewId:e.target.value})}><option value="">No crew</option>${crews.map(c=>html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select><//>
+        ${(isTrailerish(f.category,f.sub)||f.towedBy)&&html`<${Fld} label="Hooked up to (truck)"><select id="mc-towed" class="field" style=${fs} value=${f.towedBy} disabled=${!canR} onChange=${e=>setF({...f,towedBy:e.target.value})}><option value="">Not hooked up</option>${data.resources.filter(r=>r.type==='machine'&&r.id!==m.id&&!isTrailerish(r.category,r.sub)).sort((x,y)=>(isTruckish(y)-isTruckish(x))||x.name.localeCompare(y.name)).map(r=>html`<option key=${r.id} value=${r.id}>${r.name}${r.rego?' · '+r.rego:''}${r.sub?' · '+r.sub:''}</option>`)}</select><span class="text-[11.5px] text-muted">When the truck is out of service or in for work, this trailer is too.</span><//>`}
       </div>
       <div class="grid sm:grid-cols-2 gap-3 border-t border-line pt-3">
         <div class="sm:col-span-2 label">Fleet details${!canP?html` <span class="normal-case font-normal tracking-normal text-muted">· mechanics, supervisors and administrators change these</span>`:''}</div>
