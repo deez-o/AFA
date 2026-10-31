@@ -201,35 +201,63 @@ function completionText({ job, notes }) {
   return String(job.work_done_description || '').trim() || notesTxt(hisNotes(notes));
 }
 
-// Parts he mentions in his own words: "Replaced oil filter and fuel filter", "fitted 2 x hydraulic hose", "used 20L engine oil".
-const PART_VERB = /\b(?:replaced|replace|fitted|fit|installed|install|supplied|used|changed|swapped)\b\s*|^\s*new\s+/i;   // "new …" only at the start ("New starter motor")
-const NOT_PARTS = /^(?:it|them|this|that|the job|job|part|parts|same|out|over|up|in|to|machine|unit|everything|all)$/i;
+// Parts he mentions in his own words. Understood:
+//   sentences   "Replaced oil filter and fuel filter, used 20L engine oil", "fitted 2 x hydraulic hose"
+//   a list      "Used" / "Parts" / "Parts used:" / "Materials" on its own line, then one part per line
+//   a heading   "Parts: oil filter, 2 x fuel filter"
+//   a quantity  any line that starts "2 x Tyres", "4900 x Bolts and nuts", "20L engine oil" (or ends "Battery x2")
+const PART_VERB = /\b(?:replaced|replace|fitted|fit|installed|install|supplied|used|changed|change|swapped)\b\s*|^\s*new\s+/i;   // "new …" only at the start ("New starter motor")
+const PART_HEAD = /^(?:parts?|parts? used|materials?|materials? used|used|replaced|fitted|supplied|installed|consumables)\s*:?\s*$/i;
+const PART_HEAD_LIST = /^(?:parts?|parts? used|materials?|materials? used|consumables)\s*:\s*(.+)$/i;
+const NOT_PARTS = /^(?:it|them|this|that|the job|job|part|parts|same|out|over|up|in|to|machine|unit|everything|all|work completed|completed|done)$/i;
+const UNIT = '(?:l|lt|ltr|litres?|liters?|m|metres?|meters?|kg)';
+function onePart(piece, splitAnd) {
+  piece = String(piece).replace(/^[\s\-*•·]+/, '');
+  if (!splitAnd) piece = piece.replace(/\b(?:on|to|at|for|from|because|as|due|which|that|was|were|under)\b\s.*$/i, '');
+  else piece = piece.replace(/\b(?:on|to|at|for|in|from|because|as|due|which|that|was|were|with the|under)\b.*$/i, '');
+  piece = piece.replace(/^\s*(?:with|a|an|the|new|some|both)\s+/i, '').replace(/^\s*(?:a|an|the|new)\s+/i, '').trim();
+  let qty = '1', explicit = false;
+  const q2 = piece.match(new RegExp('^(\\d+(?:\\.\\d+)?\\s*' + UNIT + ')\\s+(?:of\\s+)?(.+)$', 'i'));
+  const q1 = piece.match(/^(\d+(?:\.\d+)?)\s*(?:x|×|off|pcs?|of)?\s+(.+)$/i);
+  const q3 = piece.match(/^(.+?)\s*(?:x|×)\s*(\d+(?:\.\d+)?)$/i);
+  if (q2) { qty = q2[1].replace(/\s+/g, '').toUpperCase().replace(/LITRES?|LITERS?|LTR|LT/, 'L').replace(/METRES?|METERS?/, 'M'); piece = q2[2]; explicit = true; }
+  else if (q1) { qty = q1[1]; piece = q1[2]; explicit = true; }
+  else if (q3) { qty = q3[2]; piece = q3[1]; explicit = true; }
+  piece = piece.replace(/^(?:of|x|×)\s+/i, '').replace(/[\s:]+$/, '').replace(/\s+/g, ' ').trim();
+  if (!piece || piece.length < 3 || piece.length > 50 || piece.split(' ').length > 6 || NOT_PARTS.test(piece) || /^\d/.test(piece)) return null;
+  return { part: piece.charAt(0).toUpperCase() + piece.slice(1), qty, explicit };
+}
+const QTY_LINE = new RegExp('^[\\s\\-*•·]*(?:\\d+(?:\\.\\d+)?\\s*(?:x|×|off|pcs?)\\s*\\S|\\d+(?:\\.\\d+)?\\s*' + UNIT + '\\s+\\S|.+\\s(?:x|×)\\s*\\d+(?:\\.\\d+)?\\s*$)', 'i');
 function parseParts(text) {
   const found = [];
-  for (const sentence of String(text || '').split(/[\n.;!?]+/)) {
-    const re = new RegExp(PART_VERB.source, 'gi'), hits = [];
-    for (let m; (m = re.exec(sentence));) { hits.push(m); if (!m[0].length) re.lastIndex++; }
-    // each verb's own stretch: "replaced A and B, used C" → [A, B] then [C]
-    for (let h = 0; h < hits.length; h++) {
-    const rest = sentence.slice(hits[h].index + hits[h][0].length, h + 1 < hits.length ? hits[h + 1].index : undefined);
-    for (let piece of rest.split(/,|\band\b|&|\+/i)) {
-      piece = piece.replace(/\b(?:on|to|at|for|in|from|because|as|due|which|that|was|were|with the|under)\b.*$/i, '')
-        .replace(/^\s*(?:with|a|an|the|new|some|both)\s+/i, '').replace(/^\s*(?:a|an|the|new)\s+/i, '').trim();
-      let qty = '1';
-      let q1 = piece.match(/^(\d+(?:\.\d+)?)\s*(?:x|×|off|pcs?)?\s+(.+)$/i);
-      let q2 = piece.match(/^(\d+(?:\.\d+)?\s*(?:l|lt|ltr|litres?|liters?|m|metres?|meters?|kg))\s+(?:of\s+)?(.+)$/i);
-      let q3 = piece.match(/^(.+?)\s*(?:x|×)\s*(\d+(?:\.\d+)?)$/i);
-      if (q2) { qty = q2[1].replace(/\s+/g, '').toUpperCase().replace(/LITRES?|LITERS?|LTR|LT/, 'L').replace(/METRES?|METERS?/, 'M'); piece = q2[2]; }
-      else if (q1) { qty = q1[1]; piece = q1[2]; }
-      else if (q3) { qty = q3[2]; piece = q3[1]; }
-      piece = piece.replace(/^(?:of|x|×)\s+/i, '').replace(/\s+/g, ' ').trim();
-      const words = piece.split(' ').length;
-      if (!piece || piece.length < 3 || piece.length > 50 || words > 6 || NOT_PARTS.test(piece) || /^\d/.test(piece)) continue;
-      found.push({ part: piece.charAt(0).toUpperCase() + piece.slice(1), qty });
-    }
+  let listing = false;   // under a "Used" / "Parts" heading
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trim();
+    if (!line) { listing = false; continue; }
+    if (PART_HEAD.test(line)) { listing = true; continue; }
+    const head = line.match(PART_HEAD_LIST);
+    if (head) { head[1].split(/,|;/).forEach(x => { const p = onePart(x, false); if (p) found.push(p); }); continue; }
+    if (QTY_LINE.test(line)) { const p = onePart(line, false); if (p) { found.push(p); continue; } }   // "4900 x Bolts and nuts" is one part
+    if (listing && !PART_VERB.test(line) && line.split(/\s+/).length <= 6) { const p = onePart(line, false); if (p) { found.push(p); continue; } }
+    listing = false;
+    for (const sentence of line.split(/[.;!?]+/)) {
+      const re = new RegExp(PART_VERB.source, 'gi'), hits = [];
+      for (let m; (m = re.exec(sentence));) { hits.push(m); if (!m[0].length) re.lastIndex++; }
+      // each verb's own stretch: "replaced A and B, used C" → [A, B] then [C]
+      for (let h = 0; h < hits.length; h++) {
+        const rest = sentence.slice(hits[h].index + hits[h][0].length, h + 1 < hits.length ? hits[h + 1].index : undefined);
+        for (const piece of rest.split(/,|\band\b|&|\+/i)) { const p = onePart(piece, true); if (p) found.push(p); }
+      }
     }
   }
-  return found;
+  // each part once; a stated quantity wins ("Change tyres" then "2 x Tyres" → Tyres, 2)
+  const out = [], at = new Map();
+  for (const p of found) {
+    const k = partKey(p);
+    if (!at.has(k)) { at.set(k, out.length); out.push(p); }
+    else if (p.explicit && !out[at.get(k)].explicit) out[at.get(k)] = p;
+  }
+  return out.map(({ part, qty }) => ({ part, qty }));
 }
 // one list: what's on the work order already, his ServiceM8 materials, then parts he mentions (each name once)
 const partKey = p => String(p.part || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/s\b/g, '').trim();

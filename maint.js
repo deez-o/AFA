@@ -346,6 +346,12 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
   const {sb,notify,reload,perms,M,staff}=ctx;const isNew=!wo;
   const [f,setF]=useState(()=>wo?{...wo,start_date:wo.start_date||'',end_date:wo.end_date||'',assigned_to:wo.assigned_to||'',description:wo.description||'',completion_notes:wo.completion_notes||'',parts:wo.parts||[]}
     :{asset_id:'',wo_type:'request',plan_id:null,title:'',description:'',priority:'medium',assigned_to:'',start_date:'',end_date:'',parts:[],completion_notes:'',...(init||{})});
+  /* fields ServiceM8 can change while this is open: refreshed unless you've changed them, and only saved if you have */
+  const SYNCED=['start_date','end_date','assigned_to','completion_notes','parts'];
+  const formOf=w=>({start_date:w.start_date||'',end_date:w.end_date||'',assigned_to:w.assigned_to||'',completion_notes:w.completion_notes||'',parts:w.parts||[]});
+  const base=useRef(wo?formOf(wo):null);const same=(x,y)=>JSON.stringify(x)===JSON.stringify(y);
+  useEffect(()=>{if(!wo||!base.current)return;const now=formOf(wo);
+    setF(prev=>{const n={...prev};SYNCED.forEach(k=>{if(same(prev[k],base.current[k]))n[k]=now[k]});return n});base.current=now},[wo&&wo.updated_at]);
   const a=M.byId.get(f.asset_id);
   const [svc,setSvc]=useState(()=>({done_on:iso(TODAY),hours:a&&a.mt!=='km'&&a.cur.hours?String(a.cur.hours.value):'',km:a&&a.mt!=='hours'&&a.cur.km?String(a.cur.km.value):''}));
   const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
@@ -377,7 +383,9 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
           else{for(const [k,v] of [['hours',svc.hours],['km',svc.km]])if(v!==''&&a&&(k==='hours'?a.mt!=='km':a.mt!=='hours')&&(!a.cur[k]||+v>a.cur[k].value)){
             const {error:e2}=await sb.from('meter_readings').insert({asset_id:f.asset_id,kind:k,value:+v,source:'work_order',note:woNo(wo)});if(e2)throw e2}}
         }
-        const {error}=await sb.from('work_orders').update({...r,status:next}).eq('id',wo.id);if(error)throw error;
+        const upd={...r,status:next};const datesTouched=!same(f.start_date,base.current.start_date)||!same(f.end_date,base.current.end_date);
+        SYNCED.forEach(k=>{if(same(f[k],base.current[k])&&!((k==='start_date'||k==='end_date')&&datesTouched))delete upd[k]});   /* don't put back what ServiceM8 changed */
+        const {error}=await sb.from('work_orders').update(upd).eq('id',wo.id);if(error)throw error;
         notify(next!==wo.status?`${woNo(wo)}: ${WO_STATUS[next]}`:`${woNo(wo)} saved`)}
       sm8Flush(ctx);reload();onClose()}
     catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
