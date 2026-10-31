@@ -607,42 +607,46 @@ function JobQaDocs({data,jobId,sb,role,me}){
   const btn=(cls,label,on,key)=>html`<button type="button" class=${'btn '+cls} style=${{height:28,fontSize:12}} disabled=${!!busy} onClick=${on}>${Icon.download} ${busy===key?'…':label}</button>`;
   const none=html`<div class="text-[12px] text-faint">None yet</div>`;
   const sec=(title,body,id)=>html`<div class="rounded-lg border border-line p-2.5 grid gap-1.5 content-start job-pw-sec" data-sec=${id}><div class="label" style=${{color:'var(--ink)'}}>${title}</div>${body}</div>`;
+  const doc=r=>html`<div key=${r.id} class="flex items-center gap-1.5 text-[12.5px] job-lab-doc"><span class="text-muted shrink-0">${Icon.download}</span>
+    <button type="button" class="hover:underline text-left min-w-0 flex-1 truncate" title=${r.name} onClick=${()=>openFile(r)}>${r.name}</button>${r.note&&html`<span class="text-[11px] text-muted truncate max-w-[100px]" title=${r.note}>${r.note}</span>`}
+    ${(mgr||(canUp&&r.created_by===me))&&html`<button type="button" class="p-0.5 rounded text-muted hover:text-ink" aria-label=${'Remove '+r.name} onClick=${()=>delFile(r)}>${Icon.x}</button>`}</div>`;
   const scan=r=>html`<div key=${r.id} class="flex items-center gap-1.5 text-[12.5px] job-qa-scan"><span class="text-muted shrink-0">${Icon.download}</span>
     <button type="button" class="hover:underline text-left min-w-0 flex-1 truncate" title=${r.name} onClick=${()=>openFile(r)}>${r.name}</button><span class="text-[11px] text-muted shrink-0">uploaded</span>
     ${(mgr||(canUp&&r.created_by===me))&&html`<button type="button" class="p-0.5 rounded text-muted hover:text-ink" aria-label=${'Remove '+r.name} onClick=${()=>delFile(r)}>${Icon.x}</button>`}</div>`;
   return html`<div class="grid gap-3" id="job-qa-docs">
-    ${canUp&&html`<div><button id="job-qa-upload" type="button" class="btn btn-primary" disabled=${!jobShifts.length} title=${jobShifts.length?'':'No shifts worked yet'} onClick=${()=>setUp({n:Date.now()})}>${Icon.plus} Upload a QA pack</button></div>`}
+    ${canUp&&html`<div><button id="job-doc-upload" type="button" class="btn btn-primary" disabled=${!jobShifts.length} title=${jobShifts.length?'':'No shifts worked yet'} onClick=${()=>setUp({n:Date.now()})}>${Icon.plus} Upload a document</button></div>`}
     ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
     ${!keys.length&&html`<div class="text-[12.5px] text-muted">Nothing yet. Submitted QA packs and the lab’s reports appear here, shift by shift.</div>`}
     ${keys.map(k=>{const ps=v.filter(p=>p.shift_date===k).sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||'')));const rs=lab.filter(r=>(r.shift_date||'')===k);
       return html`<div key=${k||'job'} class="grid gap-2 job-pw-shift" data-date=${k}>
         <div class="flex items-baseline gap-2"><span class="text-[13.5px] font-semibold">${k?`${WD[parse(k).getDay()]} ${fmtShort(parse(k))} ${parse(k).getFullYear()}`:'Whole job'}</span><span class="text-[12px] text-muted">${k?crewOn(k):''}</span></div>
-        <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           ${sec('QA',ps.length||rs.some(r=>r.kind==='qa')?[...rs.filter(r=>r.kind==='qa').map(scan),...ps.map(p=>html`<div key=${p.id} class="grid gap-1 job-qa-doc"><div class="text-[12.5px] font-medium">${p.label||'QA pack'} <span class="text-[11.5px] text-muted font-normal">${[p.submitted_name,p.submitted_at&&fmtDT(p.submitted_at)].filter(Boolean).join(' · ')}</span></div>
               <div class="flex flex-wrap gap-1.5">${btn('job-qa-pdf','QA PDF',()=>run(p,'qa'),p.id+'qa')}${p.toolbox&&btn('job-tb-pdf','Toolbox meeting',()=>run(p,'tb'),p.id+'tb')}${(p.forms||{}).costs&&btn('job-costs-pdf','External costs',()=>run(p,'costs'),p.id+'costs')}</div></div>`)]:none,'qa')}
           ${LAB_KINDS.map(([kk,l])=>{const list=rs.filter(r=>r.kind===kk);
-            return html`<span key=${kk} class="contents">${sec(l,list.length?list.map(r=>html`<div key=${r.id} class="flex items-center gap-1.5 text-[12.5px] job-lab-doc"><span class="text-muted shrink-0">${Icon.download}</span>
-              <button type="button" class="hover:underline text-left min-w-0 flex-1 truncate" title=${r.name} onClick=${()=>openFile(r)}>${r.name}</button>${r.note&&html`<span class="text-[11px] text-muted truncate max-w-[100px]" title=${r.note}>${r.note}</span>`}</div>`):none,kk)}</span>`})}
-          ${(o=>o.length>0&&sec('Other lab reports',o.map(r=>html`<div key=${r.id} class="flex items-center gap-1.5 text-[12.5px] job-lab-doc"><span class="text-muted shrink-0">${Icon.download}</span><button type="button" class="hover:underline text-left min-w-0 flex-1 truncate" onClick=${()=>openFile(r)}>${r.name}</button></div>`),'other'))(rs.filter(r=>r.kind!=='qa'&&!LAB_KINDS.some(([x])=>x===r.kind)))}
+            return html`<span key=${kk} class="contents">${sec(l,list.length?list.map(doc):none,kk)}</span>`})}
+          ${(o=>sec('Other',o.length?o.map(doc):none,'other'))(rs.filter(r=>r.kind!=='qa'&&!LAB_KINDS.some(([x])=>x===r.kind)))}
         </div></div>`})}
     ${up&&html`<${QaUpload} key=${up.n} sb=${sb} jobId=${jobId} shifts=${jobShifts} onClose=${()=>setUp(null)} onDone=${()=>{setUp(null);setN(x=>x+1)}}/>`}</div>`;
 }
 /* a QA pack done on paper: the scan goes into the job's paperwork for its shift */
+const DOC_KINDS=[['qa','QA'],['asphalt','Asphalt Report'],['core','Core Report'],['ncr','NCR'],['other','Other']];
 function QaUpload({sb,jobId,shifts,onClose,onDone}){
-  const [k,setK]=useState(shifts[0]||'');const [file,setFile]=useState(null);const [note,setNote]=useState('');const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
-  const save=async()=>{setErr('');if(!k){setErr('Pick the shift.');return}if(!file){setErr('Choose the scanned QA pack.');return}
-    if(file.size>25*1024*1024){setErr('That file is over 25 MB.');return}if(!/^(application\/pdf|image\/(jpeg|png|webp))$/.test(file.type||'')){setErr('Add a PDF or a picture (JPG, PNG).');return}
+  const [k,setK]=useState(shifts[0]||'');const [kind,setKind]=useState('qa');const [file,setFile]=useState(null);const [note,setNote]=useState('');const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+  const save=async()=>{setErr('');if(!k){setErr('Pick the shift.');return}if(!file){setErr('Choose the file.');return}
+    if(file.size>25*1024*1024){setErr('That file is over 25 MB.');return}if(!/^(application\/pdf|image\/(jpeg|png|webp)|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document)|application\/vnd\.ms-excel|text\/csv)$/.test(file.type||'')){setErr('Add a PDF, a picture, or an Excel, CSV or Word file.');return}
     setBusy(true);try{const safe=file.name.replace(/[^\w.\- ]+/g,'_').slice(-80);const path=`jobs/${jobId}/${Date.now()}-${safe}`;
       const {error}=await sb.storage.from('lab').upload(path,file,{contentType:file.type,upsert:false});if(error)throw error;
-      const {error:e2}=await sb.from('lab_reports').insert({job_id:jobId,kind:'qa',shift_date:k,name:file.name,path,mime:file.type,size:file.size,note:note.trim()||null});
+      const {error:e2}=await sb.from('lab_reports').insert({job_id:jobId,kind,shift_date:k,name:file.name,path,mime:file.type,size:file.size,note:note.trim()||null});
       if(e2){try{await sb.storage.from('lab').remove([path])}catch(x){}throw e2}onDone()}
-    catch(x){setErr(/kind|check constraint|lab_reports/.test(errMsg(x))?'Uploading QA packs needs a database update: an administrator needs to run supabase/lab.sql again.':errMsg(x))}finally{setBusy(false)}};
-  return html`<${Modal} title="Upload a QA pack" sub="A QA pack done on paper: the scan goes in this job’s paperwork for the shift" onClose=${onClose}
+    catch(x){setErr(/kind|check constraint|lab_reports/.test(errMsg(x))?'Uploading documents needs a database update: an administrator needs to run supabase/lab.sql again.':errMsg(x))}finally{setBusy(false)}};
+  return html`<${Modal} title="Upload a document" sub="It goes in this job’s paperwork, under the shift and section you pick" onClose=${onClose}
     foot=${html`${err&&html`<span id="job-qa-up-err" class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="job-qa-up-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Uploading…':'Upload'}</button>`}>
     <div class="grid gap-3">
       <${Fld} label="Shift"><select id="job-qa-up-shift" class="field" style=${fs} value=${k} onChange=${e=>setK(e.target.value)}>${shifts.map(d=>html`<option key=${d} value=${d}>${WD[parse(d).getDay()]} ${fmtShort(parse(d))} ${parse(d).getFullYear()}</option>`)}</select><//>
-      <${Fld} label="Scanned QA pack (PDF or picture, up to 25 MB)"><input id="job-qa-up-file" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" class="field" style=${{...fs,paddingTop:5}} onChange=${e=>setFile(e.target.files&&e.target.files[0]||null)}/><//>
-      <${Fld} label="Note (optional)"><input id="job-qa-up-note" class="field" style=${fs} placeholder="e.g. Paper pack, north side" value=${note} onInput=${e=>setNote(e.target.value)}/><//>
+      <div class="grid gap-1 min-w-0"><span class="label">Section</span><div class="flex flex-wrap gap-1.5" id="job-doc-kind">${DOC_KINDS.map(([kk,l])=>html`<button key=${kk} type="button" aria-pressed=${kind===kk} class=${'job-doc-kind text-[12.5px] rounded-full border px-2.5 py-1 '+(kind===kk?'font-semibold':'text-muted hover:text-ink')} style=${kind===kk?{background:'var(--accent-soft)',borderColor:'var(--accent)',color:'var(--accent)'}:{borderColor:'var(--line)'}} data-kind=${kk} onClick=${()=>setKind(kk)}>${l}</button>`)}</div></div>
+      <${Fld} label="File (PDF, picture, Excel, CSV or Word, up to 25 MB)"><input id="job-qa-up-file" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.xlsx,.xls,.csv,.docx" class="field" style=${{...fs,paddingTop:5}} onChange=${e=>setFile(e.target.files&&e.target.files[0]||null)}/><//>
+      <${Fld} label="Note (optional)"><input id="job-qa-up-note" class="field" style=${fs} placeholder="e.g. Paper QA pack, north side" value=${note} onInput=${e=>setNote(e.target.value)}/><//>
     </div><//>`;
 }
 
