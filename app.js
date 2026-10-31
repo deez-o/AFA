@@ -2939,9 +2939,9 @@ const SCREENS={
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
   fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',tab:'machine',preview:true},   /* maintenance: not for operators or viewers */
-  prestarts:{label:'Prestarts',title:'Prestarts',only:[],legend:[],head:'',preview:true},   /* the phone checklist; the only screen operators see */
   qa:{label:'QA',title:'Site QA',only:[],legend:[],head:'',preview:true},   /* JSA and toolbox meetings per booking shift: supervisors fill them in, the crew sign */
   lab:{label:'Lab',title:'Lab',only:[],legend:[],head:'',preview:true},   /* past shifts by job: laid from the QA, QA PDFs, lab reports */
+  prestarts:{label:'Prestarts',title:'Prestarts',only:[],legend:[],head:'',preview:true},   /* the phone checklist; the only screen operators see */
   admin:{label:'Admin',title:'Admin',only:[],legend:[],head:'',bottom:true},   /* roles and what each can do: the administrator only */
   ideas:{label:'Ideas',title:'Ideas',only:[],legend:[],head:'',bottom:true},   /* the administrator only, never superusers; always at the bottom of the menu */   /* administrators only (button hidden for everyone else) */
 };
