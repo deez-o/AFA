@@ -1606,7 +1606,8 @@ const BOOKING_TABS=[
   {id:'program',label:'Subcontractors',applies:f=>f.kind==='job',
     badge:f=>{const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&q.subs)||[]).filter(subHas).length,0);return n?`${n}`:null},
     render:p=>html`<${ProgramShifts} key="subs" part="subs" f=${p.f} set=${p.set} data=${p.data}/>`},
-  {id:'qa',label:'QA',applies:(f,d)=>f.kind==='job'&&!!f.id&&d.blocks.some(b=>b.id===f.id)&&!!window.__ffLive&&screenOK('qa',window.__ffLive.role,d),
+  /* QA tab inside a booking: switched off (QA packs are reached from the QA screen) */
+  {id:'qa',label:'QA',applies:(f,d)=>false&&f.kind==='job'&&!!f.id&&d.blocks.some(b=>b.id===f.id)&&!!window.__ffLive&&screenOK('qa',window.__ffLive.role,d),
     render:p=>html`<${LazyFleet} comp="QaBookingTab" data=${p.data} block=${p.f} live=${window.__ffLive}/>`},
 ];
 
