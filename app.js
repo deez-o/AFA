@@ -4111,14 +4111,7 @@ const PLAN_STEPS=['Put environmental protection out before profiler starts','Com
   'Bring out sand for clean-up','Use watercart to wet down base and minimise dust','Use water at the end to help with clean-up',
   'Use straight edge on all joins to ensure transitions are correct','Use a 50mm block to mark out the ramp to be cut by the profiler',
   'Cut out ramps from last night’s work to the numbers on the ground','Tack coat before paving'];
-const PLAN_HAZARDS=[
-  {hazard:'Open trenches / uneven ground',control:'Exclusion zones, watch your step, paint ramps'},
-  {hazard:'Slips, trips and falls',control:'Keep work area clear, good housekeeping'},
-  {hazard:'Open drains and pits',control:'Cover pits with environmental covers; enviro trailer on site'},
-  {hazard:'Sediment control',control:'Environmental protection out before profiling starts'},
-  {hazard:'Lighting (night works)',control:'Light towers for night works, head lamps for the crew'},
-  {hazard:'Traffic',control:'Traffic control to set out the job to the TGS and control trucks entering and leaving site'},
-  {hazard:'Trucks and plant movements',control:'Spotters to communicate with trucks once on site'}];
+/* hazards are added to a plan one by one (there's no standard list) */
 const PIN_TYPES=[
   {id:'site',label:'Job location',color:'#9b0a1e'},
   {id:'access',label:'Site access',color:'#26548c'},
@@ -4186,7 +4179,7 @@ function newPlan(d){
   return {id:'p'+uid(),title:'',status:'draft',bookingId:'',uhf:'',induction:false,supply:'AFA',
     ppe:['Hi-vis (day/night)','Steel cap boots','2-way radios (UHF)'],pins:[],sections:[],shiftPlans:[],jobSubs:[],machineIds:[],
     seal:{},
-    hazards:PLAN_HAZARDS.map(h=>({...h})),createdAt:Date.now(),...(window.__rosterMe?{createdBy:window.__rosterMe}:{})};
+    hazards:[],createdAt:Date.now(),   /* no standard hazards: added only when there's one to note */...(window.__rosterMe?{createdBy:window.__rosterMe}:{})};
 }
 /* what's in the way: machines on other jobs or down, and the crew already booked, on the plan's dates */
 function planConflicts(d,p){
@@ -4620,10 +4613,10 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
       <div class="grid gap-1.5"><span class="label">PPE</span>
         <div class="flex flex-wrap gap-x-4 gap-y-1.5 text-[13px]">${PLAN_PPE.map(t=>html`<label key=${t} class="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${(p.ppe||[]).includes(t)} onChange=${()=>set({ppe:toggleIn(p.ppe||[],t)})}/>${t}</label>`)}</div>
         <input class="field field-sm" style=${fsm} placeholder="Other PPE" value=${p.ppeOther||''} onInput=${e=>set({ppeOther:e.target.value})} aria-label="Other PPE"/></div>
-      <div class="grid gap-1.5"><span class="label">Hazards and controls</span>
+      <div class="grid gap-1.5" id="plan-hazards">${(p.hazards||[]).length>0&&html`<span class="label">Hazards</span>`}
         ${(p.hazards||[]).map((h,j)=>html`<div key=${j} class="grid gap-2 grid-cols-[1fr_28px] sm:grid-cols-[1fr_1.6fr_28px] items-start">
           <input class="field field-sm" style=${fsm} placeholder="Hazard" value=${h.hazard||''} onInput=${e=>set({hazards:p.hazards.map((x,k)=>k===j?{...x,hazard:e.target.value}:x)})} aria-label="Hazard"/>
-          <input class="field field-sm sm:col-start-2" style=${fsm} placeholder="Control" value=${h.control||''} onInput=${e=>set({hazards:p.hazards.map((x,k)=>k===j?{...x,control:e.target.value}:x)})} aria-label="Control"/>
+          <input class="field field-sm sm:col-start-2" style=${fsm} placeholder="Control (optional)" value=${h.control||''} onInput=${e=>set({hazards:p.hazards.map((x,k)=>k===j?{...x,control:e.target.value}:x)})} aria-label="Control"/>
           <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken row-start-1 col-start-2 sm:col-start-3" onClick=${()=>set({hazards:p.hazards.filter((_,k)=>k!==j)})} aria-label="Remove hazard">${Icon.x}</button></div>`)}
         <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>set({hazards:[...(p.hazards||[]),{}]})}>${Icon.plus} Add hazard</button></div></div>
 
