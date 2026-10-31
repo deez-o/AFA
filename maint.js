@@ -155,6 +155,8 @@ async function sm8Call(sb,body){const {data:{session}}=await sb.auth.getSession(
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('The ServiceM8 link didn’t answer ('+r.status+')'));return j}
 const sm8Cfg=db=>(db&&db.sm8&&db.servicem8_settings[0])||{};
 const sm8On=db=>!!sm8Cfg(db).enabled;
+/* who new work orders are assigned to: the contractor named in the ServiceM8 settings, or Bells Diesel */
+const defaultAssignee=db=>(sm8Cfg(db).contractor_name||'').trim()||'Bells Diesel';
 const sm8Of=(db,id)=>db&&db.sm8?db.servicem8_jobs.find(l=>l.work_order_id===id)||null:null;
 /* send what's waiting and pass on changes, quietly: a problem shows on the work order itself */
 function sm8Flush(ctx){if(sm8On(ctx.db))sm8Call(ctx.sb,{action:'flush'}).catch(()=>{})}
@@ -345,7 +347,7 @@ function ProfileDialog({ctx,a,onClose}){
 function WorkOrderDialog({ctx,wo,init,onClose}){
   const {sb,notify,reload,perms,M,staff}=ctx;const isNew=!wo;
   const [f,setF]=useState(()=>wo?{...wo,start_date:wo.start_date||'',end_date:wo.end_date||'',assigned_to:wo.assigned_to||'',description:wo.description||'',servicem8_no:wo.servicem8_no||'',completion_notes:wo.completion_notes||'',parts:wo.parts||[]}
-    :{asset_id:'',wo_type:'request',plan_id:null,title:'',description:'',servicem8_no:'',priority:'medium',assigned_to:'',start_date:'',end_date:'',parts:[],completion_notes:'',...(init||{})});
+    :{asset_id:'',wo_type:'request',plan_id:null,title:'',description:'',servicem8_no:'',priority:'medium',assigned_to:defaultAssignee(ctx.db),start_date:'',end_date:'',parts:[],completion_notes:'',...(init||{})});
   /* fields ServiceM8 can change while this is open: refreshed unless you've changed them, and only saved if you have */
   const SYNCED=['start_date','end_date','assigned_to','completion_notes','parts'];
   const formOf=w=>({start_date:w.start_date||'',end_date:w.end_date||'',assigned_to:w.assigned_to||'',completion_notes:w.completion_notes||'',parts:w.parts||[]});
@@ -459,7 +461,7 @@ function BreakdownDialog({ctx,a,onClose}){
   const [f,setF]=useState({what:'',location:crewJob,safe:null,priority:'high',hours:'',km:''});const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
   const save=async()=>{setErr('');if(!f.what.trim()){setErr('Describe what failed.');return}if(f.safe==null){setErr('Say whether it is safe to operate.');return}setBusy(true);
     try{const first=f.what.trim().split('\n')[0];
-      const {error}=await sb.from('work_orders').insert({asset_id:a.m.id,wo_type:'breakdown',title:first.length>80?first.slice(0,77)+'…':first,
+      const {error}=await sb.from('work_orders').insert({asset_id:a.m.id,wo_type:'breakdown',assigned_to:defaultAssignee(ctx.db),title:first.length>80?first.slice(0,77)+'…':first,
         description:[f.what.trim(),f.location.trim()?'Location / job: '+f.location.trim():'',`Reported by ${window.__rosterMe?showLogin(window.__rosterMe):'someone'} at ${new Date().toLocaleString('en-AU',{dateStyle:'medium',timeStyle:'short'})}`].filter(Boolean).join('\n\n'),
         priority:f.priority,safe_to_operate:f.safe,reported_hours:n0(f.hours),reported_km:n0(f.km),start_date:f.safe?null:iso(TODAY),end_date:f.safe?null:iso(TODAY),status:f.safe?'open':'scheduled'});
       if(error)throw error;
