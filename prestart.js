@@ -361,7 +361,7 @@ function MyDefects({ctx,me,onOpen}){
   const {db,M}=ctx;
   if(!db.p4)return null;
   const myPs=new Set(db.prestarts.filter(p=>p.operator===me).map(p=>p.id));
-  const since=Date.now()-30*864e5;
+  const since=Date.now()-7*864e5;   // closed or dismissed defects drop off a week later
   const seen=readSeen(me);
   const list=(db.defects||[]).filter(d=>d.reported_by===me||myPs.has(d.prestart_id)||myPs.has(d.last_prestart_id))
     .filter(d=>!['closed','dismissed'].includes(d.status)||new Date(d.updated_at).getTime()>since)
