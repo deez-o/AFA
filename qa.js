@@ -606,6 +606,7 @@ function JobQaDocs({data,jobId,sb,role,me}){
   const crewOn=k=>{const ns=[...new Set(data.blocks.filter(b=>b.jobId===jobId&&b.kind==='job'&&b.start<=k&&b.end>=k).map(b=>(data.resources.find(r=>r.id===(coverOf(b,k)||b.resourceId))||{}).name).filter(Boolean))];return ns.join(', ')};
   const btn=(cls,label,on,key)=>html`<button type="button" class=${'btn '+cls} style=${{height:28,fontSize:12}} disabled=${!!busy} onClick=${on}>${Icon.download} ${busy===key?'…':label}</button>`;
   const none=html`<div class="text-[12px] text-faint">None yet</div>`;
+  const missing=html`<div class="text-[12px] font-semibold job-pw-missing" style=${{color:'var(--bad)'}}>Missing</div>`;   /* asphalt and core reports are expected for every shift */
   const sec=(title,body,id)=>html`<div class="rounded-lg border border-line p-2.5 grid gap-1.5 content-start job-pw-sec" data-sec=${id}><div class="label" style=${{color:'var(--ink)'}}>${title}</div>${body}</div>`;
   const doc=r=>html`<div key=${r.id} class="flex items-center gap-1.5 text-[12.5px] job-lab-doc"><span class="text-muted shrink-0">${Icon.download}</span>
     <button type="button" class="hover:underline text-left min-w-0 flex-1 truncate" title=${r.name} onClick=${()=>openFile(r)}>${r.name}</button>${r.note&&html`<span class="text-[11px] text-muted truncate max-w-[100px]" title=${r.note}>${r.note}</span>`}
@@ -624,7 +625,7 @@ function JobQaDocs({data,jobId,sb,role,me}){
           ${sec('QA',ps.length||rs.some(r=>r.kind==='qa')?[...rs.filter(r=>r.kind==='qa').map(scan),...ps.map(p=>html`<div key=${p.id} class="grid gap-1 job-qa-doc"><div class="text-[12.5px] font-medium">${p.label||'QA pack'} <span class="text-[11.5px] text-muted font-normal">${[p.submitted_name,p.submitted_at&&fmtDT(p.submitted_at)].filter(Boolean).join(' · ')}</span></div>
               <div class="flex flex-wrap gap-1.5">${btn('job-qa-pdf','QA PDF',()=>run(p,'qa'),p.id+'qa')}${p.toolbox&&btn('job-tb-pdf','Toolbox meeting',()=>run(p,'tb'),p.id+'tb')}${(p.forms||{}).costs&&btn('job-costs-pdf','External costs',()=>run(p,'costs'),p.id+'costs')}</div></div>`)]:none,'qa')}
           ${LAB_KINDS.map(([kk,l])=>{const list=rs.filter(r=>r.kind===kk);
-            return html`<span key=${kk} class="contents">${sec(l,list.length?list.map(doc):none,kk)}</span>`})}
+            return html`<span key=${kk} class="contents">${sec(l,list.length?list.map(doc):(kk==='asphalt'||kk==='core')&&k?missing:none,kk)}</span>`})}
           ${(o=>sec('Other',o.length?o.map(doc):none,'other'))(rs.filter(r=>r.kind!=='qa'&&!LAB_KINDS.some(([x])=>x===r.kind)))}
         </div></div>`})}
     ${up&&html`<${QaUpload} key=${up.n} sb=${sb} jobId=${jobId} shifts=${jobShifts} onClose=${()=>setUp(null)} onDone=${()=>{setUp(null);setN(x=>x+1)}}/>`}</div>`;
