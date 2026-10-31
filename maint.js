@@ -842,8 +842,10 @@ function ReadingsHistory({a,ctx}){
 function MachinesTab({ctx,open}){
   const {M,data,perms,canEdit}=ctx;
   const [q,setQ]=useState('');const [cat,setCat]=useState('');const [ret,setRet]=useState(false);const [dlg,setDlg]=useState(null);
+  const [svc,setSvc]=useState('');   /* last service: '' all, 'set', 'notset' */
+  const svcState=a=>{const ps=a.plans||[];if(!ps.length)return 'noplan';return ps.every(x=>x.last)?'set':'notset'};
   const ql=q.trim().toLowerCase();const nRet=M.assets.filter(a=>a.retired).length;
-  const hit=a=>(ret||!a.retired)&&(!cat||machCatOf(a.m).toLowerCase()===cat.toLowerCase())&&(!ql||[a.m.name,a.m.sub,a.m.rego,machCatOf(a.m),a.crew&&a.crew.name,a.p&&a.p.make,a.p&&a.p.model,a.p&&a.p.serial].join(' ').toLowerCase().includes(ql));
+  const hit=a=>(ret||!a.retired)&&(!svc||svcState(a)===svc)&&(!cat||machCatOf(a.m).toLowerCase()===cat.toLowerCase())&&(!ql||[a.m.name,a.m.sub,a.m.rego,machCatOf(a.m),a.crew&&a.crew.name,a.p&&a.p.make,a.p&&a.p.model,a.p&&a.p.serial].join(' ').toLowerCase().includes(ql));
   const shown=data.resources.filter(r=>r.type==='machine').filter(r=>{const a=M.byId.get(r.id);return a&&hit(a)});
   const groups=groupMachines(shown,data);
   const canAdd=canEdit;const canDel=perms.admin;
@@ -851,6 +853,8 @@ function MachinesTab({ctx,open}){
     <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
       <input id="mc-search" class="field" style=${{...fs,width:240}} placeholder="Search machine, rego, make, serial" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search machines"/>
       <select class="field w-auto" style=${fs} value=${cat} onChange=${e=>setCat(e.target.value)} aria-label="Category"><option value="">All categories</option>${machineCatsOf(data).map(c=>html`<option key=${c} value=${c}>${c}</option>`)}</select>
+      <select id="mc-svc" class="field w-auto" style=${fs} value=${svc} onChange=${e=>setSvc(e.target.value)} aria-label="Last service">
+        <option value="">Last service: all</option><option value="set">Last service set</option><option value="notset">Last service not set</option></select>
       ${nRet>0&&html`<label class="inline-flex items-center gap-1.5 text-[12.5px] cursor-pointer"><input type="checkbox" class="w-4 h-4" checked=${ret} onChange=${e=>setRet(e.target.checked)}/>Show retired (${nRet})</label>`}
       <span class="text-[12.5px] text-muted">${shown.length} machine${shown.length===1?'':'s'}</span><span class="flex-1"></span>
       ${html`<button id="mc-export-missing" type="button" class="btn" onClick=${()=>exportMissing(ctx)} title="A spreadsheet of machines with no make, model or year, ready to fill in (e.g. from a rego check) and import">${Icon.download} Export missing details</button>`}
