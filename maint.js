@@ -40,11 +40,12 @@ function useMaint(sb){
       catch(e){P4.forEach(t=>o[t]=[]);o.p4=false;o.p4err=errMsg(e)}
       try{const r5=await Promise.all(P5.map(t=>fetchAll(sb,t)));P5.forEach((t,i)=>o[t]=r5[i]);o.sm8=true}
       catch(e){P5.forEach(t=>o[t]=[]);o.sm8=false}
+      try{o.fleet_settings=await fetchAll(sb,'fleet_settings')}catch(e){o.fleet_settings=null}   /* supabase/service_auto.sql: optional */
       setDb(o);setErr('');if(window.ffStore)window.ffStore.set('maint',{...o,savedAt:Date.now()})}   /* kept on this device for working without reception */
     catch(e){const saved=window.isNetErr&&window.isNetErr(e)&&window.ffStore?await window.ffStore.get('maint'):null;
       if(saved){setDb(d=>d&&!d.offline?d:{...saved,offline:true});setErr('')}else setErr(errMsg(e))}};
   useEffect(()=>{load();let t=null;let ch=null;
-    try{ch=sb.channel('maint-'+uid());[...MT,...P3,'prestarts',...P4,...P5].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,350)}));ch.subscribe()}catch(e){}
+    try{ch=sb.channel('maint-'+uid());[...MT,...P3,'prestarts',...P4,...P5,'fleet_settings'].forEach(tb=>ch.on('postgres_changes',{event:'*',schema:'public',table:tb},()=>{clearTimeout(t);t=setTimeout(load,350)}));ch.subscribe()}catch(e){}
     return()=>{clearTimeout(t);try{if(ch)sb.removeChannel(ch)}catch(e){}}},[]);
   return {db,err,reload:load};
 }
@@ -869,6 +870,27 @@ function MachineDialog({ctx,a,isNew,startDel,onClose}){
     </div><//>`;
 }
 
+/* services raised automatically (api/_service_due.js, on the regular schedule) */
+function AutoServices({ctx}){
+  const {db,sb,perms,notify,reload}=ctx;const [busy,setBusy]=useState('');const [msg,setMsg]=useState('');
+  if(!db.fleet_settings)return perms.mgr?html`<div class="px-3 py-2 text-[12px] text-muted border-b border-line">To raise service work orders automatically, run <span class="mono">supabase/service_auto.sql</span> in Supabase.</div>`:null;
+  const fs=db.fleet_settings[0]||{};
+  const toggle=async on=>{setBusy('t');setMsg('');const {error}=await sb.from('fleet_settings').update({auto_service:on}).eq('id',1);setBusy('');
+    if(error){setMsg(errMsg(error));return}notify(on?'Services will be raised automatically':'Automatic services switched off');reload();if(on)check()};
+  const check=async()=>{setBusy('c');setMsg('');try{const r=await sm8Call(sb,{action:'services'});
+      setMsg(r.raised.length?`Raised ${r.raised.length}: ${r.raised.map(x=>`${x.machine} (${x.title})`).join(', ')}`:'Nothing new is due.');reload()}
+    catch(e){setMsg(errMsg(e))}finally{setBusy('')}};
+  return html`<div id="sp-auto" class="px-3 py-2.5 border-b border-line grid gap-1">
+    <div class="flex flex-wrap items-center gap-2">
+      <label class="flex items-center gap-2 text-[13px] font-medium cursor-pointer"><input id="sp-auto-on" type="checkbox" class="w-4 h-4" checked=${!!fs.auto_service} disabled=${!perms.mgr||!!busy} onChange=${e=>toggle(e.target.checked)}/>
+        Raise service work orders automatically</label>
+      <span class="flex-1"></span>
+      ${perms.mgr&&html`<button id="sp-auto-check" type="button" class="btn" style=${{height:30,fontSize:12.5}} disabled=${!!busy} onClick=${check}>${busy==='c'?'Checking…':'Check now'}</button>`}</div>
+    <div class="text-[12px] text-muted">When a machine comes within a plan’s warning (e.g. 50 h before), or is overdue, a service work order is made for it${sm8On(db)?' and sent to ServiceM8':''}. Checked every 10 minutes. Cancelling one skips that service.${fs.last_check_at?` Last checked ${agoTxt(fs.last_check_at)}${fs.last_raised?`, raised ${fs.last_raised}`:''}.`:''}</div>
+    ${msg&&html`<div id="sp-auto-msg" class="text-[12.5px]">${msg}</div>`}
+  </div>`;
+}
+
 function Plans({ctx,open}){
   const {perms,data}=ctx;const [del,setDel]=useState(null);
   const plans=ctx.db.service_plans.slice().sort((a,b)=>(a.category||'~').localeCompare(b.category||'~')||a.name.localeCompare(b.name));
@@ -877,6 +899,7 @@ function Plans({ctx,open}){
   return html`<section class="panel flex flex-col min-h-0">
     <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line"><div class="text-[12.5px] text-muted">Each machine follows the plans for its category, plus any plans set for that machine alone. Default warnings: 50 h, 1,000 km, 14 days.</div>
       <span class="flex-1"></span>${perms.mgr&&html`<button id="sp-new" type="button" class="btn btn-primary" onClick=${()=>open({k:'plan'})}>${Icon.plus} New service plan</button>`}</div>
+    <${AutoServices} ctx=${ctx}/>
     <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="sp-table">
       <thead><tr class="text-left">${['Applies to','Service','Every','Warn before','Machines','',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
       <tbody>${plans.map(p=>{const m=p.asset_id&&data.resources.find(r=>r.id===p.asset_id);return html`<tr key=${p.id} class="border-t border-line" style=${p.active?null:{opacity:.55}}>

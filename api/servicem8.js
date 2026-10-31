@@ -27,6 +27,7 @@
 //   GET  /api/servicem8?cron=1&all=1  (same)   refresh every outstanding work order (supabase/servicem8_schedule.sql runs it every 10 minutes)
 
 const crypto = require('crypto');
+const { raiseDueServices } = require('./_service_due.js');
 const RUN = { env: null, http: null };   // this request's settings and fetch, for the file copies
 
 const SM8 = 'https://api.servicem8.com/api_1.0';
@@ -538,6 +539,15 @@ async function flush(D, S, cfg, { sendLimit = 10, refresh = 5, staleMinutes = 15
   return out;
 }
 
+// services due → work orders, when switched on in Fleet › Service plans (supabase/service_auto.sql)
+async function autoServices(D, cfg, force = false) {
+  const fs = await D.one('fleet_settings?id=eq.1&select=*').catch(() => null);
+  if (!fs || (!fs.auto_service && !force)) return null;
+  const raised = await raiseDueServices(D, { assignee: (cfg.contractor_name || '').trim() || 'Bells Diesel' });
+  await D.patch('fleet_settings?id=eq.1', { last_check_at: new Date().toISOString(), last_raised: raised.length }).catch(() => null);
+  return raised;
+}
+
 /* ---------- OAuth state: who asked to connect, signed so it can't be forged ---------- */
 const b64u = s => Buffer.from(s).toString('base64url');
 function signState(secret, uid) {
@@ -632,12 +642,13 @@ async function handler(req, res, env = process.env, http = fetch) {
     const auth = String(req.headers.authorization || '');
     if (!env.CRON_SECRET || auth !== 'Bearer ' + env.CRON_SECRET) return send(res, 401, { error: 'Not allowed' });
     const cfg = await settings(D);
-    if (!cfg.enabled) return send(res, 200, { off: true });
+    const out = { services: await autoServices(D, cfg) };   // services due: raised as work orders (if switched on)
+    if (!cfg.enabled) return send(res, 200, { ...out, off: true });
     const A = await credentials(env, D, http);
-    if (!A.ok) return send(res, 200, { connected: false });
+    if (!A.ok) return send(res, 200, { ...out, connected: false });
     // ?all=1 (the every-10-minutes schedule): refresh every outstanding work order; the daily check: those quiet for an hour
     const stale = Q.all != null ? 0 : 60;
-    return send(res, 200, await flush(D, client(A, http), cfg, { sendLimit: 25, refresh: 100, staleMinutes: stale }));
+    return send(res, 200, { ...out, ...(await flush(D, client(A, http), cfg, { sendLimit: 25, refresh: 100, staleMinutes: stale })) });
   }
 
   // 4. people in FraserFlow
@@ -650,8 +661,15 @@ async function handler(req, res, env = process.env, http = fetch) {
   const me = await who.json();
   const prof = await D.one(`profiles?id=eq.${q(me.id)}&select=role`);
   const role = prof && prof.role;
-  if (!WORK_ROLES.includes(role)) return send(res, 403, { error: 'Only mechanics, supervisors and administrators can do this.' });
-  const mgr = MGR_ROLES.includes(role);
+  // what this person may do in Fleet: Admin › Roles (public.can, asked as them), or the standard roles before that's set up
+  const can = async (area, fallback) => {
+    const r = await http(base + '/rest/v1/rpc/can', { method: 'POST', headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ area, lvl: 2 }) }).catch(() => null);
+    if (r && r.ok) { const v = await r.json().catch(() => null); if (typeof v === 'boolean') return v; }
+    return fallback.includes(role);
+  };
+  if (!(await can('fleet.workorders', WORK_ROLES))) return send(res, 403, { error: 'Your role can’t change work orders.' });
+  const mgr = await can('fleet.manage', MGR_ROLES);
   let b;
   try { b = await readBody(req); } catch (e) { return send(res, 400, { error: 'Bad request' }); }
   const cfg = await settings(D);
@@ -670,6 +688,13 @@ async function handler(req, res, env = process.env, http = fetch) {
     const u = new URLSearchParams({ response_type: 'code', client_id: env.SERVICEM8_APP_ID, scope: SCOPES,
       redirect_uri: origin(req, env) + '/api/servicem8?action=callback', state: signState(env.SERVICEM8_APP_SECRET, me.id) });
     return send(res, 200, { url: OAUTH + '/authorize?' + u.toString() });
+  }
+  if (b.action === 'services') {   // Fleet › Service plans: check for due services now
+    if (!mgr) return send(res, 403, { error: 'Your role can’t change service settings.' });
+    const raised = await autoServices(D, cfg, true);
+    if (raised == null) return send(res, 409, { error: 'Run supabase/service_auto.sql in Supabase first.' });
+    if (cfg.enabled) { const A2 = await credentials(env, D, http); if (A2.ok) await flush(D, client(A2, http), cfg, { refresh: 0 }).catch(() => null); }   // send them on now
+    return send(res, 200, { raised });
   }
   if (b.action === 'disconnect') {
     if (!mgr) return send(res, 403, { error: 'Only administrators can do this.' });
