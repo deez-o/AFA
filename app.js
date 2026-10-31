@@ -5661,15 +5661,16 @@ function App({boot,live}){
   const [phone,setPhone]=useState(()=>{try{return window.matchMedia('(max-width: 639px), (pointer: coarse) and (max-height: 520px)').matches}catch(e){return false}});
   useEffect(()=>{let m;try{m=window.matchMedia('(max-width: 639px), (pointer: coarse) and (max-height: 520px)')}catch(e){return}const h=()=>setPhone(m.matches);try{m.addEventListener('change',h)}catch(e){m.addListener&&m.addListener(h)}return()=>{try{m.removeEventListener('change',h)}catch(e){}}},[]);
   const todayNoon=()=>{const d=new Date(TODAY);d.setHours(12,0,0,0);return d};
-  /* a phone opens the schedule on the week, upright or turned sideways (and goes back to the week when it's turned) */
+  /* a phone opens the schedule on the week when upright and on 14 days when turned sideways (and switches when it's turned);
+     computers open on 30 days unless the person has picked another length */
   const phoneWay=()=>{try{if(window.matchMedia('(max-width: 639px)').matches)return 'up';
     if(window.matchMedia('(pointer: coarse) and (orientation: landscape) and (max-height: 520px)').matches)return 'side'}catch(e){}return ''};
-  const [view,setView]=useState(()=>{const pw=phoneWay();if(pw==='up'||pw==='side')return 7;try{const v=Number(localStorage.getItem(KEY+':view'));return [7,14,30,60].includes(v)?v:7}catch(e){return 7}});
+  const [view,setView]=useState(()=>{const pw=phoneWay();if(pw==='up')return 7;if(pw==='side')return 14;try{const v=Number(localStorage.getItem(KEY+':view2'));return [7,14,30,60].includes(v)?v:30}catch(e){return 30}});
   const [anchor,setAnchor]=useState(()=>view===3?todayNoon():mondayOf(TODAY));
   useEffect(()=>{if(narrow&&view!==7||view===3){setView(7);setAnchor(mondayOf(TODAY))}},[narrow]);   /* upright phone: the week only (no 3-day view) */
   useEffect(()=>{let ms;try{ms=[window.matchMedia('(max-width: 639px)'),window.matchMedia('(pointer: coarse) and (orientation: landscape) and (max-height: 520px)')]}catch(e){return}
     let last=phoneWay();
-    const h=()=>{const pw=phoneWay();if(pw===last)return;last=pw;if(pw==='up'){setView(7);setAnchor(mondayOf(TODAY))}else if(pw==='side'){setView(7);setAnchor(mondayOf(TODAY))}};
+    const h=()=>{const pw=phoneWay();if(pw===last)return;last=pw;if(pw==='up'){setView(7);setAnchor(mondayOf(TODAY))}else if(pw==='side'){setView(14);setAnchor(mondayOf(TODAY))}};
     ms.forEach(m=>{try{m.addEventListener('change',h)}catch(e){m.addListener&&m.addListener(h)}});
     return()=>ms.forEach(m=>{try{m.removeEventListener('change',h)}catch(e){}})},[]);
   const [editing,setEditing]=useState(null);
@@ -5735,7 +5736,7 @@ function App({boot,live}){
   const [collapsed,setCollapsed]=useState(()=>{let c={};try{c=JSON.parse(localStorage.getItem(KEY+':collapsed')||'{}')||{}}catch(e){}return {tonnes:true,aplant:true,...c}});
   useEffect(()=>{try{localStorage.setItem(KEY+':collapsed',JSON.stringify(collapsed))}catch(e){}},[collapsed]);
   const [toast,setToast]=useState('');
-  useEffect(()=>{try{localStorage.setItem(KEY+':view',String(view))}catch(e){}},[view]);
+  useEffect(()=>{if(phoneWay())return;try{localStorage.setItem(KEY+':view2',String(view))}catch(e){}},[view]);   /* computers remember the length picked (':view2': everyone started again on 30 days) */
   useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(''),2200);return()=>clearTimeout(t)},[toast]);
 
   const monthStart=d=>new Date(d.getFullYear(),d.getMonth(),1,12);
