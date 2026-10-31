@@ -229,6 +229,7 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
     'setup: finds the existing AFA client and tells ServiceM8 where to report job changes');
   r = await call({ method: 'GET', query: { cron: '1' }, headers: { authorization: 'Bearer nope' } }); ok(r.statusCode === 401, 'the daily check needs CRON_SECRET');
   r = await call({ method: 'GET', query: { cron: '1' }, headers: { authorization: 'Bearer cron' } }); ok(r.statusCode === 200 && r.body.sent === 1, 'the daily check sends anything still waiting');
+  r = await call({ method: 'GET', query: { cron: '1', all: '1' }, headers: { authorization: 'Bearer cron' } }); ok(r.statusCode === 200 && r.body.errors.length === 0, 'the 10-minute schedule runs');
   db.settings.enabled = false; r = await call({ token: 'tok-mech', body: { action: 'flush' } }); ok(r.body.off === true, 'switched off: nothing is sent');
 
   console.log(fails ? `${fails} FAILED` : 'ALL SERVICEM8 FUNCTION TESTS PASSED'); process.exit(fails ? 1 : 0);

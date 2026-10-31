@@ -24,6 +24,7 @@
 //   GET  /api/servicem8?action=callback&code=…&state=…   ServiceM8 returns here after he connects
 //   POST /api/servicem8-hook/<key>                       ServiceM8 reports a job change (and checks the address when subscribing)
 //   GET  /api/servicem8?cron=1  (Authorization: Bearer <CRON_SECRET>)   the daily check
+//   GET  /api/servicem8?cron=1&all=1  (same)   refresh every outstanding work order (supabase/servicem8_schedule.sql runs it every 10 minutes)
 
 const crypto = require('crypto');
 
@@ -432,7 +433,9 @@ async function handler(req, res, env = process.env, http = fetch) {
     if (!cfg.enabled) return send(res, 200, { off: true });
     const A = await credentials(env, D, http);
     if (!A.ok) return send(res, 200, { connected: false });
-    return send(res, 200, await flush(D, client(A, http), cfg, { sendLimit: 25, refresh: 100, staleMinutes: 60 }));
+    // ?all=1 (the every-10-minutes schedule): refresh every outstanding work order; the daily check: those quiet for an hour
+    const stale = Q.all != null ? 0 : 60;
+    return send(res, 200, await flush(D, client(A, http), cfg, { sendLimit: 25, refresh: 100, staleMinutes: stale }));
   }
 
   // 4. people in FraserFlow

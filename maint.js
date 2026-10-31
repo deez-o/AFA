@@ -850,6 +850,9 @@ function FleetScreen({data,live,notify,setData,tab:tab0,onCounts,assetReq,onImpo
   const sb=live.sb;const role=live.role;
   const perms={work:['admin','superuser','supervisor','mechanic'].includes(role),verify:['admin','superuser','supervisor'].includes(role),mgr:role==='admin'||role==='superuser'};
   const {db,err,reload}=useMaint(sb);
+  /* while Fleet is open: every 5 minutes, send what's waiting and refresh outstanding work orders from ServiceM8 */
+  const sm8Ref=useRef(null);sm8Ref.current=db&&perms.work?{db,sb}:null;
+  useEffect(()=>{const t=setInterval(()=>{const c=sm8Ref.current;if(c&&!document.hidden)sm8Flush(c)},5*60e3);return()=>clearInterval(t)},[]);
   const tab=tab0||'dash';
   const [dlg,setDlg]=useState(null);const [asset,setAsset]=useState(null);
   useEffect(()=>{try{const id=localStorage.getItem(KEY+':fleetAsset');if(id){localStorage.removeItem(KEY+':fleetAsset');setAsset(id)}}catch(e){}},[]);

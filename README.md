@@ -191,6 +191,8 @@ FraserFlow only ever looks at jobs it made. When ServiceM8 reports a change, the
    Redeploy.
 3. Fleet → Work orders → **ServiceM8** (administrators): connect (with the add-on, he signs in to his ServiceM8 on the next page), fill in AFA's client name in his ServiceM8, his business name and the depot address, click **Set up in ServiceM8**, pick his "awaiting parts" queue, then tick **Send work orders to ServiceM8** and Save.
 
+**Keeping work orders up to date:** ServiceM8 reports changes as they happen. On top of that, the Fleet screen refreshes outstanding work orders every 5 minutes while it's open, and `supabase/servicem8_schedule.sql` (run once, with your `CRON_SECRET` pasted in) refreshes them every 10 minutes around the clock.
+
 Files: `api/servicem8.js` (the server side), `supabase/servicem8.sql`, `tests/servicem8_test.sql`, `tests/api_servicem8_test.js` (`node tests/api_servicem8_test.js`).
 
 ### Reports
