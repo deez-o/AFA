@@ -432,7 +432,7 @@ const LAYING={id:'laying',label:'Asphalt laying record',short:'Laying record',
     y=kvGrid(o,y+3,[['Calibrated temp gun serial number',laySerial(o.p,d)],['Total tonnes',fmt2((run))]],2)}};
 
 /* ---------- operations site environmental checklist ---------- */
-const ENV_ITEMS=[['residents','Residents notified'],['kerb','Kerb and channel clean'],['gully','Gully pits clean'],['profiling','Profiling required'],['swept','Pave section swept and clean'],['linemarking','Temporary line marking / stick ’n’ stomps'],['prime','Prime / bitumen on kerb, crossovers'],
+const ENV_ITEMS=[['kerb','Kerb and channel clean'],['gully','Gully pits clean'],['profiling','Profiling required'],['swept','Pave section swept and clean'],['linemarking','Temporary line marking / stick ’n’ stomps'],['prime','Prime / bitumen on kerb, crossovers'],
   ['noise','Noise and dust suppression kept to minimum'],['profilings','Profilings removed from site'],['pits','Gully pits / inspection pipes protected'],['excess','Excess noise generated'],['spills','Fuel, bitumen, oil, emulsion spills contained'],
   ['animals','Nesting and territorial animals, including birds, dogs, bees / wasps (discuss controls with customer)'],['trees','Overhanging trees / branches, other flora (discuss controls with customer)']];
 const YNA=[['yes','Yes'],['no','No'],['na','N/A']];
