@@ -190,6 +190,14 @@ function Sm8Panel({ctx,wo}){
       :st==='removed'?'The job was deleted in ServiceM8. Send it again, or carry on here.'
       :st==='pending'||st==='sending'?'It goes to ServiceM8 in a moment.'
       :open&&cfg.enabled?'This work order is handled here, not in ServiceM8.':''}</div>
+    ${st==='sent'&&html`<div class="grid sm:grid-cols-2 gap-2 pt-1">
+      <div id="wo-sm8-desc" class="rounded-md border border-line bg-sunken p-2.5 grid gap-1 content-start min-w-0"><span class="label">Description (from ServiceM8)</span>
+        ${l.sm8_description?html`<div class="text-[13px] whitespace-pre-wrap break-words">${l.sm8_description}</div>`:html`<div class="text-[12.5px] text-muted">Nothing added to the job description yet.</div>`}</div>
+      <div id="wo-sm8-notes" class="rounded-md border border-line bg-sunken p-2.5 grid gap-1.5 content-start min-w-0"><span class="label">Notes (from ServiceM8)</span>
+        ${Array.isArray(l.sm8_notes)&&l.sm8_notes.length?l.sm8_notes.map((n,i)=>html`<div key=${i} class="text-[13px] break-words"><span class="text-[11.5px] text-muted mono">${n.at?n.at.slice(8,10)+'/'+n.at.slice(5,7)+' '+n.at.slice(11,16):''}</span> <span class="whitespace-pre-wrap">${n.text}</span></div>`)
+          :html`<div class="text-[12.5px] text-muted">${Array.isArray(l.sm8_notes)?'No notes on the job yet.':'Notes show here once ServiceM8 is reconnected (Fleet › Work orders › ServiceM8).'}</div>`}</div>
+    </div>`}
+    ${st==='sent'&&l.files_error&&html`<div class="text-[12px]" style=${{color:'var(--bad)'}}>His photos/documents couldn’t be copied: ${l.files_error}</div>`}
     ${(()=>{const files=(db.maintenance_files||[]).filter(f=>f.work_order_id===wo.id);if(!files.length)return null;
       const openFile=async f=>{const w=window.open('','_blank');try{const o=window.FFP?await window.FFP.signedUrls(sb,[f.path]):{};if(o[f.path]){if(w)w.location=o[f.path];else location.href=o[f.path]}else{if(w)w.close();setErr('Couldn’t open that file.')}}catch(e){if(w)w.close();setErr(errMsg(e))}};
       return html`<div id="wo-sm8-files" class="grid gap-1 pt-1"><span class="label">His photos and documents</span>

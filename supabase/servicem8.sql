@@ -63,6 +63,9 @@ create table if not exists public.servicem8_jobs (
   updated_at    timestamptz not null default now()
 );
 alter table public.servicem8_jobs add column if not exists sm8_queue text;
+alter table public.servicem8_jobs add column if not exists sm8_description text;   -- what he wrote in the job description (live)
+alter table public.servicem8_jobs add column if not exists sm8_notes jsonb;        -- his job notes [{at, text}] (live)
+alter table public.servicem8_jobs add column if not exists files_error text;       -- why his photos/PDFs couldn't be copied, if they couldn't
 create index if not exists servicem8_jobs_todo on public.servicem8_jobs (state) where state in ('pending','sending','error') or dirty;
 
 -- his photos and PDFs from a ServiceM8 job are copied into the machine's files (Storage bucket "maintenance"),
@@ -147,7 +150,7 @@ end; $$;
 -- p_patch:   {status, start_date, end_date, parts, completion_notes, assigned_to}, each only when it should change
 -- p_service: {done_on, hours, km, mechanic} when a scheduled service is completed (becomes the service record)
 -- p_meters:  [{kind:'hours'|'km', value}] readings from his notes (for other work orders; kept only if newest)
--- p_job:     {job_no, sm8_status, queue_uuid, removed}
+-- p_job:     {job_no, sm8_status, queue_uuid, description, notes, removed}
 create or replace function public.servicem8_apply(p_wo uuid, p_patch jsonb, p_service jsonb, p_meters jsonb, p_job jsonb)
 returns text language plpgsql security definer set search_path = public as $$
 declare w public.work_orders; nxt text; m jsonb; cur numeric;
@@ -159,6 +162,8 @@ begin
   update public.servicem8_jobs set synced_at = now(), updated_at = now(), last_error = null,
     job_no = coalesce(p_job->>'job_no', job_no), sm8_status = coalesce(p_job->>'sm8_status', sm8_status),
     sm8_queue = case when p_job ? 'queue_uuid' then nullif(p_job->>'queue_uuid', '') else sm8_queue end,
+    sm8_description = case when p_job ? 'description' then nullif(p_job->>'description', '') else sm8_description end,
+    sm8_notes = case when p_job ? 'notes' then p_job->'notes' else sm8_notes end,
     state = case when (p_job->>'removed')::boolean then 'removed' else state end
    where work_order_id = p_wo;
 

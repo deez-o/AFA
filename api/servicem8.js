@@ -33,8 +33,8 @@ const SM8 = 'https://api.servicem8.com/api_1.0';
 const SM8_HOOKS = 'https://api.servicem8.com/webhook_subscriptions';
 const OAUTH = 'https://go.servicem8.com/oauth';
 const SCOPES = 'read_jobs create_jobs manage_jobs read_schedule read_job_materials read_job_queues read_customers manage_customers read_job_notes publish_job_notes read_attachments read_job_attachments read_job_photos';
-const HOOK_FIELDS = ['status', 'queue_uuid', 'work_done_description', 'active', 'job_is_scheduled_until_stamp', 'total_invoice_amount'];
-const HOOK_FIELDS_MIN = ['status', 'queue_uuid', 'work_done_description', 'active'];
+const HOOK_FIELDS = ['status', 'queue_uuid', 'work_done_description', 'job_description', 'active', 'job_is_scheduled_until_stamp', 'total_invoice_amount'];
+const HOOK_FIELDS_MIN = ['status', 'queue_uuid', 'work_done_description', 'job_description', 'active'];
 const ACTIVITY_FIELDS = ['start_date', 'end_date', 'active', 'activity_was_scheduled', 'activity_was_recorded'];   // bookings and time on a job
 const WORK_ROLES = ['admin', 'superuser', 'supervisor', 'mechanic'];
 const MGR_ROLES = ['admin', 'superuser'];
@@ -178,18 +178,69 @@ function parseMeters(text, meterType) {
 }
 
 const PLACEHOLDER = /^Completed in ServiceM8\b/;
-function completionText({ job, notes, sent }) {
-  const parts = [];
-  const done = String(job.work_done_description || '').trim();
-  if (done) parts.push(done);
-  const ns = (notes || []).filter(n => yes(n.active == null ? 1 : n.active) && String(n.note || '').trim() && !/^Cancelled in FraserFlow/.test(String(n.note).trim()))
-    .sort((a, b) => String(a.create_date || a.edit_date || '').localeCompare(String(b.create_date || b.edit_date || '')));
-  if (ns.length) parts.push('Notes:\n' + ns.map(n => { const d = String(n.create_date || n.edit_date || '').slice(0, 16); return `- ${d ? d + ': ' : ''}${String(n.note).trim()}`; }).join('\n'));
-  // lines he added to (or changed in) the job description; FraserFlow's own lines are left out
+// his job (diary) notes, oldest first: [{ at, text }]
+function hisNotes(notes) {
+  return (notes || []).filter(n => yes(n.active == null ? 1 : n.active) && String(n.note || '').trim() && !/^Cancelled in FraserFlow/.test(String(n.note).trim()))
+    .sort((a, b) => String(a.create_date || a.edit_date || '').localeCompare(String(b.create_date || b.edit_date || '')))
+    .map(n => ({ at: String(n.create_date || n.edit_date || '').slice(0, 16) || null, text: String(n.note).trim() }));
+}
+const notesTxt = list => (list || []).map(n => `- ${n.at ? n.at + ': ' : ''}${n.text}`).join('\n');
+// what he wrote in (or changed in) the job description; FraserFlow's own lines are left out
+function hisDescription(job, sent) {
   const ours = new Set(String(sent || '').split('\n').map(l => l.trim()).filter(Boolean));
-  const extra = String(job.job_description || '').split('\n').map(l => l.trim()).filter(l => l && !ours.has(l) && !/^FraserFlow WO \d+/.test(l) && !/^When it's done, please put the meter reading/.test(l));
-  if (extra.length) parts.push('From the job description:\n' + extra.join('\n'));
-  return parts.join('\n\n');
+  return String(job.job_description || '').split('\n').map(l => l.trim())
+    .filter(l => l && !ours.has(l) && !/^FraserFlow WO \d+/.test(l) && !/^When it's done, please put the meter reading/.test(l)).join('\n');
+}
+// completion notes: his Work Done, or else his notes
+function completionText({ job, notes }) {
+  return String(job.work_done_description || '').trim() || notesTxt(hisNotes(notes));
+}
+
+// Parts he mentions in his own words: "Replaced oil filter and fuel filter", "fitted 2 x hydraulic hose", "used 20L engine oil".
+const PART_VERB = /\b(?:replaced|replace|fitted|fit|installed|install|supplied|used|changed|swapped)\b\s*|^\s*new\s+/i;   // "new …" only at the start ("New starter motor")
+const NOT_PARTS = /^(?:it|them|this|that|the job|job|part|parts|same|out|over|up|in|to|machine|unit|everything|all)$/i;
+function parseParts(text) {
+  const found = [];
+  for (const sentence of String(text || '').split(/[\n.;!?]+/)) {
+    const re = new RegExp(PART_VERB.source, 'gi'), hits = [];
+    for (let m; (m = re.exec(sentence));) { hits.push(m); if (!m[0].length) re.lastIndex++; }
+    // each verb's own stretch: "replaced A and B, used C" → [A, B] then [C]
+    for (let h = 0; h < hits.length; h++) {
+    const rest = sentence.slice(hits[h].index + hits[h][0].length, h + 1 < hits.length ? hits[h + 1].index : undefined);
+    for (let piece of rest.split(/,|\band\b|&|\+/i)) {
+      piece = piece.replace(/\b(?:on|to|at|for|in|from|because|as|due|which|that|was|were|with the|under)\b.*$/i, '')
+        .replace(/^\s*(?:with|a|an|the|new|some|both)\s+/i, '').replace(/^\s*(?:a|an|the|new)\s+/i, '').trim();
+      let qty = '1';
+      let q1 = piece.match(/^(\d+(?:\.\d+)?)\s*(?:x|×|off|pcs?)?\s+(.+)$/i);
+      let q2 = piece.match(/^(\d+(?:\.\d+)?\s*(?:l|lt|ltr|litres?|liters?|m|metres?|meters?|kg))\s+(?:of\s+)?(.+)$/i);
+      let q3 = piece.match(/^(.+?)\s*(?:x|×)\s*(\d+(?:\.\d+)?)$/i);
+      if (q2) { qty = q2[1].replace(/\s+/g, '').toUpperCase().replace(/LITRES?|LITERS?|LTR|LT/, 'L').replace(/METRES?|METERS?/, 'M'); piece = q2[2]; }
+      else if (q1) { qty = q1[1]; piece = q1[2]; }
+      else if (q3) { qty = q3[2]; piece = q3[1]; }
+      piece = piece.replace(/^(?:of|x|×)\s+/i, '').replace(/\s+/g, ' ').trim();
+      const words = piece.split(' ').length;
+      if (!piece || piece.length < 3 || piece.length > 50 || words > 6 || NOT_PARTS.test(piece) || /^\d/.test(piece)) continue;
+      found.push({ part: piece.charAt(0).toUpperCase() + piece.slice(1), qty });
+    }
+    }
+  }
+  return found;
+}
+// one list: what's on the work order already, his ServiceM8 materials, then parts he mentions (each name once)
+const partKey = p => String(p.part || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/s\b/g, '').trim();
+function mergeParts(existing, materials, mentioned) {
+  const out = [], at = new Map();
+  for (const p of [...(existing || []), ...(materials || [])]) {
+    const k = partKey(p); if (!k) continue;
+    if (at.has(k)) out[at.get(k)] = { ...out[at.get(k)], qty: p.qty || out[at.get(k)].qty };   // his materials list wins on quantity
+    else { at.set(k, out.length); out.push({ part: p.part, qty: p.qty || '1' }); }
+  }
+  for (const p of mentioned || []) {
+    const k = partKey(p); if (!k) continue;
+    if ([...at.keys()].some(x => x === k || x.includes(k) || k.includes(x))) continue;   // already listed (e.g. "Oil filter" vs "CAT oil filter")
+    at.set(k, out.length); out.push(p);
+  }
+  return out;
 }
 
 const qtyTxt = v => { const n = Number(v); return isFinite(n) && String(v).trim() !== '' ? String(+n.toFixed(3)) : String(v || '1').trim() || '1'; };
@@ -197,9 +248,11 @@ const qtyTxt = v => { const n = Number(v); return isFinite(n) && String(v).trim(
 // A ServiceM8 job (with its bookings and materials) → what should change on the work order.
 // Returns { patch, service, meters, job } for servicem8_apply, or null when nothing should change.
 function mapJob({ job, activities, materials, wo, cfg, profile, latest, prev, notes, sent }) {
+  const desc = hisDescription(job, sent), nl = notes ? hisNotes(notes) : null;
   const st = String(job.status || '');
   const was = prev || {};   // what the job looked like last time: only changes made in ServiceM8 move the work order
-  const jobInfo = { job_no: job.generated_job_id != null ? String(job.generated_job_id) : null, sm8_status: st || null, queue_uuid: job.queue_uuid || '' };
+  const jobInfo = { job_no: job.generated_job_id != null ? String(job.generated_job_id) : null, sm8_status: st || null, queue_uuid: job.queue_uuid || '',
+    description: desc, ...(nl ? { notes: nl } : {}) };   // shown live on the work order
   if (!yes(job.active)) return { patch: null, service: null, meters: null, job: { ...jobInfo, removed: true } };
   if (['closed', 'cancelled'].includes(wo.status)) return { patch: null, service: null, meters: null, job: jobInfo };
   const acts = (activities || []).filter(a => yes(a.active == null ? 1 : a.active));
@@ -209,21 +262,23 @@ function mapJob({ job, activities, materials, wo, cfg, profile, latest, prev, no
   const starts = booked.map(a => day(a.start_date)).filter(Boolean).sort();
   const ends = booked.map(a => day(a.end_date) || day(a.start_date)).filter(Boolean).sort();
   if (starts.length) { patch.start_date = starts[0]; patch.end_date = ends[ends.length - 1] < starts[0] ? starts[0] : ends[ends.length - 1]; }
-  const parts = (materials || []).filter(m => yes(m.active == null ? 1 : m.active) && String(m.name || '').trim())
+  const mats = (materials || []).filter(m => yes(m.active == null ? 1 : m.active) && String(m.name || '').trim())
     .map(m => ({ part: String(m.name).trim(), qty: qtyTxt(m.quantity) }));
-  if (parts.length) patch.parts = parts;
+  const said = parseParts([job.work_done_description, desc, ...(nl || []).map(n => n.text)].filter(Boolean).join('\n'));
+  const parts = mergeParts(wo.parts, mats, said);
+  if (parts.length && JSON.stringify(parts) !== JSON.stringify(wo.parts || [])) patch.parts = parts;
   if (cfg.contractor_name) patch.assigned_to = cfg.contractor_name;
 
   const rank = { open: 0, scheduled: 1, in_progress: 2, awaiting_parts: 2 };
   let next = wo.status, service = null, meters = null;
   if (st === 'Completed') {
     next = 'completed';
-    const text = completionText({ job, notes, sent });
+    const text = completionText({ job, notes });
     if (wo.status === 'completed' && text && PLACEHOLDER.test(wo.completion_notes || '')) patch.completion_notes = text;   // fill in what was missed before
     if (wo.status !== 'completed') {
       patch.completion_notes = text || `Completed in ServiceM8${jobInfo.job_no ? ' (job ' + jobInfo.job_no + ')' : ''}`;
       const cur = latest || {};
-      meters = parseMeters(text, profile && profile.meter_type).filter(x => cur[x.kind] == null || x.value >= cur[x.kind]);
+      meters = parseMeters([text, desc, ...(nl || []).map(n => n.text)].join('\n'), profile && profile.meter_type).filter(x => cur[x.kind] == null || x.value >= cur[x.kind]);
       if (wo.wo_type === 'service') {
         const mv = Object.fromEntries(meters.map(x => [x.kind, x.value]));
         service = { done_on: day(job.completion_date) || todayBne(), hours: mv.hours ?? null, km: mv.km ?? null, mechanic: cfg.contractor_name || 'ServiceM8' };
@@ -332,14 +387,16 @@ async function pullOne(D, S, cfg, link, wo, ctx) {
   const [activities, materials] = yes(job.active) ? await Promise.all([S.get(`/jobactivity.json?${f}`), S.get(`/jobmaterial.json?${f}`)]) : [[], []];
   ctx = ctx || await jobContext(D, wo);
   // his notes, when they're needed: the job has just been completed (or was completed without them)
-  let notes = null;
-  if (yes(job.active) && job.status === 'Completed' && (wo.status !== 'completed' || PLACEHOLDER.test(wo.completion_notes || ''))) {
-    notes = await S.get(`/note.json?${filt(`related_object_uuid eq '${link.job_uuid}' and active eq 1`)}`).catch(() => null);   // needs read_job_notes
-  }
+  // his notes, every time (shown live on the work order); needs read_job_notes
+  const notes = yes(job.active) ? await S.get(`/note.json?${filt(`related_object_uuid eq '${link.job_uuid}' and active eq 1`)}`).catch(() => null) : null;
   const m = mapJob({ job, activities, materials, wo, cfg, profile: ctx.profile, latest: ctx.latest, prev: link, notes, sent: describeJob({ wo, ...ctx }) });
   const result = await D.rpc('servicem8_apply', { p_wo: wo.id, p_patch: m.patch || {}, p_service: m.service, p_meters: m.meters || [], p_job: m.job });
   // his photos and PDFs (a problem here doesn't stop the rest of the update; it is tried again next time)
-  if (yes(job.active) && !['closed', 'cancelled'].includes(wo.status) && env) await syncAttachments(D, S, env, http, wo, link).catch(() => null);
+  if (yes(job.active) && !['closed', 'cancelled'].includes(wo.status) && env) {
+    let problem = null;
+    try { await syncAttachments(D, S, env, http, wo, link); } catch (e) { problem = errText(e); }
+    if (problem !== (link.files_error || null)) await D.patch(`servicem8_jobs?work_order_id=eq.${wo.id}`, { files_error: problem }).catch(() => null);   // shown on the work order
+  }
   return result;
 }
 
@@ -347,23 +404,26 @@ async function pullOne(D, S, cfg, link, wo, ctx) {
 const FILE_TYPES = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.pdf': 'application/pdf' };
 async function syncAttachments(D, S, env, http, wo, link, limit = 8) {
   const list = await S.get(`/attachment.json?${filt(`related_object_uuid eq '${link.job_uuid}' and active eq 1`)}`);
-  const want = (list || []).filter(a => safeId(a.uuid) && FILE_TYPES[String(a.file_type || '').toLowerCase()]);
+  const extOf = a => { const t = String(a.file_type || '').trim().toLowerCase(); const e = t ? (t.startsWith('.') ? t : '.' + t) : ((String(a.attachment_name || '').match(/\.[a-z0-9]+$/i) || [''])[0].toLowerCase()); return e; };
+  const want = (list || []).filter(a => safeId(a.uuid) && FILE_TYPES[extOf(a)]);
   if (!want.length) return 0;
   const have = new Set(((await D.get(`maintenance_files?sm8_uuid=in.(${want.map(a => q(a.uuid)).join(',')})&select=sm8_uuid`)) || []).map(f => f.sm8_uuid));
   const storage = (env.SUPABASE_URL || '').replace(/\/$/, '') + '/storage/v1/object/maintenance/';
   let n = 0;
   for (const a of want.filter(x => !have.has(x.uuid)).slice(0, limit)) {
-    const ext = String(a.file_type).toLowerCase(), mime = FILE_TYPES[ext];
+    const ext = extOf(a), mime = FILE_TYPES[ext];
     let data;
     try { data = await S.bytes(`/attachment/${a.uuid}.file`); }
     catch (e) { data = await S.bytes(`/attachment/${a.uuid}/download`); }
-    if (!data || !data.length || data.length > 15 * 1024 * 1024) continue;   // the store takes files up to 15 MB
+    if (!data || !data.length) throw new Error(`ServiceM8 sent an empty file for ${a.attachment_name || a.uuid}`);
+    if (data.length > 15 * 1024 * 1024) continue;   // the store takes files up to 15 MB
     const path = `assets/${wo.asset_id}/sm8/${a.uuid}${ext}`;
     const up = await http(storage + path.split('/').map(q).join('/'), { method: 'POST', body: data,
       headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + env.SUPABASE_SERVICE_ROLE_KEY, 'Content-Type': mime, 'x-upsert': 'true' } });
     if (!up.ok) { const t = await up.text().catch(() => ''); throw new Error(`File store ${up.status}: ${t.slice(0, 200)}`); }
     let name = String(a.attachment_name || 'ServiceM8 ' + (mime === 'application/pdf' ? 'document' : 'photo')).trim().slice(0, 120);
     if (!name.toLowerCase().endsWith(ext)) name += ext;
+    // (this fails if servicem8.sql hasn't been run again: work_order_id, sm8_uuid)
     await D.post('maintenance_files', { asset_id: wo.asset_id, kind: mime === 'application/pdf' ? 'document' : 'photo', name: `WO ${wo.number} · ${name}`,
       path, mime, size: data.length, work_order_id: wo.id, sm8_uuid: a.uuid });
     n++;
@@ -448,14 +508,14 @@ async function handler(req, res, env = process.env, http = fetch) {
     if (challenge && !b.object) return answer(200, decodeURIComponent(String(challenge)));
     if (req.method !== 'POST' || !b.object) return answer(200, 'ok');
     const obj = String(b.object || '').toLowerCase().replace(/[^a-z]/g, '');
-    if (obj !== 'job' && obj !== 'jobactivity' && obj !== 'attachment') return answer(200, 'ignored');
+    if (!['job', 'jobactivity', 'attachment', 'note'].includes(obj)) return answer(200, 'ignored');
     const ids = (Array.isArray(b.entry) ? b.entry : []).map(e => e && e.uuid).filter(safeId);
     if (!ids.length) return answer(200, 'ok');
     const cfg = await settings(D);
     if (!cfg.enabled) return answer(200, 'switched off');
     let jobIds = ids, S = null;
     const connect = async () => { const A = await credentials(env, D, http); if (!A.ok) return null; return (S = client(A, http)); };
-    if (obj === 'jobactivity' || obj === 'attachment') {
+    if (obj !== 'job') {
       // a booking, time or attachment changed: which job is it on? (only that is used; anything not on an AFA job is dropped)
       if (!(await connect())) return answer(503, 'not connected');
       jobIds = (await Promise.all(ids.map(id => S.get(`/${obj}/${id}.json`).then(a => a && (a.job_uuid || (a.related_object === 'job' ? a.related_object_uuid : null)), () => null)))).filter(safeId);
@@ -564,7 +624,8 @@ async function handler(req, res, env = process.env, http = fetch) {
     }
     let bookings = true;
     try { await hook(ACTIVITY_FIELDS, 'jobactivity'); } catch (e) { bookings = false; }
-    try { await hook(['active', 'attachment_name'], 'attachment'); } catch (e) { /* photos then arrive with the regular refresh */ }   // without it, bookings arrive with the regular refresh
+    try { await hook(['active', 'attachment_name'], 'attachment'); } catch (e) { /* photos then arrive with the regular refresh */ }
+    try { await hook(['note', 'active'], 'note'); } catch (e) { /* notes then arrive with the regular refresh */ }   // without it, bookings arrive with the regular refresh
     await D.patch('servicem8_settings?id=eq.1', { hooks_on_at: new Date().toISOString() });
     return send(res, 200, { company_uuid: company, hooks, bookings });
   }
@@ -585,6 +646,8 @@ module.exports = (req, res) => handler(req, res).catch(e => send(res, 500, { err
 module.exports.handler = handler;   // for the tests
 module.exports.mapJob = mapJob;
 module.exports.parseMeters = parseMeters;
+module.exports.parseParts = parseParts;
+module.exports.mergeParts = mergeParts;
 module.exports.describeJob = describeJob;
 module.exports.checkState = checkState;
 module.exports.signState = signState;

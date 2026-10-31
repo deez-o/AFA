@@ -41,14 +41,21 @@ function pureChecks() {
     r = mapJob({ job: { active: 1, status: 'Completed', work_done_description: '', job_description: sent + '\nAlso found worn pins, replaced\nHours: 4600' },
       notes: [{ active: 1, note: 'Ordered hose from Pirtek', create_date: '2026-11-03 08:10:00' }, { active: 0, note: 'deleted' }, { active: 1, note: 'Fitted hose, tested OK', create_date: '2026-11-04 13:00:00' }],
       sent, activities: [], materials: [], wo, cfg, profile: { meter_type: 'hours' }, latest: { hours: 4500 } });
-    ok(/Notes:\n- 2026-11-03 08:10: Ordered hose from Pirtek\n- 2026-11-04 13:00: Fitted hose, tested OK/.test(r.patch.completion_notes) && !/deleted/.test(r.patch.completion_notes),
-      'completed: his job notes come through, oldest first (deleted ones left out)');
-    ok(/From the job description:\nAlso found worn pins, replaced/.test(r.patch.completion_notes) && !/Left boom/.test(r.patch.completion_notes), 'what he added to the job description comes through, not FraserFlow’s own text');
+    ok(r.patch.completion_notes === '- 2026-11-03 08:10: Ordered hose from Pirtek\n- 2026-11-04 13:00: Fitted hose, tested OK', 'completed with no Work Done: his notes become the completion notes, oldest first (deleted ones left out)');
+    ok(r.job.notes.length === 2 && r.job.notes[0].text === 'Ordered hose from Pirtek' && r.job.notes[1].at === '2026-11-04 13:00', 'his notes are kept for their own box on the work order');
+    ok(r.job.description === 'Also found worn pins, replaced\nHours: 4600', 'his description is kept for its own box, without FraserFlow’s own text');
+    ok(r.patch.parts.some(p => p.part === 'Hose'), 'a part he mentions ("Fitted hose") is added to the parts');
     ok(r.meters.length === 1 && r.meters[0].value === 4600, 'a reading in his notes or description is picked up too');
     r = mapJob({ job: { active: 1, status: 'Completed', work_done_description: 'Replaced hose' }, notes: [], sent, activities: [], materials: [],
       wo: { ...wo, status: 'completed', completion_notes: 'Completed in ServiceM8 (job 501)' }, cfg, profile: { meter_type: 'hours' }, latest: {} });
     ok(r.patch.completion_notes === 'Replaced hose' && !r.patch.status, 'a work order completed before this fix gets his notes on the next refresh');
   }
+  r = mapJob({ job: { active: 1, status: 'Work Order', job_description: 'FraserFlow WO 1042\nNeeds new battery' },
+    notes: [{ active: 1, note: 'Replaced oil filter and fuel filter, used 20L engine oil', create_date: '2026-11-03 08:10:00' }], sent: 'FraserFlow WO 1042', activities: [],
+    materials: [{ active: 1, name: 'Fuel filter', quantity: '2' }], wo: { ...wo, status: 'in_progress', parts: [{ part: 'Grease', qty: '1' }] }, cfg });
+  ok(!r.patch.status && r.job.notes[0].text.startsWith('Replaced oil filter') && r.job.description === 'Needs new battery', 'before completion: his notes and description come through live');
+  ok(JSON.stringify(r.patch.parts) === JSON.stringify([{ part: 'Grease', qty: '1' }, { part: 'Fuel filter', qty: '2' }, { part: 'Oil filter', qty: '1' }, { part: 'Engine oil', qty: '20L' }]),
+    'parts: what was there, his materials, then parts he mentions (each once; his materials win on quantity)');
   r = mapJob({ job: { active: 1, status: 'Completed', work_done_description: 'Hours: 12' }, activities: [], materials: [], wo, cfg, profile: { meter_type: 'hours' }, latest: { hours: 4500 } });
   ok(r.meters.length === 0, 'a reading lower than the machine’s last one is ignored');
   r = mapJob({ job: { active: 1, status: 'Completed', work_done_description: '', completion_date: '2026-11-04 14:00:00' }, activities: [], materials: [], wo: { ...wo, wo_type: 'service' }, cfg,
@@ -124,7 +131,7 @@ async function http(url, o = {}) {
     if (p.startsWith('asset_profiles')) return json(200, [{ meter_type: 'hours' }]);
     if (p.startsWith('meter_readings')) return json(200, p.includes('kind=eq.hours') ? [{ kind: 'hours', value: 4500, read_at: '2026-10-30T00:00:00Z' }] : []);
     if (p.startsWith('defects')) return json(200, []);
-    if (p.startsWith('maintenance_files') && m === 'POST') { db.files.push(JSON.parse(o.body)); return json(201, null); }
+    if (p.startsWith('maintenance_files') && m === 'POST') { if (db.filesBroken) return json(400, { message: 'column "work_order_id" does not exist' }); db.files.push(JSON.parse(o.body)); return json(201, null); }
     if (p.startsWith('maintenance_files')) { const ids = p.match(/sm8_uuid=in\.\(([^)]*)\)/)[1].split(','); return json(200, db.files.filter(f => ids.includes(f.sm8_uuid))); }
     if (p.startsWith('maintenance_audit')) return json(201, null);
     if (p.startsWith('rpc/servicem8_apply')) { const a = JSON.parse(o.body); rpcCalls.push(a); const l = db.links.find(x => x.work_order_id === a.p_wo); if (l) Object.assign(l, { sm8_status: a.p_job.sm8_status, job_no: a.p_job.job_no }); return json(200, (a.p_patch && a.p_patch.status) || 'open'); }
@@ -251,6 +258,14 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   db.attachments.push({ uuid: '00000000-0000-0000-0000-0000000000d5', related_object: 'job', related_object_uuid: link.job_uuid, attachment_name: 'After', file_type: '.png', active: 1 });
   r = await call({ method: 'POST', query: { hook: key }, body: { object: 'attachment', entry: [{ uuid: '00000000-0000-0000-0000-0000000000d5' }] } });
   ok(r.statusCode === 200 && db.files.length === 3 && db.files[2].mime === 'image/png', 'a photo he adds later arrives as soon as ServiceM8 reports it');
+
+  db.filesBroken = true;
+  db.attachments.push({ uuid: '00000000-0000-0000-0000-0000000000d6', related_object: 'job', related_object_uuid: link.job_uuid, attachment_name: 'Gauge.jpeg', file_type: 'jpeg', active: 1 });
+  r = await call({ token: 'tok-mech', body: { action: 'sync', wo: WO1 } });
+  ok(r.statusCode === 200 && /work_order_id/.test(db.links[0].files_error || ''), 'when a photo can’t be copied, the reason shows on the work order (the rest of the update still happens)');
+  db.filesBroken = false;
+  r = await call({ token: 'tok-mech', body: { action: 'sync', wo: WO1 } });
+  ok(db.files.some(f => f.sm8_uuid === '00000000-0000-0000-0000-0000000000d6' && f.mime === 'image/jpeg') && db.links[0].files_error === null, 'a file type given without the dot ("jpeg") is copied, and the problem clears');
 
   // a change made in FraserFlow
   db.links[0].sm8_status = 'Work Order'; db.jobs[link.job_uuid].status = 'Work Order';
