@@ -54,7 +54,7 @@
       ]
     },
     {
-      "source": "/(maint|prestart|defects|reports|qa|qaforms|lab|floats).js",
+      "source": "/(maint|prestart|defects|reports|qa|qaforms|lab|floats|timesheets).js",
       "headers": [
         {
           "key": "Cache-Control",

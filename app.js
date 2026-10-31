@@ -7,6 +7,7 @@ const AREAS=[
   {mod:'Schedule',items:[['schedule','Schedule board','See the crews’ schedule; change: make, move and edit bookings'],['schedule.settings','Settings','Crews, plant, mixes, seal lists, trucks and subbies'],['schedule.exports','Exports & daily program','Excel, PDFs and the daily program',1],['schedule.forecast','Forecast','The tonnes forecast',1]]},
   {mod:'Projects',items:[['jobs','Projects','See projects and their bookings; change: add, edit, complete and delete projects'],['jobs.paperwork','Paperwork','QA PDFs and reports; change: upload documents'],['jobs.pictures','Pictures','See pictures; change: add and relabel their own'],['jobs.manage','Remove anyone’s paperwork and pictures','',2]]},
   {mod:'Planning',items:[['planning','Job planning','See plans; change: make plans and send them to the schedule']]},
+  {mod:'Timesheets',items:[['timesheets','Timesheets','See everyone’s; change: edit any day and sign off the week'],['timesheets.mine','Own timesheet','Fill in their own hours on days they signed on',2]]},
   {mod:'Floats',items:[['floats','Floats','See the float’s moves and run sheet; change: pick-up times, ticking off and float settings']]},
   {mod:'Staff & leave',items:[['staff.leave','Leave calendar','See leave; change: put leave straight on the calendar'],['staff.request','Request leave for anyone','Goes to an approver first',2],['staff.approve','Approve or decline leave','',2],['staff.myleave','Own leave form','A form for their own leave (instead of the calendar)',2],['staff.people','People','The staff list; change: add and edit staff members'],['staff.logins','Logins','Create logins, reset passwords, set roles',2]]},
   {mod:'Fleet & Maintenance',items:[['fleet','Fleet','The Fleet section and dashboard',1],['fleet.machines','Machines','See machines; change: add, edit and delete them'],['fleet.calendar','Machine calendar','See where machines are; change: book them'],['fleet.workorders','Work orders, services, readings & defects','See them; change: raise, update and complete'],['fleet.verify','Verify & close','Verify work orders and defects, restrict machines',2],['fleet.manage','Fleet admin','Service plans, checklists, corrections, deleting readings and finished work orders, ServiceM8',2],['fleet.reports','Reports','Fleet reports',1]]},
@@ -2984,6 +2985,16 @@ function LazyFloats(props){
   if(err)return html`<div class="panel p-6 text-[13px]" style=${{color:'var(--bad)'}}>${err}</div>`;
   if(!ok||!window.FloatsScreen)return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;
   return html`<${window.FloatsScreen} ...${props}/>`}
+/* Timesheets (in development): its own file, loaded the first time the screen opens */
+let tsLoading=null;
+function LazyTimesheets(props){
+  const [ok,setOk]=useState(!!window.TimesheetsScreen);const [err,setErr]=useState('');
+  useEffect(()=>{if(ok)return;const v=((document.querySelector('script[src*="/app.js"]')||{}).src||'').split('?v=')[1]||Date.now();
+    tsLoading=tsLoading||new Promise((res,rej)=>{const s=document.createElement('script');s.src='/timesheets.js?v='+v;s.onload=res;s.onerror=()=>{tsLoading=null;rej()};document.body.appendChild(s)});
+    tsLoading.then(()=>setOk(true),()=>setErr('Couldn’t load Timesheets. Check the connection and reload.'))},[]);
+  if(err)return html`<div class="panel p-6 text-[13px]" style=${{color:'var(--bad)'}}>${err}</div>`;
+  if(!ok||!window.TimesheetsScreen)return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;
+  return html`<${window.TimesheetsScreen} ...${props}/>`}
 function LazyFleet(props){
   const comp=props.comp||'FleetScreen';
   const [ok,setOk]=useState(!!(window.FleetScreen&&window.PrestartScreen&&window.FFD&&window.FFR&&window.QaScreen&&window.FFQF&&window.LabScreen));const [err,setErr]=useState('');
@@ -3000,7 +3011,7 @@ const previewKeys=()=>Object.keys(SCREENS).filter(k=>SCREENS[k].preview);
 const previewOf=d=>{if(!d||!Array.isArray(d.previewOnly))return [...new Set([...PREVIEW_DEFAULT,...previewKeys()])];const known=Array.isArray(d.previewKnown)?d.previewKnown:['fleet'];
   return [...d.previewOnly,...previewKeys().filter(k=>!known.includes(k)&&!d.previewOnly.includes(k))]};
 /* which areas open each screen (Admin › Roles) */
-const SCREEN_AREAS={schedule:['schedule'],jobs:['jobs'],planning:['planning'],floats:['floats'],staff:['staff.leave','staff.people','staff.myleave'],fleet:['fleet'],prestarts:['prestarts'],qa:['qa'],lab:['lab'],ideas:['ideas'],admin:[]};
+const SCREEN_AREAS={schedule:['schedule'],jobs:['jobs'],planning:['planning'],floats:['floats'],timesheets:['timesheets','timesheets.mine'],staff:['staff.leave','staff.people','staff.myleave'],fleet:['fleet'],prestarts:['prestarts'],qa:['qa'],lab:['lab'],ideas:['ideas'],admin:[]};
 const screenOK0=(k,role,d)=>{const s=SCREENS[k];if(!s)return false;
   if(k==='admin')return FF_PERM.role==='admin';
   return (SCREEN_AREAS[k]||[]).some(a=>can(a,1))&&(!s.preview||FF_PERM.role==='admin'||!previewOf(d).includes(k))};
@@ -3017,7 +3028,8 @@ const SCREENS={
   schedule:{label:'Schedule',title:'Schedule',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   jobs:{label:'Projects',title:'Projects',only:[],legend:[],head:''},
   planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
-  floats:{label:'Floats',title:'Floats',only:[],legend:[],head:'',preview:true},   /* moving machines between jobs on the float (floats.js) */
+  floats:{label:'Floats',title:'Floats',only:[],legend:[],head:'',preview:true},
+  timesheets:{label:'Timesheets',title:'Timesheets',only:[],legend:[],head:'',preview:true},   /* daily hours, signed off weekly by a supervisor (timesheets.js) */   /* moving machines between jobs on the float (floats.js) */
   fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',tab:'machine'},   /* maintenance: not for operators or viewers */
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
@@ -3030,6 +3042,7 @@ const SCREENS={
 /* only their own leave form: the menu says "Leave" */
 const staffIsLeave=()=>!can('staff.leave',1)&&!can('staff.people',1)&&can('staff.myleave',1);
 const NAV_ICON={
+  timesheets:svg(html`<rect x="2.5" y="2" width="11" height="12.5" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M5 5.5h6M5 8.5h6M5 11.5h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`),
   floats:svg(html`<path d="M1.5 11.5h13M3 11.5V9.5h7.5l2 2" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/><path d="M4.5 9.5V6.5h3.5l1.2 3" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/><circle cx="4" cy="13" r="1.2" stroke="currentColor" stroke-width="1.2"/><circle cx="11.5" cy="13" r="1.2" stroke="currentColor" stroke-width="1.2"/>`),
   admin:svg(html`<circle cx="8" cy="5.2" r="2.6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M2.8 14.2c.4-2.7 2.6-4.4 5.2-4.4s4.8 1.7 5.2 4.4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M12.6 2.2l.5 1 1.1.2-.8.8.2 1.1-1-.5-1 .5.2-1.1-.8-.8 1.1-.2z" fill="currentColor"/>`,20),
   lab:svg(html`<path d="M6.2 1.8h3.6M6.8 1.8v4.4L3 12.6c-.5.9.1 1.9 1.1 1.9h7.8c1 0 1.6-1 1.1-1.9L9.2 6.2V1.8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round" stroke-linecap="round"/><path d="M4.6 10h6.8" stroke="currentColor" stroke-width="1.5"/>`,20),
@@ -5781,7 +5794,7 @@ function App({boot,live}){
   const setFleetTab=v=>{setFleetTab0(v);try{localStorage.setItem(KEY+':fleet-tab',v)}catch(e){}};
   const [fleetCounts,setFleetCounts]=useState({});const [fleetAsset,setFleetAsset]=useState(null);
   const fleetCal=screen==='fleet'&&fleetTab==='cal';
-  const boardScreen=screen!=='planning'&&screen!=='floats'&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='lab'&&screen!=='admin'&&!peopleView&&!myLeaveView;   /* the date controls and + Booking belong to the board screens */
+  const boardScreen=screen!=='planning'&&screen!=='floats'&&screen!=='timesheets'&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='lab'&&screen!=='admin'&&!peopleView&&!myLeaveView;   /* the date controls and + Booking belong to the board screens */
   const goScreen=k=>{setScreen(k);try{localStorage.setItem(KEY+':screen',k)}catch(e){}
     const t=SCREENS[k].tab;if(t)setTab(t);else if(tab==='person'||tab==='machine')setTab('crew')};
   useEffect(()=>{const t=SCREENS[screen].tab;if(t&&tab!==t)setTab(t);else if(!t&&(tab==='person'||tab==='machine'))setTab('crew')},[screen,tab]);
@@ -5967,7 +5980,7 @@ function App({boot,live}){
       ${leaveDlg&&html`<${LeaveDialog} data=${data} setData=${setData} notify=${setToast} personId=${leaveDlg.personId} start=${leaveDlg.start} end=${leaveDlg.end} request=${leaveReqOnly?sendLeave:null} onClose=${()=>setLeaveDlg(null)}/>`}
       ${leaveReq&&html`<${LeaveRequestDialog} key=${leaveReq.id} r=${leaveReq} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onClose=${()=>setLeaveReq(null)}/>`}
       ${screen==='staff'&&!peopleView&&!myLeaveView&&html`<${LeaveRequests} LR=${LR} data=${data} setData=${setData} live=${live} notify=${setToast} onOpen=${setLeaveReq}/>`}
-      ${myLeaveView?html`<${MyLeave} live=${live} data=${data} LR=${LR} notify=${setToast}/>`:peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:(screen==='fleet'&&!fleetCal)||screen==='prestarts'||screen==='qa'||screen==='lab'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':screen==='qa'?'QaScreen':screen==='lab'?'LabScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast} setData=${setData} tab=${fleetTab} onCounts=${setFleetCounts} assetReq=${fleetAsset} onImportMachines=${()=>setMachImport(true)}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='admin'?html`<${AdminScreen} live=${live} data=${data} notify=${setToast}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='floats'?html`<${LazyFloats} data=${data} setData=${setData} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
+      ${myLeaveView?html`<${MyLeave} live=${live} data=${data} LR=${LR} notify=${setToast}/>`:peopleView?html`<${StaffPeople} data=${data} setData=${setData} live=${live} notify=${setToast} onAddLeave=${id=>setLeaveDlg({personId:id})}/>`:(screen==='fleet'&&!fleetCal)||screen==='prestarts'||screen==='qa'||screen==='lab'?html`<${LazyFleet} key=${screen} comp=${screen==='prestarts'?'PrestartScreen':screen==='qa'?'QaScreen':screen==='lab'?'LabScreen':'FleetScreen'} data=${data} live=${live} notify=${setToast} setData=${setData} tab=${fleetTab} onCounts=${setFleetCounts} assetReq=${fleetAsset} onImportMachines=${()=>setMachImport(true)}/>`:screen==='jobs'?html`<${JobsScreen} data=${data} setData=${setData} notify=${setToast} onEditBooking=${b=>setEditing(b)} onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}goScreen('planning')}}/>`:screen==='admin'?html`<${AdminScreen} live=${live} data=${data} notify=${setToast}/>`:screen==='ideas'?html`<${IdeasScreen} data=${data} setData=${setData} notify=${setToast}/>`:screen==='floats'?html`<${LazyFloats} data=${data} setData=${setData} notify=${setToast}/>`:screen==='timesheets'?html`<${LazyTimesheets} data=${data} live=${live} notify=${setToast}/>`:screen==='planning'?html`<${PlanningScreen} data=${data} setData=${setData} notify=${setToast} onOpenBooking=${id=>{const bk=data.blocks.find(x=>x.id===id);if(bk)setEditing(bk)}}/>`:html`
       ${screen==='staff'?(()=>{const L=leaveStats(data);return html`<section class="panel px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3" id="leave-stats">
         <${Stat} k="Away today" v=${L.today.length} sub=${L.today.length?L.today.map(x=>`${x.p.name.split(' ')[0]} (back ${fmtShort(addDays(parse(x.b.end),1))})`).join(', '):'everyone in'} tone=${L.today.length?'var(--warn)':null}/>
         <${Stat} k="Away this week" v=${L.week.length} sub=${L.week.length?`${L.weekDays} staff-day${L.weekDays===1?'':'s'} · ${L.week.map(p=>p.name.split(' ')[0]).join(', ')}`:'no leave this week'}/>

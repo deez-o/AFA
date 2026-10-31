@@ -252,3 +252,10 @@ People can sign in with a plain username (e.g. `jsmith`) instead of an email. Su
 To add one: Staff › People › **Create login**, or in Supabase → **Authentication → Users → Add user → Create new user**. Email: `jsmith@fraserflow.local`, a temporary password, tick **Auto Confirm User**. They sign in with `jsmith` and the temporary password, then choose their own. Forgotten passwords: reset it the same way (a new temporary password). People with real email logins keep signing in with their email.
 
 Set a role the same way as before, e.g. `update public.profiles set role = 'mechanic' where email = 'name@yourcompany.com.au';`
+
+
+### Timesheets (in development)
+Timesheets in the left menu (administrators only until it's released in Settings › Features in progress). `timesheets.js` and `supabase/timesheets.sql`.
+- **My timesheet**: each day of the week. A day can be filled in (start, finish, break, notes) only if the person signed on to a job that day (signed the JSA in a QA pack); leave on the calendar fills those days in. At the end of the week they **Send to supervisor**.
+- **All timesheets**: everyone with a sign-on, a timesheet or leave that week, day by day with totals. A timesheet starts on someone's first sign-on of the week; a week of leave makes one on its own. Hours different to the rest of the same crew that day are highlighted. Open a person to change any day (work, leave, sick, RDO, training, public holiday, off) and **Sign off week** (locks it; **Reopen** to change). PDFs: one person, or the whole week (a page each).
+- Admin › Roles: *Timesheets* (view everyone's; change: edit and sign off) and *Own timesheet* (fill in their own). The database enforces the sign-on rule and the lock.
