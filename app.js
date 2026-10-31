@@ -2962,7 +2962,7 @@ const NAV_ICON={
 };
 function NavRail({screen,go,isAdmin,role,data,badge={}}){
   const btn=([k,s])=>{const on=screen===k;
-    return html`<button key=${k} class=${'flex flex-col items-center gap-0.5 sm:gap-1 rounded-lg py-2 sm:py-2.5 text-[9.5px] sm:text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
+    return html`<button key=${k} class=${'shrink-0 flex flex-col items-center gap-0.5 sm:gap-1 rounded-lg py-2 sm:py-2.5 text-[9.5px] sm:text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
       style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${k==='staff'&&staffIsLeave()?'Leave':s.label}>
       <span class="relative inline-flex">${k==='staff'&&staffIsLeave()?NAV_ICON.schedule:NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${k==='staff'&&staffIsLeave()?'Leave':s.label}</span>${role==='admin'&&s.preview&&previewOf(data).includes(k)&&html`<span class="-mt-0.5 text-[8.5px] font-bold uppercase tracking-wide px-1 rounded leading-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}} title="Only you can see this while it is in progress">Preview</span>`}</button>`};
   const all=Object.entries(SCREENS).filter(([k])=>screenOK(k,role,data));
@@ -2970,9 +2970,10 @@ function NavRail({screen,go,isAdmin,role,data,badge={}}){
   /* bottom of the bar: features still in progress (admin only, until released), then Ideas */
   const low=([k,s])=>s.bottom||(s.preview&&previewOf(data).includes(k));
   const order=([k,s])=>s.bottom?1:0;
-  return html`<nav class="panel shrink-0 w-[50px] sm:w-[68px] h-full flex flex-col gap-1 p-1 sm:p-1.5" aria-label="Screens">
+  /* on a phone the menu scrolls when it's taller than the screen (turned sideways, or many screens) so Ideas at the bottom can always be reached */
+  return html`<nav class="panel nav-rail shrink-0 w-[50px] sm:w-[68px] h-full flex flex-col gap-1 p-1 sm:p-1.5 overflow-y-auto overscroll-contain" style=${{scrollbarWidth:'none'}} aria-label="Screens">
     ${all.filter(e=>!low(e)).map(btn)}
-    <div class="flex-1"></div>
+    <div class="flex-1 min-h-[8px]"></div>
     ${all.filter(low).sort((a,b)=>order(a)-order(b)).map(btn)}
   </nav>`;
 }
