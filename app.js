@@ -1012,7 +1012,7 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
     const ck=pre+':'+g.key;
     return html`<div key=${'g-'+g.key} class="flex border-b border-line">
       <button class="sticky left-0 z-10 bg-surface border-r border-line flex items-center gap-2 pl-6 pr-3 py-1.5 shrink-0 text-left" style=${{width:nameW}}
-        onClick=${()=>toggleSection(ck)} aria-expanded=${!collapsed[ck]}>
+        onClick=${()=>toggleSection(ck)} aria-expanded=${String(!collapsed[ck])}>
         <span class="text-muted inline-flex transition-transform" style=${{transform:collapsed[ck]?'rotate(-90deg)':'none'}}>${Icon.chevD}</span>
         <span class="text-[12.5px] font-semibold truncate">${g.label}</span>
         ${!narrow&&html`<span class="mono text-[11px] text-faint shrink-0">${g.rows.length} ${noun}${g.rows.length===1?'':'s'}</span>`}
@@ -1109,7 +1109,7 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
         <div class="flex border-b border-line bg-sunken">
           <div class="sticky left-0 z-10 bg-sunken flex items-center pl-1 shrink-0" style=${{width:nameW}}>
             ${Grip('Drag to move the '+SEC_LABEL(t)+' section',e=>startReo(e,'section',t,'sections'))}
-            <button class="flex items-center gap-2 pl-1 pr-3 py-2 flex-1 min-w-0 text-left" onClick=${()=>toggleSection(t)} aria-expanded=${!collapsed[t]}>
+            <button class="flex items-center gap-2 pl-1 pr-3 py-2 flex-1 min-w-0 text-left" onClick=${()=>toggleSection(t)} aria-expanded=${String(!collapsed[t])}>
               <span class="text-muted inline-flex transition-transform" style=${{transform:collapsed[t]?'rotate(-90deg)':'none'}}>${Icon.chevD}</span>
               <span class="label" style=${{color:'var(--ink)'}}>${SEC_LABEL(t)}</span>
               <span class="mono text-[11px] text-faint whitespace-nowrap">${t==='tonnes'?`${fmtN(viewTotal)} t in view`:rows.length}</span>
@@ -5482,7 +5482,8 @@ function App({boot,live}){
     let wide=true;try{wide=window.matchMedia('(min-width: 1024px)').matches}catch(e){}
     if(!wide)setDrawer(true);else setPanel(true)};
   /* collapsed sections and crew groups are remembered in this browser */
-  const [collapsed,setCollapsed]=useState(()=>{try{return JSON.parse(localStorage.getItem(KEY+':collapsed')||'{}')||{}}catch(e){return {}}});
+  /* paving tonnes and the asphalt plant start folded away: the crews show first (opening one is remembered) */
+  const [collapsed,setCollapsed]=useState(()=>{let c={};try{c=JSON.parse(localStorage.getItem(KEY+':collapsed')||'{}')||{}}catch(e){}return {tonnes:true,aplant:true,...c}});
   useEffect(()=>{try{localStorage.setItem(KEY+':collapsed',JSON.stringify(collapsed))}catch(e){}},[collapsed]);
   const [toast,setToast]=useState('');
   useEffect(()=>{try{localStorage.setItem(KEY+':view',String(view))}catch(e){}},[view]);
