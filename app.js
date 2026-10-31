@@ -1037,6 +1037,7 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
             ${(src=>src&&src.kind==='job'&&html`
               ${src.end>=iso(TODAY)&&restrictedIn(data,src.plantIds).length>0&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px] bar-restricted" style=${{width:15,height:14,background:'hsl(0 75% 46%)',color:'#fff'}} title=${'Restricted machine on this job: '+restrictedIn(data,src.plantIds).map(id=>(data.resources.find(r=>r.id===id)||{}).name).join(', ')+'. Swap it for another machine.'}>${Icon.alert}</span>`}
               ${src.end>=iso(TODAY)&&(tal=>tal.length>0&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px] bar-truck-alert text-[10px] font-bold" style=${{width:15,height:14,background:'hsl(0 75% 46%)',color:'#fff'}} title=${'Truck problem: '+tal.map(x=>`${x.name} (${fmtShort(parse(x.day))}): ${x.alert.text}`).join('; ')}>!</span>`)(bookingTruckAlerts(data,src,iso(TODAY)).filter(x=>x.alert.tone==='var(--bad)'))}
+              ${(due=>due.length>0&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px] bar-sub-due text-[9.5px] font-bold" style=${{width:15,height:14,background:'hsl(0 75% 46%)',color:'#fff'}} title=${'Subcontractor not booked (shift within 48 hours):\n'+due.map(x=>`${WD[parse(x.k).getDay()]} ${fmtShort(parse(x.k))}: ${subLabel(x.s)}`).join('\n')}>S</span>`)(subsToBook(src).filter(x=>x.due))}
               ${!src.sapEntered&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:13,background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">${Icon.sap}</span>`}
               ${src.inductionReq&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:14,background:src.inductionDone?'hsl(145 60% 34%)':'hsl(0 75% 46%)',color:'#fff'}} title=${src.inductionDone?'Site induction required: paperwork sent':'Site induction required: paperwork not sent yet'}>${Icon.induct}</span>`}
               ${src.creditIssue&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-full font-bold" style=${{width:14,height:14,fontSize:10,lineHeight:1,background:'hsl(0 75% 46%)',color:'#fff',boxShadow:'0 0 0 1.5px #fff'}} title="Credit issue">$</span>`}`)(v?(it.b.cover?it.b.parent:null):it.b)}
@@ -1682,6 +1683,9 @@ function BookingDetails({f,set,data,rtype,err,changeRes,resTypes}){
             </div>
             ${f.inductionReq&&html`<span class="text-[11.5px] text-faint">The bar shows a ${f.inductionDone?'green':'red'} induction icon${f.inductionDone?': paperwork sent.':' until the paperwork is sent.'}</span>`}
           </div>
+          ${isSealCrew(res)&&html`<div class="grid gap-1">
+            <label class="inline-flex items-center gap-2 text-[13.5px] cursor-pointer"><input id="ed-spreader" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--accent)'}} checked=${f.spreader!==false} onChange=${e=>set({spreader:e.target.checked?undefined:false})}/>Subcontractor spreader</label>
+            <span class="text-[11.5px] text-faint">${f.spreader!==false?'A spreader is added to every shift in the Subcontractors tab. Pick the company there and tick Booked once it’s booked in.':'No spreader is added to this booking.'}</span></div>`}
           <label class="grid gap-1"><span class="label">Notes</span>
             <textarea id="ed-notes" class="field" style=${{height:'auto',minHeight:60,padding:'8px 10px',resize:'vertical'}} rows="2" placeholder="Anything the crew or plant should know" value=${f.notes||''} onInput=${e=>set({notes:e.target.value})}></textarea></label>
           <div class="grid gap-1"><span class="label">Shift</span>
@@ -1741,6 +1745,9 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify,resTypes
   const [f,setF]=useState(initial);
   const [confirmDel,setConfirmDel]=useState(false);
   const isNew=!initial.id;
+  /* seal bookings: keep a subcontractor spreader on every shift while the tick is on */
+  const sdKey=f.kind==='job'?[f.resourceId,f.start,f.end,f.spreader,f.shift,f.satShift,f.sunShift,f.friShift,f.weekendShifts,(f.offDays||[]).join()].join('|'):'';
+  useEffect(()=>{if(readOnly||f.kind!=='job')return;setF(cur=>withSpreader(data,cur))},[sdKey]);
   const res=data.resources.find(r=>r.id===f.resourceId);
   const rtype=res?.type||'crew';
   const err=f.end<f.start?'End date is before the start date. Move the end date later.'
@@ -1772,8 +1779,9 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify,resTypes
   const active=tabs.find(t=>t.id===tab)||tabs[0];
   const submit=e=>{e.preventDefault();if(err)return;
     if(missing.length){setTried(true);const m0=missing[0];setTab(m0.tab);setTimeout(()=>{const el=document.getElementById(m0.id);if(el){el.scrollIntoView({block:'center'});if(el.focus)el.focus()}},60);return}
-    const out={...f,id:f.id||uid()};
+    let out={...f,id:f.id||uid()};
     if(!out.inductionReq){delete out.inductionReq;delete out.inductionDone}
+    out=withSpreader(data,out);if(out.spreader!==false)delete out.spreader;
     if(out.kind!=='job'||!isPavetech(data.resources.find(r=>r.id===out.resourceId)))delete out.crewSize;
     if(out.kind!=='job'){delete out.jobId;delete out.shift;delete out.address;delete out.plantIds}
     else{out.jobId=out.jobId||data.jobs[0]?.id||'__new';out.shift=out.shift||'day';out.plantIds=out.plantIds||[];out.address=(out.address||'').trim();out.quoteNo=(out.quoteNo||'').trim();if(!out.quoteNo)delete out.quoteNo;
@@ -2302,6 +2310,7 @@ const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking
   {id:'resource',label:'Crews, staff, machines & plants',desc:'Added, renamed or removed.'},
   {id:'lists',label:'Mixes & seal lists',desc:'Mix, seal and binder lists edited.'},
   {id:'jobdone',label:'Projects to complete',desc:'An open project whose bookings have all finished: mark it complete?'},
+  {id:'subbook',label:'Subcontractors to book',desc:'A subcontractor on a booking isn’t ticked as booked and the shift starts within 48 hours.'},
   /* maintenance (shown to people with Fleet & Maintenance) */
   {id:'mcritical',maint:true,label:'Critical defects & restrictions',desc:'A machine is restricted: do not use.'},
   {id:'mbooking',maint:true,label:'Restricted machines on bookings',desc:'A booking from today on has a machine that must not be used.'},
@@ -2311,11 +2320,20 @@ const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking
   {id:'mwo',maint:true,label:'Work orders',desc:'New work orders, and work orders completed and waiting for verification.'},
   {id:'mservice',maint:true,label:'Services due',desc:'Services overdue or due soon (once a day).'}];
 const NOTIF_KEY=KEY+':notif-prefs';
-const NOTIF_DEFAULT={quote:false,booking:false,job:false,resource:false,lists:false,jobdone:true,   /* roster changes: off until a person turns them on */
+const NOTIF_DEFAULT={quote:false,booking:false,job:false,resource:false,lists:false,jobdone:true,subbook:true,   /* roster changes: off until a person turns them on */
   mcritical:false,mbooking:false,mbreak:false,mprestart:false,mreturn:false,mwo:false,mservice:false};   /* maintenance: off too until switched on in Settings */
 
 /* maintenance notifications: events from the database feed, plus things true right now (services due, missing prestarts, restricted machines on bookings) */
 /* open jobs with bookings that have all finished: ask whether the job is complete */
+/* subcontractors not ticked as booked, 48 hours before the shift: one notification per booking and shift */
+function subBookNotifs(data,prefs){if(!prefs.subbook)return [];const now=Date.now(),out=[];
+  data.blocks.forEach(b=>{const due=subsToBook(b,now).filter(x=>x.due);if(!due.length)return;
+    const c=data.resources.find(r=>r.id===b.resourceId),j=data.jobs.find(x=>x.id===b.jobId);
+    [...new Set(due.map(x=>x.k))].forEach(k=>{const xs=due.filter(x=>x.k===k);
+      out.push({id:`sub-book-${b.id}-${k}-${xs.map(x=>subLabel(x.s)).join('|')}`,at:Math.min(now,xs[0].at-SUB_DUE_MS),blockId:b.id,alert:true,
+        text:`Subcontractor not booked: ${xs.map(x=>subLabel(x.s)).join(', ')}`,
+        sub:`${[c&&c.name,j&&jobLabel(j)].filter(Boolean).join(' · ')} · ${WD[parse(k).getDay()]} ${fmtShort(parse(k))}. Tick Booked in the booking’s Subcontractors tab.`})})});
+  return out}
 function jobDoneNotifs(data,prefs){if(!prefs.jobdone)return [];const today=iso(TODAY),out=[];
   data.jobs.forEach(j=>{if(j.completed)return;const bs=data.blocks.filter(b=>b.jobId===j.id&&(b.kind==='job'||b.kind==='onjob'));if(!bs.length||bs.some(b=>b.end>=today))return;
     const last=bs.reduce((m,b)=>b.end>m?b.end:m,'');const at=parse(last);at.setDate(at.getDate()+1);at.setHours(6,0,0,0);
@@ -2644,6 +2662,7 @@ function jobSummary(data,j){
   if(!j.completed){
     if(bs.some(b=>b.creditIssue))issues.push('Credit issue');
     if(live.some(b=>b.inductionReq&&!b.inductionDone))issues.push('Induction paperwork not sent');
+    if(live.some(b=>subsToBook(b).some(x=>x.due)))issues.push('Subcontractor not booked (within 48 hours)');
     if(live.some(b=>restrictedIn(data,b.plantIds).length))issues.push('Restricted machine booked');
     if(live.some(b=>bookingTruckAlerts(data,b,today).some(x=>x.alert.tone==='var(--bad)')))issues.push('Truck restricted or in for maintenance');
     if(status==='finished')issues.push('All shifts done: complete the project');}
@@ -2779,6 +2798,7 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
             const flags=b=>html`<span class="inline-flex flex-wrap gap-1">
               ${!b.sapEntered&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded" style=${{background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">SAP</span>`}
               ${b.creditIssue&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white" style=${{background:'hsl(0 75% 46%)'}}>Credit</span>`}
+              ${(un=>un.length>0&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white" style=${{background:un.some(x=>x.due)?'hsl(0 75% 46%)':'hsl(30 90% 42%)'}} title=${'Not booked yet: '+[...new Set(un.map(x=>subLabel(x.s)))].join(', ')}>Subbie</span>`)(subsToBook(b))}
               ${b.inductionReq&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white" style=${{background:b.inductionDone?'hsl(145 60% 34%)':'hsl(0 75% 46%)'}} title=${b.inductionDone?'Induction paperwork sent':'Induction paperwork not sent'}>Induction</span>`}
               ${b.planId&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>Plan</span>`}</span>`;
             const group=(seal,bs)=>{if(!bs.length)return null;const Q=bs.map(qtyOf);
@@ -3227,7 +3247,7 @@ function Notifications({data,onOpen,prefs,setPrefs,maint,onMaint,onCompleteJob})
     const out=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};const esc=e=>{if(e.key==='Escape')setOpen(false)};
     document.addEventListener('pointerdown',out);window.addEventListener('keydown',esc);
     return()=>{document.removeEventListener('pointerdown',out);window.removeEventListener('keydown',esc)}},[open]);
-  const list=[...(prefs.quote?recentQuoteChanges(data).map(c=>({...c,_q:true})):[]),...recentChanges(data,prefs),...(maint?maintNotifs(data,prefs):[]),...(onCompleteJob?jobDoneNotifs(data,prefs):[])].filter(c=>!gone[c.id]).sort((a,b)=>b.at-a.at).slice(0,150);
+  const list=[...(prefs.quote?recentQuoteChanges(data).map(c=>({...c,_q:true})):[]),...recentChanges(data,prefs),...(maint?maintNotifs(data,prefs):[]),...(onCompleteJob?jobDoneNotifs(data,prefs):[]),...subBookNotifs(data,prefs)].filter(c=>!gone[c.id]).sort((a,b)=>b.at-a.at).slice(0,150);
   const me=window.__rosterMe||'';
   const allOff=NOTIF_TYPES.filter(t=>maint||!t.maint).every(t=>!prefs[t.id]);
   const unseen=list.filter(c=>c.at>seen).length;
@@ -3335,10 +3355,30 @@ const bookingTruckAlerts=(d,b,fromDay)=>{const out=[];Object.keys(b.shiftData||{
 const subCosOf=d=>d&&Array.isArray(d.subCos)?d.subCos:DEFAULT_SUBS;
 const truckHas=t=>!!t&&!!(t.co||t.driver||t.w||t.time||t.loc);
 const subHas=s=>!!s&&!!(s.name||s.info||s.time);
+/* seal bookings get a subcontractor spreader on every shift (the "Subcontractor spreader" tick on the booking; on unless it's unticked) */
+const isSpreader=s=>!!s&&/spread/i.test(`${s.info||''} ${s.name||''}`);
+const wantsSpreader=(data,b)=>!!b&&b.kind==='job'&&isSealCrew(data.resources.find(r=>r.id===b.resourceId))&&b.spreader!==false;
+function withSpreader(data,b){
+  if(!b||b.kind!=='job'||!isSealCrew(data.resources.find(r=>r.id===b.resourceId)))return b;
+  const on=b.spreader!==false;const sd={...(b.shiftData||{})};let ch=false;
+  shiftDates(b).forEach(k=>{const q=sd[k]||{};const subs=(q.subs||[]).filter(subHas);
+    const set=list=>{sd[k]={...shiftBase(q),lines:linesOnly(q),...q,subs:list};ch=true};
+    if(on&&!subs.some(isSpreader))set([...subs,{name:'',info:'Spreader',time:q.start||'',auto:true}]);
+    else if(!on&&subs.some(x=>x.auto&&isSpreader(x)&&!x.name&&!x.booked))set(subs.filter(x=>!(x.auto&&isSpreader(x)&&!x.name&&!x.booked)))});
+  return ch?{...b,shiftData:sd}:b}
+/* subcontractors on a booking not ticked as booked: due when the shift starts within 48 hours */
+const SUB_DUE_MS=48*3600e3;
+const shiftStartMs=(b,k)=>{const q=(b.shiftData||{})[k]||{};const m=/^(\d{1,2}):(\d{2})/.exec(q.start||'');const d=parse(k);d.setHours(m?+m[1]:(b.shift==='night'?18:6),m?+m[2]:0,0,0);return d.getTime()};
+function subsToBook(b,now=Date.now()){
+  if(!b||b.kind!=='job')return [];const today=iso(TODAY);const out=[];
+  shiftDates(b).forEach(k=>{if(k<today)return;const at=shiftStartMs(b,k);
+    ((b.shiftData||{})[k]||{}).subs?.filter(x=>subHas(x)&&!x.booked).forEach(x=>out.push({k,at,s:x,due:at-now<=SUB_DUE_MS}))});
+  return out}
+const subLabel=x=>[x.name||'Subcontractor (no company yet)',x.info].filter(Boolean).join(' · ');
 const progHas=q=>!!q&&((q.trucks||[]).some(truckHas)||(q.subs||[]).some(subHas)||!!q.start||!!(q.comments||'').trim());
 const progClean=q=>{const o={};if(!q)return o;
   const t=(q.trucks||[]).filter(truckHas).map(x=>({co:(x.co||'').trim(),driver:(x.driver||'').trim(),w:x.w||'',time:x.time||'',loc:(x.loc||'').trim(),...(x.manual?{manual:true}:{})}));if(t.length)o.trucks=t;
-  const s=(q.subs||[]).filter(subHas).map(x=>({name:(x.name||'').trim(),info:(x.info||'').trim(),time:x.time||''}));if(s.length)o.subs=s;
+  const s=(q.subs||[]).filter(subHas).map(x=>({name:(x.name||'').trim(),info:(x.info||'').trim(),time:x.time||'',...(x.booked?{booked:true}:{}),...(x.auto?{auto:true}:{})}));if(s.length)o.subs=s;
   if(q.start)o.start=q.start;if(q.locTimes){const L={};Object.entries(q.locTimes).forEach(([kk,v])=>{if(v&&(v.start||+v.gap))L[kk]={...(v.start?{start:v.start}:{}),...(+v.gap?{gap:+v.gap}:{})}});if(Object.keys(L).length)o.locTimes=L}const c=(q.comments||'').trim();if(c)o.comments=c;return o};
 const linesOnly=q=>!q?[]:Array.isArray(q.lines)?q.lines:(q.type||q.tonnes||q.area?[q]:[]);
 const fmtTime=t=>{if(!t)return '';const m=/^(\d{1,2}):(\d{2})/.exec(t);if(!m)return t;let h=+m[1];const ap=h>=12?'PM':'AM';h=h%12||12;return `${h}:${m[2]} ${ap}`};
@@ -3534,7 +3574,7 @@ function ProgramShifts({f,set,data,part}){
   const locs=[...new Set([...programLocsOf(data),...(f.address?[f.address]:[])])];
   const fs={height:30,fontSize:13};const iconX='w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken';
   const TC='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.2fr_1fr_72px_190px_1.1fr_28px] items-center';
-  const SC2='grid gap-2 grid-cols-[1fr_1fr_28px] sm:grid-cols-[1.3fr_1.2fr_164px_28px] items-center';
+  const SC2='grid gap-2 grid-cols-[1fr_1fr_auto_28px] sm:grid-cols-[1.3fr_1.2fr_164px_auto_28px] items-center';
   return html`<section class="grid gap-4" aria-labelledby="sec-program">
     <div class="flex flex-wrap items-end gap-3">
       <div class="mr-auto"><h3 id="sec-program" class="font-display text-[15px] font-semibold">${part==='trucks'?'Trucks':'Subcontractors'}</h3>
@@ -3612,11 +3652,14 @@ function ProgramShifts({f,set,data,part}){
 
     ${part!=='trucks'&&html`    <div class="grid gap-1.5">
       <div class="flex items-baseline gap-2"><span class="label" style=${{color:'var(--ink)'}}>Subcontractors</span><span class="flex-1 h-px bg-line self-center"></span></div>
-      <div class=${'hidden sm:grid '+SC2}><span class="label">Subcontractor</span><span class="label">Service</span><span class="label">Start time</span><span></span></div>
+      <div class=${'hidden sm:grid '+SC2}><span class="label">Subcontractor</span><span class="label">Service</span><span class="label">Start time</span><span class="label">Booked</span><span></span></div>
       ${subs.map((s,j)=>html`<div key=${j} class=${SC2}>
         <${Combo} id=${`pg-s${j}-n`} style=${fs} placeholder="Subcontractor" value=${s.name||''} onChange=${v=>setS(j,{name:v})} label=${`Subcontractor ${j+1}`} options=${subCosOf(data)}/>
         <${Combo} id=${`pg-s${j}-i`} style=${fs} placeholder=${servicesFor(data,s.name).length?'Pick or type a service':'Type the service'} value=${s.info||''} onChange=${v=>setS(j,{info:v})} label=${`Subcontractor ${j+1} service`} options=${servicesFor(data,s.name)}/>
         <${TimeSelect} id=${`pg-s${j}-t`} label=${`Subcontractor ${j+1} start time`} value=${s.time||''} pm=${night} onChange=${v=>setS(j,{time:v})}/>
+        <label class="inline-flex items-center gap-1.5 text-[12.5px] font-medium cursor-pointer whitespace-nowrap pg-s-booked" title="Tick once this subcontractor is booked in"
+          style=${subHas(s)&&!s.booked?{color:shiftStartMs(f,k)-Date.now()<=SUB_DUE_MS?'var(--bad)':'hsl(30 90% 36%)'}:{color:'hsl(145 55% 30%)'}}>
+          <input id=${`pg-s${j}-booked`} type="checkbox" class="w-4 h-4" style=${{accentColor:'hsl(145 60% 36%)'}} checked=${!!s.booked} disabled=${!subHas(s)} onChange=${e=>setS(j,{booked:e.target.checked})}/>${s.booked?'Booked':'Book'}</label>
         <button type="button" class=${iconX} onClick=${()=>upd({subs:subs.filter((_,x)=>x!==j)})} aria-label=${`Remove subcontractor ${j+1}`} title="Remove">${Icon.x}</button>
       </div>`)}
       <div><button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>upd({subs:[...subs.filter(subHas),{time:q.start||''}]})}>${Icon.plus} Add subcontractor</button></div>
