@@ -1749,16 +1749,17 @@ function BookingOverview({b,data,onClose}){
   const lineTxt=l=>seal
     ?[(l.type||'').trim(),l.binder,(l.stone||'').trim()&&`${l.stone} stone`,n(l.area)&&`${n(l.area)} m²`,n(l.spray)&&`${n(l.spray)} L/m²`,n(l.spread)&&`${n(l.spread)} m²/m³`,l.twoCoat&&'two coat'].filter(Boolean).join(' · ')
     :[(l.type||'').trim(),l.binder,n(l.tonnes)&&`${n(l.tonnes)} t`,n(l.area)&&`${n(l.area)} m²`,n(l.depth)&&`${n(l.depth)} mm`].filter(Boolean).join(' · ');
-  const Row=({k,children})=>children?html`<div class="flex gap-3 text-[13px]"><span class="text-muted w-[86px] shrink-0">${k}</span><span class="min-w-0 flex-1 break-words">${children}</span></div>`:null;
+  const Row=({k,children})=>children?html`<div class="flex gap-3 text-[12px]"><span class="text-muted w-[78px] shrink-0">${k}</span><span class="min-w-0 flex-1 break-words">${children}</span></div>`:null;
   const Sec=({t,children})=>html`<div class="grid gap-1"><div class="label" style=${{color:'var(--ink)'}}>${t}</div>${children}</div>`;
   const range=b.start===b.end?`${WD[parse(b.start).getDay()]} ${fmtShort(parse(b.start))}`:`${WD[parse(b.start).getDay()]} ${fmtShort(parse(b.start))} – ${WD[parse(b.end).getDay()]} ${fmtShort(parse(b.end))}`;
-  return html`<div class="fixed inset-0 z-[60] flex flex-col bg-surface" role="dialog" aria-modal="true" aria-labelledby="bo-title" id="booking-overview">
-    <div class="flex items-start gap-3 px-4 pt-[max(12px,env(safe-area-inset-top))] pb-3 border-b border-line">
+  return html`<div class="fixed inset-0 z-[60] flex items-center justify-center backdrop p-2" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div class="panel pop flex flex-col overflow-hidden w-[92vw] max-w-[560px] max-h-[86dvh]" role="dialog" aria-modal="true" aria-labelledby="bo-title" id="booking-overview">
+    <div class="flex items-start gap-2.5 px-3 pt-2.5 pb-2 border-b border-line">
       <span class="w-3 h-3 rounded-sm mt-1.5 shrink-0" style=${{background:crew?`hsl(${crew.hue} 60% 55%)`:'var(--line-strong)'}}></span>
-      <div class="min-w-0 flex-1"><div id="bo-title" class="font-display text-[17px] font-semibold leading-tight">${b.kind==='job'?jobLabel(j):blockTitle(b,data.jobs)}</div>
-        <div class="text-[12.5px] text-muted">${[crew&&crew.name,range,night?'Night works':'Day works'].filter(Boolean).join(' · ')}</div></div>
-      <button type="button" class="btn px-2" onClick=${onClose} aria-label="Close">${Icon.x}</button></div>
-    <div class="flex-1 overflow-y-auto px-4 py-3 grid gap-4 content-start">
+      <div class="min-w-0 flex-1"><div id="bo-title" class="font-display text-[15px] font-semibold leading-tight">${b.kind==='job'?jobLabel(j):blockTitle(b,data.jobs)}</div>
+        <div class="text-[11.5px] text-muted">${[crew&&crew.name,range,night?'Night works':'Day works'].filter(Boolean).join(' · ')}</div></div>
+      <button type="button" class="btn px-1.5" style=${{height:30}} onClick=${onClose} aria-label="Close">${Icon.x}</button></div>
+    <div class="flex-1 min-h-0 overflow-y-auto px-3 py-2.5 grid gap-3 content-start">
       <div class="grid gap-1">
         <${Row} k="Address">${b.address||(j&&j.address)||''}<//>
         <${Row} k="Project no.">${b.projectNo||(j&&j.projectNo)||''}<//>
@@ -1766,21 +1767,21 @@ function BookingOverview({b,data,onClose}){
         <${Row} k="Supervisor">${b.supervisor?html`${b.supervisor}${b.supervisorPhone?html` · <a class="underline" href=${'tel:'+b.supervisorPhone.replace(/\s/g,'')}>${b.supervisorPhone}</a>`:''}`:''}<//>
         <${Row} k="Induction">${b.inductionReq?(b.inductionDone?'Required · paperwork sent':'Required · paperwork not sent'):''}<//>
         <${Row} k="Notes">${(b.notes||'').trim()}<//></div>
-      ${ds.length===0&&html`<div class="text-[13px] text-muted">No shifts on this booking.</div>`}
+      ${ds.length===0&&html`<div class="text-[12px] text-muted">No shifts on this booking.</div>`}
       ${ds.map((k,i)=>{const q=sd[k]||{};const lines=linesOf(q).filter(lineHas);const mach=machinesOn(b,k).map(mName).filter(Boolean);const subs=(q.subs||[]).filter(subHas);
         const cov=coverOf(b,k);const cc=cov&&data.resources.find(r=>r.id===cov);
-        return html`<section key=${k} class=${'rounded-lg border border-line p-3 grid gap-2.5 bo-shift'+(k<today?' opacity-70':'')} data-date=${k}>
-          <div class="flex items-baseline gap-2 flex-wrap"><span class="font-semibold text-[14px]">${WD[parse(k).getDay()]} ${fmtShort(parse(k))}</span>
+        return html`<section key=${k} class=${'rounded-lg border border-line p-2.5 grid gap-2 bo-shift'+(k<today?' opacity-70':'')} data-date=${k}>
+          <div class="flex items-baseline gap-2 flex-wrap"><span class="font-semibold text-[13px]">${WD[parse(k).getDay()]} ${fmtShort(parse(k))}</span>
             <span class="text-[12px] text-muted">${night?'Night':'Shift'} ${i+1}${q.start?` · starts ${fmtTime(q.start)}`:''}</span>
             ${k===today&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded" style=${{background:'var(--accent-soft)',color:'var(--accent)'}}>Today</span>`}
             ${cc&&html`<span class="text-[11.5px] text-muted">· ${cc.name} covering</span>`}</div>
-          <${Sec} t=${seal?'Seal':'Asphalt'}>${lines.length?lines.map((l,x)=>html`<div key=${x} class="text-[13px]">${lineTxt(l)}</div>`):html`<div class="text-[12.5px] text-muted">No quantities entered.</div>`}<//>
-          <${Sec} t="Machines">${mach.length?html`<div class="text-[13px] grid gap-0.5">${mach.map((m,x)=>html`<div key=${x}>${m}</div>`)}</div>`:html`<div class="text-[12.5px] text-muted">None assigned.</div>`}<//>
-          ${subs.length>0&&html`<${Sec} t="Subcontractors">${subs.map((x,y)=>html`<div key=${y} class="text-[13px] flex flex-wrap gap-x-2"><span>${[x.name||'Subcontractor',x.info].filter(Boolean).join(' · ')}${x.time?` · ${fmtTime(x.time)}`:''}</span>
+          <${Sec} t=${seal?'Seal':'Asphalt'}>${lines.length?lines.map((l,x)=>html`<div key=${x} class="text-[12px]">${lineTxt(l)}</div>`):html`<div class="text-[11.5px] text-muted">No quantities entered.</div>`}<//>
+          <${Sec} t="Machines">${mach.length?html`<div class="text-[12px] grid gap-0.5">${mach.map((m,x)=>html`<div key=${x}>${m}</div>`)}</div>`:html`<div class="text-[11.5px] text-muted">None assigned.</div>`}<//>
+          ${subs.length>0&&html`<${Sec} t="Subcontractors">${subs.map((x,y)=>html`<div key=${y} class="text-[12px] flex flex-wrap gap-x-2"><span>${[x.name||'Subcontractor',x.info].filter(Boolean).join(' · ')}${x.time?` · ${fmtTime(x.time)}`:''}</span>
             <span class="text-[11.5px] font-semibold" style=${{color:x.booked?'hsl(145 55% 30%)':'hsl(30 90% 36%)'}}>${x.booked?'Booked':'Not booked yet'}</span></div>`)}<//>`}
-          ${(q.comments||'').trim()&&html`<${Sec} t="Comments"><div class="text-[13px] whitespace-pre-line">${q.comments.trim()}</div><//>`}
+          ${(q.comments||'').trim()&&html`<${Sec} t="Comments"><div class="text-[12px] whitespace-pre-line">${q.comments.trim()}</div><//>`}
         </section>`})}
-    </div></div>`;
+    </div></div></div>`;
 }
 function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify,resTypes,readOnly}){
   const [planView,setPlanView]=useState(null);
