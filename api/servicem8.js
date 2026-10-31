@@ -172,14 +172,26 @@ function describeJob({ wo, machine, profile, meters, defects }) {
 }
 
 // Meter readings he wrote in Work Done ("Hours: 4,530", "Km 123456"). The label comes first, so "500 hr service" isn't one.
+// Meter readings in his words: "Hours: 4,530", "Hour meter reading 4530", "SMU 4530", "4530 hrs", "Odo 123456", "123,456 km".
+// The highest of each kind is taken. A number before "hrs" isn't a reading when it's a duration or a service name
+// ("took 3 hrs", "500 hr service") or under 50 hours / 100 km.
 function parseMeters(text, meterType) {
-  const t = String(text || ''), out = [];
-  const num = s => +String(s).replace(/,/g, '');
-  const h = t.match(/\b(?:engine\s+)?(?:hours|hrs|hour\s*meter|hourmeter|hm)\b\s*[:=\-]?\s*(\d[\d,]*(?:\.\d+)?)/i);
-  const k = t.match(/\b(?:odometer|odo|kms?|kilomet(?:re|er)s)\b\s*[:=\-]?\s*(\d[\d,]*(?:\.\d+)?)/i);
-  if (h && meterType !== 'km') out.push({ kind: 'hours', value: num(h[1]) });
-  if (k && meterType !== 'hours') out.push({ kind: 'km', value: num(k[1]) });
-  return out.filter(x => isFinite(x.value) && x.value > 0);
+  const t = String(text || ''), num = s => +String(s).replace(/,/g, '');
+  const N = '(\\d[\\d,]*(?:\\.\\d+)?)', FILL = '(?:\\s+(?:reading|read|now|at|on|is|was|currently|showing|of))*\\s*[:=\\-]?\\s*';
+  const all = (re, f) => { const out = []; for (let m; (m = re.exec(t));) { const v = f(m); if (v != null && isFinite(v) && v > 0) out.push(v); } return out; };
+  const notDuration = m => !/\b(?:took|take|spent|about|approx|approximately|around|for|after|every|over|under|labou?r|travel)\s+$/i.test(t.slice(Math.max(0, m.index - 25), m.index));
+  const hours = [
+    ...all(new RegExp('\\b(?:engine\\s+)?(?:hours?|hrs?|hour\\s*meter|hourmeter|hm|smu)\\b' + FILL + N, 'gi'), m => num(m[1])),
+    ...all(new RegExp(N + '\\s*(?:hours|hrs|hr|h)\\b(?!\\s*(?:service|interval|check|job|labou?r|of\\b|work|travel))', 'gi'), m => notDuration(m) && num(m[1]) >= 50 ? num(m[1]) : null),
+  ];
+  const km = [
+    ...all(new RegExp("\\b(?:odometer|odo|kms?|km's|kilomet(?:re|er)s)\\b" + FILL + N, 'gi'), m => num(m[1])),
+    ...all(new RegExp(N + "\\s*(?:km|kms|km's|kilomet(?:re|er)s)\\b(?!\\s*(?:service|interval|check|away|trip|drive))", 'gi'), m => notDuration(m) && num(m[1]) >= 100 ? num(m[1]) : null),
+  ];
+  const out = [];
+  if (hours.length && meterType !== 'km') out.push({ kind: 'hours', value: Math.max(...hours) });
+  if (km.length && meterType !== 'hours') out.push({ kind: 'km', value: Math.max(...km) });
+  return out;
 }
 
 const PLACEHOLDER = /^Completed in ServiceM8\b/;
@@ -303,19 +315,19 @@ function mapJob({ job, activities, materials, wo, cfg, profile, latest, prev, no
   if (cfg.contractor_name) patch.assigned_to = cfg.contractor_name;
 
   const rank = { open: 0, scheduled: 1, in_progress: 2, awaiting_parts: 2 };
-  let next = wo.status, service = null, meters = null;
+  let next = wo.status, service = null;
+  // readings he gives (Work Done, description, notes), as soon as he writes them; only ones newer than the machine's last
+  const hisText = [job.work_done_description, desc, ...(nl || []).map(n => n.text)].filter(Boolean).join('\n');
+  let meters = wo.wo_type === 'service' ? [] : parseMeters(hisText, profile && profile.meter_type).filter(x => (latest || {})[x.kind] == null || x.value > latest[x.kind]);
   if (st === 'Completed') {
     next = 'completed';
     const text = completionText({ job, notes });
     if (wo.status === 'completed' && text && PLACEHOLDER.test(wo.completion_notes || '')) patch.completion_notes = text;   // fill in what was missed before
     if (wo.status !== 'completed') {
       patch.completion_notes = text || `Completed in ServiceM8${jobInfo.job_no ? ' (job ' + jobInfo.job_no + ')' : ''}`;
-      const cur = latest || {};
-      meters = parseMeters([text, desc, ...(nl || []).map(n => n.text)].join('\n'), profile && profile.meter_type).filter(x => cur[x.kind] == null || x.value >= cur[x.kind]);
-      if (wo.wo_type === 'service') {
-        const mv = Object.fromEntries(meters.map(x => [x.kind, x.value]));
+      if (wo.wo_type === 'service') {   // a service's reading goes on its service record (which records the reading)
+        const mv = Object.fromEntries(parseMeters(hisText, profile && profile.meter_type).filter(x => (latest || {})[x.kind] == null || x.value >= latest[x.kind]).map(x => [x.kind, x.value]));
         service = { done_on: day(job.completion_date) || todayBne(), hours: mv.hours ?? null, km: mv.km ?? null, mechanic: cfg.contractor_name || 'ServiceM8' };
-        meters = [];
       }
     }
   } else if (st === 'Unsuccessful') {
@@ -423,7 +435,13 @@ async function pullOne(D, S, cfg, link, wo, ctx) {
   // his notes, every time (shown live on the work order); needs read_job_notes
   const notes = yes(job.active) ? await S.get(`/note.json?${filt(`related_object_uuid eq '${link.job_uuid}' and active eq 1`)}`).catch(() => null) : null;
   const m = mapJob({ job, activities, materials, wo, cfg, profile: ctx.profile, latest: ctx.latest, prev: link, notes, sent: describeJob({ wo, ...ctx }) });
-  const result = await D.rpc('servicem8_apply', { p_wo: wo.id, p_patch: m.patch || {}, p_service: m.service, p_meters: m.meters || [], p_job: m.job });
+  // his readings, as soon as he gives them (not only on completion); the database refuses one lower than the last
+  if (!['closed', 'cancelled'].includes(wo.status)) {
+    for (const r of m.meters || []) {
+      await D.post('meter_readings', { asset_id: wo.asset_id, kind: r.kind, value: r.value, source: 'work_order', note: `WO ${wo.number} (ServiceM8)` }).catch(() => null);
+    }
+  }
+  const result = await D.rpc('servicem8_apply', { p_wo: wo.id, p_patch: m.patch || {}, p_service: m.service, p_meters: [], p_job: m.job });
   // his photos and PDFs (a problem here doesn't stop the rest of the update; it is tried again next time)
   if (yes(job.active) && !['closed', 'cancelled'].includes(wo.status) && env) {
     const problems = [];

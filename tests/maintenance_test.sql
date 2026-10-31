@@ -157,5 +157,19 @@ insert into public.items (kind, id, data) values ('block','t-block-1','{"kind":"
 select pg_temp.ok(exists (select 1 from public.items where id = 't-block-1'), 'planner can still add bookings');
 reset role;
 
+-- finished early: the downtime ends the day it was finished, or goes if the work hadn't started
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
+set local role authenticated;
+insert into public.work_orders (id, asset_id, wo_type, title, start_date, end_date) values
+  ('00000000-0000-0000-0000-00000000c0e1','t-mach-1','request','Early finish', current_date - 1, current_date + 5),
+  ('00000000-0000-0000-0000-00000000c0e2','t-mach-1','request','Not started', current_date + 3, current_date + 4);
+update public.work_orders set status = 'completed', completion_notes = 'done' where id in ('00000000-0000-0000-0000-00000000c0e1','00000000-0000-0000-0000-00000000c0e2');
+reset role;
+select pg_temp.ok((select data->>'end' from public.items where kind = 'block' and id = 'wo-00000000-0000-0000-0000-00000000c0e1') = ((now() at time zone 'Australia/Brisbane')::date)::text,
+  'completed early: its downtime on the schedule ends the day it was finished');
+select pg_temp.ok(not exists (select 1 from public.items where kind = 'block' and id = 'wo-00000000-0000-0000-0000-00000000c0e2'),
+  'completed before its scheduled days: its downtime comes off the schedule');
+
 select 'ALL MAINTENANCE TESTS PASSED' as result;
 rollback;

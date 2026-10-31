@@ -95,7 +95,7 @@ function reset() {
     secrets: { id: 1, webhook_key: 'ab'.repeat(24) },
     links: [{ work_order_id: WO1, state: 'pending', dirty: false, job_uuid: null, attempts: 0, updated_at: '2026-10-31T00:00:00+00:00' }],
     wos: [{ id: WO1, number: 1042, asset_id: 'm1', wo_type: 'breakdown', priority: 'high', title: 'Hose burst', description: 'Left boom', status: 'open' }],
-    jobs: {}, companies: [], attachments: [], files: [], uploads: [],
+    jobs: {}, companies: [], attachments: [], files: [], uploads: [], readings: [],
   };
   sm8Calls = []; rpcCalls = [];
 }
@@ -130,6 +130,7 @@ async function http(url, o = {}) {
     if (p.startsWith('work_orders')) { const id = p.match(/id=eq\.([^&]+)/)[1]; return json(200, db.wos.filter(w => w.id === id)); }
     if (p.startsWith('items')) return json(200, [{ data: { name: 'R12', sub: 'Pneumatic roller', rego: 'ABC123' } }]);
     if (p.startsWith('asset_profiles')) return json(200, [{ meter_type: 'hours' }]);
+    if (p.startsWith('meter_readings') && m === 'POST') { db.readings.push(JSON.parse(o.body)); return json(201, null); }
     if (p.startsWith('meter_readings')) return json(200, p.includes('kind=eq.hours') ? [{ kind: 'hours', value: 4500, read_at: '2026-10-30T00:00:00Z' }] : []);
     if (p.startsWith('defects')) return json(200, []);
     if (p.startsWith('maintenance_files') && m === 'POST') { if (db.filesBroken) return json(400, { message: 'column "work_order_id" does not exist' }); db.files.push(JSON.parse(o.body)); return json(201, null); }
@@ -231,7 +232,7 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   db.jobs[link.job_uuid].status = 'Completed'; db.jobs[link.job_uuid].work_done_description = 'Replaced hose. Hours: 4530';
   rpcCalls.length = 0;
   r = await call({ method: 'POST', query: { hook: key }, body: { object: 'job', entry: [{ uuid: link.job_uuid, changed_fields: ['status'] }] } });
-  ok(r.statusCode === 200 && rpcCalls.length === 1 && rpcCalls[0].p_patch.status === 'completed' && rpcCalls[0].p_meters[0].value === 4530, 'he completes our job: the work order is completed with his notes and the reading');
+  ok(r.statusCode === 200 && rpcCalls.length === 1 && rpcCalls[0].p_patch.status === 'completed' && db.readings.some(x => x.kind === 'hours' && x.value === 4530 && x.source === 'work_order'), 'he completes our job: the work order is completed with his notes and the reading');
 
   db.settings.enabled = false; sm8Calls.length = 0; rpcCalls.length = 0;
   r = await call({ method: 'POST', query: { hook: key }, body: { object: 'job', entry: [{ uuid: link.job_uuid }] } });
@@ -258,6 +259,20 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
     ok(JSON.stringify(parseParts('Parts used:\nGrease\nAir filter\n\nChecked brakes, all good')) === JSON.stringify([{ part: 'Grease', qty: '1' }, { part: 'Air filter', qty: '1' }]), 'a list ends at a blank line');
     ok(JSON.stringify(parseParts('Replaced steering wheel')) === JSON.stringify([{ part: 'Steering wheel', qty: '1' }]) && !parseParts('Took 3 hours. Replaced it.').length && !parseParts('the new hose leaks').length,
       'sentences still work, and non-parts aren’t picked up');
+  }
+
+  {   // his readings, word for word, as he wrote them in notes after completing
+    const { parseMeters } = mod;
+    const wo = { id: 'w1', status: 'open', wo_type: 'breakdown' }, cfg = {};
+    const note = '1/10 12:13 Work completed\nDie grind bolts\nChange tyres\n\nUsed\n2 x Tyres\n3 x Drill bits\n4900 x Bolts and nuts\n31/10 12:17 driver reported issue with steering\nFixed steering\n\nParts used\nReplaced steering wheel\n31/10 12:31 250,000kms current reading\n31/10 12:33 4500hrs current reading';
+    ok(JSON.stringify(parseMeters(note, 'both')) === JSON.stringify([{ kind: 'hours', value: 4500 }, { kind: 'km', value: 250000 }]), 'readings written number-first ("4500hrs", "250,000kms") are read');
+    ok(parseMeters('Hour meter reading 4530', 'hours')[0].value === 4530 && parseMeters('SMU 4530', 'hours')[0].value === 4530, '"Hour meter reading 4530" and "SMU 4530" are read');
+    ok(!parseMeters('took 3 hrs', 'both').length && !parseMeters('Did the 500 hr service', 'both').length && !parseMeters('drove 5 km to site', 'both').length && !parseMeters('labour 6 hours', 'both').length,
+      'durations, service names and short trips aren’t readings');
+    const r2 = mapJob({ job: { active: 1, status: 'Work Order' }, notes: [{ active: 1, note: '4600hrs current reading' }], activities: [], materials: [], wo: { ...wo, status: 'in_progress' }, cfg, profile: { meter_type: 'hours' }, latest: { hours: 4500 } });
+    ok(r2.meters.length === 1 && r2.meters[0].value === 4600, 'a reading in a note is taken while the job is still open, not only on completion');
+    const r3 = mapJob({ job: { active: 1, status: 'Work Order' }, notes: [{ active: 1, note: '4500hrs current reading' }], activities: [], materials: [], wo: { ...wo, status: 'in_progress' }, cfg, profile: { meter_type: 'hours' }, latest: { hours: 4500 } });
+    ok(r3.meters.length === 0, 'the same reading isn’t saved again on the next refresh');
   }
 
   // his photos and PDFs
