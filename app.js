@@ -904,6 +904,7 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
   const startDrag=(e,b,mode='move')=>{
     e.stopPropagation();
     if(e.button!==0)return;
+    if(readOnly&&mode!=='move')return;   /* view only: no stretching */
     if(mode!=='move')e.preventDefault();
     const area=e.currentTarget.closest('.dayarea');
     const colW=area.getBoundingClientRect().width/N;
@@ -915,6 +916,7 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
     if(!drag)return;
     const mv=e=>{
       const d=dragRef.current;if(!d)return;
+      if(readOnly)return;   /* view only: a booking can be opened, not moved */
       const moved=d.moved||Math.abs(e.clientX-d.x0)>4||Math.abs(e.clientY-d.y0)>4;
       if(moved)e.preventDefault();
       const dx=Math.round((e.clientX-d.x0)/d.colW);
@@ -941,12 +943,12 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
   const preview=drag&&drag.moved?(drag.mode!=='move'?resized(drag):{...drag.b,resourceId:drag.rid,start:iso(addDays(parse(drag.b.start),drag.dx)),end:iso(addDays(parse(drag.b.end),drag.dx))}):null;
   const effBlocks=preview?data.blocks.map(b=>b.id===preview.id?preview:b):data.blocks;
   const quoteFresh=new Set(!(notifPrefs&&notifPrefs.quote)?[]:recentQuoteChanges(data).map(c=>c.bookingId));
-  const nudge=(b,n)=>onMove({...b,start:iso(addDays(parse(b.start),n)),end:iso(addDays(parse(b.end),n))});
+  const nudge=(b,n)=>{if(!readOnly)onMove({...b,start:iso(addDays(parse(b.start),n)),end:iso(addDays(parse(b.end),n))})};
   const grid={gridTemplateColumns:`repeat(${N},minmax(${colMin}px,1fr))`};
   const colBg=d=>diffDays(d,TODAY)===0?'var(--accent-soft)':isWeekend(d)?'var(--weekend)':'transparent';
 
   const idxAt=(e,el)=>{const r=el.getBoundingClientRect();return Math.max(0,Math.min(N-1,Math.floor((e.clientX-r.left)/r.width*N)))};
-  const down=(e,r)=>{if(e.button!==0)return;const i=idxAt(e,e.currentTarget);e.currentTarget.setPointerCapture?.(e.pointerId);setSel({rid:r.id,a:i,b:i})};
+  const down=(e,r)=>{if(e.button!==0||readOnly)return;const i=idxAt(e,e.currentTarget);e.currentTarget.setPointerCapture?.(e.pointerId);setSel({rid:r.id,a:i,b:i})};
   const move=e=>{if(!sel)return;const i=idxAt(e,e.currentTarget);if(i!==sel.b)setSel(s=>({...s,b:i}))};
   const up=()=>{if(!sel)return;const a=Math.min(sel.a,sel.b),b=Math.max(sel.a,sel.b);
     onCreate({resourceId:sel.rid,start:iso(addDays(rangeStart,a)),end:iso(addDays(rangeStart,b))});setSel(null)};
@@ -1733,7 +1735,7 @@ function BookingDetails({f,set,data,rtype,err,changeRes,resTypes}){
   </div>`;
 }
 
-function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify,resTypes}){
+function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify,resTypes,readOnly}){
   const [planView,setPlanView]=useState(null);
   const [f,setF]=useState(initial);
   const [confirmDel,setConfirmDel]=useState(false);
@@ -1797,7 +1799,7 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify,resTypes
       if(out._jobDone!==undefined)pch.completed=!!out._jobDone;
       if(Object.keys(pch).length)jobPatch={id:out.jobId,...pch}}
     delete out._customer;delete out._newJobName;delete out._jobDone;
-    onSave(out,newMixes,jobPatch,newJob)};
+    if(readOnly)return;onSave(out,newMixes,jobPatch,newJob)};
   const resName=res?res.name:'';
   const wide=f.kind==='job';
   return html`<div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
@@ -1805,7 +1807,7 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify,resTypes
       <div class="px-5 pt-5 border-b border-line">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <div id="ed-title" class="font-display text-[18px] font-semibold">${isNew?'New booking':'Edit booking'}</div>
+            <div id="ed-title" class="font-display text-[18px] font-semibold">${readOnly?'Booking':isNew?'New booking':'Edit booking'}${readOnly&&html` <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sunken border border-line text-muted align-middle">View only</span>`}</div>
             <div class="text-muted text-[12.5px] truncate"><span class="mono">${days?`${days} day${days>1?'s':''}`:'—'}</span>${resName&&` · ${resName}`}${f.kind==='job'&&f.jobId?` · ${data.jobs.find(j=>j.id===f.jobId)?.name||''}`:''}</div>
           </div>
           <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button>
@@ -1824,10 +1826,11 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify,resTypes
         ${f.kind==='job'&&active.id==='details'&&(()=>{const pl=planFor(data,f);return pl?html`<div class="mb-4 rounded-lg px-3 py-2.5 flex flex-wrap items-center gap-2" style=${{background:'var(--accent-soft)'}}>
             <span class="text-[13px]"><span class="font-semibold" style=${{color:'var(--accent)'}}>Job plan:</span> ${pl.title||pl.jobName||'Untitled plan'}${pl.appliedAt?'':' (not sent to the schedule yet)'}</span>
             <span class="flex-1"></span><button type="button" class="btn" style=${{height:30}} onClick=${()=>setPlanView(pl)}>View full plan</button></div>`:null})()}
-        ${active.render({f,set,data,rtype,err,changeRes,resTypes})}
+        <fieldset disabled=${!!readOnly} class="m-0 p-0 border-0 min-w-0">${active.render({f,set,data,rtype,err,changeRes,resTypes})}</fieldset>
         ${planView&&html`<${PlanViewDialog} data=${data} plan=${planView} onClose=${()=>setPlanView(null)} notify=${notify||(()=>{})} onOpenPlan=${id=>{setPlanView(null);onOpenPlan&&onOpenPlan(id)}}/>`}
       </div>
       <div class="px-5 py-3 border-t border-line bg-sunken flex flex-wrap items-center gap-2">
+        ${readOnly?html`<span class="flex-1 text-[12.5px] text-muted">Your role can look at bookings but not change them.</span><button type="button" class="btn" onClick=${onClose}>Close</button>`:html`
         ${!isNew&&(confirmDel
           ?html`<span class="text-[13px] text-muted">Delete this booking?</span>
                <button type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>onDelete(f.id)}>Delete</button>
@@ -1835,7 +1838,7 @@ function Editor({initial,data,onSave,onDelete,onClose,onOpenPlan,notify,resTypes
           :html`<button type="button" class="btn btn-ghost text-muted" onClick=${()=>setConfirmDel(true)}>Delete</button>`)}
         <div class="flex-1 min-w-0">${tried&&missing.length>0&&html`<div id="ed-missing" role="alert" class="text-[12.5px] font-medium" style=${{color:'var(--bad)'}}>Still needed: ${missing.map(m=>m.label).join(', ')}</div>`}</div>
         <button type="button" class="btn" onClick=${onClose}>Cancel</button>
-        <button type="submit" class="btn btn-primary" disabled=${!!err}>${isNew?'Add booking':'Save'}</button>
+        <button type="submit" class="btn btn-primary" disabled=${!!err}>${isNew?'Add booking':'Save'}</button>`}
       </div>
     </form>
   </div>`;
@@ -2993,6 +2996,10 @@ function AdminScreen({live,data,notify}){
   const dirty=cur&&draft&&JSON.stringify({label:cur.label,description:cur.description||'',perms:cur.perms||{},opts:cur.opts||{}})!==JSON.stringify(draft);
   const setLvl=(k,v)=>setDraft(d=>{const perms={...d.perms};if(v)perms[k]=v;else delete perms[k];return {...d,perms}});
   const setMod=(m,v)=>setDraft(d=>{const perms={...d.perms};m.items.forEach(([k,,,kind])=>{const ok=lvlOpts(kind).map(x=>x[0]);const vv=ok.includes(v)?v:v===1&&kind===2?0:v===2&&kind===1?1:v;if(vv)perms[k]=vv;else delete perms[k]});return {...d,perms}});
+  /* a whole section's View or Change column: View on keeps what can be changed; Change off leaves it viewable */
+  const setModCol=(m,col,on)=>setDraft(d=>{const perms={...d.perms};m.items.forEach(([k,,,kind])=>{const v=perms[k]||0;let nv=v;
+      if(col==='view'){if(kind===2)return;nv=on?Math.max(v,1):0}else{if(kind===1)return;nv=on?2:(kind===2?0:(v>=1?1:0))}
+      if(nv)perms[k]=nv;else delete perms[k]});return {...d,perms}});
   const save=async()=>{if(!draft.label.trim()){setErr('Give the role a name.');return}setBusy(true);setErr('');
     const {error}=await sb.from('roles').update({label:draft.label.trim(),description:draft.description.trim()||null,perms:draft.perms,opts:draft.opts}).eq('key',cur.key);setBusy(false);
     if(error){setErr(error.message);return}notify&&notify(`${draft.label.trim()} saved. Logins with this role get it next time they open FraserFlow.`);setN(x=>x+1)};
@@ -3004,7 +3011,6 @@ function AdminScreen({live,data,notify}){
     setBusy(false);if(error){setErr(error.message);return}setAdding(null);setSel(key);notify&&notify(`${label} added`);setN(x=>x+1)};
   const remove=async()=>{setBusy(true);setErr('');const {error}=await sb.from('roles').delete().eq('key',cur.key);setBusy(false);if(error){setErr(error.message);return}notify&&notify(`${cur.label} deleted`);setSel('');setN(x=>x+1)};
   const screensFor=d=>Object.keys(SCREENS).filter(k=>k!=='machines'&&k!=='admin'&&(SCREEN_AREAS[k]||[]).some(a=>(d.perms[a]||0)>=1));
-  const seg=(k,kind,v,on)=>html`<div class="seg w-max shrink-0 adm-lvl" data-area=${k} role="group" aria-label=${k}>${lvlOpts(kind).map(([lv,l])=>html`<button key=${lv} type="button" data-lvl=${lv} aria-pressed=${(v||0)===lv} disabled=${!on} onClick=${()=>setLvl(k,lv)} style=${(v||0)===lv&&lv?{color:LVL_C[lv],fontWeight:600}:null}>${l}</button>`)}</div>`;
   const isAdm=cur&&cur.key==='admin';
   return html`<div class="flex-1 min-h-0 flex flex-col md:flex-row gap-3" id="admin">
     <aside class="panel w-full md:w-[280px] shrink-0 flex flex-col min-h-0 overflow-hidden">
@@ -3021,7 +3027,7 @@ function AdminScreen({live,data,notify}){
     </aside>
     <div class="flex-1 min-w-0 min-h-0 overflow-y-auto md:pr-1 grid gap-3 content-start">
       <div class="panel px-4 py-3 flex flex-wrap items-center gap-2"><div class="seg" role="tablist"><button id="adm-tab-edit" type="button" aria-pressed=${tab==='edit'} onClick=${()=>setTab('edit')}>Edit role</button><button id="adm-tab-compare" type="button" aria-pressed=${tab==='compare'} onClick=${()=>setTab('compare')}>Compare roles</button></div>
-        <span class="text-[12px] text-muted flex-1">Hidden: they don’t see it. View: they can look but not change. Change: they can change it. The database follows these too.</span></div>
+        <span class="text-[12px] text-muted flex-1">Untick both: hidden. View: they can look. Change: they can change it (and look). The database follows these too.</span></div>
       ${err&&html`<div class="panel px-4 py-3 text-[12.5px]" style=${{color:'var(--bad)'}} id="adm-err">${err}</div>`}
       ${tab==='compare'?html`<section class="panel overflow-x-auto" id="adm-compare"><table class="w-full text-[12px]">
           <thead><tr class="text-left"><th class="label font-normal py-2 px-3 sticky left-0 bg-surface">Area</th>${roles.map(r=>html`<th key=${r.key} class="label font-normal py-2 px-2 text-center whitespace-nowrap">${r.label}</th>`)}</tr></thead>
@@ -3029,22 +3035,35 @@ function AdminScreen({live,data,notify}){
             ...m.items.map(([k,l])=>html`<tr key=${k} class="border-t border-line"><td class="py-1.5 px-3 sticky left-0 bg-surface whitespace-nowrap">${l}</td>${roles.map(r=>{const v=r.key==='admin'?2:((r.perms||{})[k]||0);
               return html`<td key=${r.key} class="py-1.5 px-2 text-center" title=${['Hidden','View','Change'][v]}><span class="inline-block text-[11px] font-semibold" style=${{color:LVL_C[v]}}>${['–','View','Change'][v]}</span></td>`})}</tr>`)])}</tbody></table></section>`
       :!cur||!draft?html`<div class="panel p-8 text-center text-[13px] text-muted">Pick a role.</div>`
-      :html`<section class="panel p-4 grid gap-3" id="adm-role" data-role=${cur.key}>
+      :html`<section class="panel p-3 grid gap-2.5 text-[12.5px]" id="adm-role" data-role=${cur.key}>
         <div class="grid sm:grid-cols-2 gap-3">
-          <label class="grid gap-1"><span class="label">Role name</span><input id="adm-label" class="field" style=${{height:34,fontSize:14}} value=${draft.label} disabled=${isAdm} onInput=${e=>setDraft({...draft,label:e.target.value})}/></label>
-          <label class="grid gap-1"><span class="label">Description</span><input id="adm-desc" class="field" style=${{height:34,fontSize:13}} value=${draft.description} disabled=${isAdm} placeholder="What this role is for" onInput=${e=>setDraft({...draft,description:e.target.value})}/></label></div>
+          <label class="grid gap-1"><span class="label">Role name</span><input id="adm-label" class="field" style=${{height:30,fontSize:13}} value=${draft.label} disabled=${isAdm} onInput=${e=>setDraft({...draft,label:e.target.value})}/></label>
+          <label class="grid gap-1"><span class="label">Description</span><input id="adm-desc" class="field" style=${{height:30,fontSize:12.5}} value=${draft.description} disabled=${isAdm} placeholder="What this role is for" onInput=${e=>setDraft({...draft,description:e.target.value})}/></label></div>
         ${isAdm?html`<div class="rounded-lg bg-sunken px-3 py-2.5 text-[13px]">The Admin role always has everything, including this Admin area. It can’t be changed or deleted.</div>`:html`
-        <div class="grid sm:grid-cols-3 gap-3 rounded-lg border border-line p-3">
-          <label class="grid gap-1"><span class="label">Opens on</span><select id="adm-home" class="field" style=${{height:34,fontSize:13}} value=${draft.opts.home||''} onChange=${e=>setDraft({...draft,opts:{...draft.opts,home:e.target.value||undefined}})}>
+        <div class="grid sm:grid-cols-3 gap-2 rounded-lg border border-line p-2.5">
+          <label class="grid gap-1"><span class="label">Opens on</span><select id="adm-home" class="field" style=${{height:30,fontSize:12.5}} value=${draft.opts.home||''} onChange=${e=>setDraft({...draft,opts:{...draft.opts,home:e.target.value||undefined}})}>
             <option value="">The first screen they can see</option>${screensFor(draft).map(k=>html`<option key=${k} value=${k}>${SCREENS[k].label}</option>`)}</select></label>
           <label class="inline-flex items-start gap-2 text-[13px] cursor-pointer"><input id="adm-simple" type="checkbox" class="w-4 h-4 mt-0.5" checked=${!!draft.opts.simple} onChange=${e=>setDraft({...draft,opts:{...draft.opts,simple:e.target.checked||undefined}})}/><span>Simple schedule<span class="block text-[11.5px] text-muted">Crews only, no extras: made for phones on site</span></span></label>
           <label class="inline-flex items-start gap-2 text-[13px] cursor-pointer"><input id="adm-apponly" type="checkbox" class="w-4 h-4 mt-0.5" checked=${!!draft.opts.app_only} onChange=${e=>setDraft({...draft,opts:{...draft.opts,app_only:e.target.checked||undefined}})}/><span>Phones must use the app<span class="block text-[11.5px] text-muted">On a phone they install FraserFlow first</span></span></label></div>
-        ${AREAS.map(m=>html`<div key=${m.mod} class="rounded-lg border border-line overflow-hidden adm-mod" data-mod=${m.mod}>
-          <div class="px-3 py-2 bg-sunken flex flex-wrap items-center gap-2"><span class="font-display text-[14px] font-semibold flex-1">${m.mod}</span>
-            <span class="text-[11.5px] text-muted">Set all:</span>${[[0,'Hidden'],[1,'View'],[2,'Change']].map(([v,l])=>html`<button key=${v} type="button" class="text-[11.5px] font-medium underline underline-offset-2 text-muted hover:text-ink adm-all" data-lvl=${v} onClick=${()=>setMod(m,v)}>${l}</button>`)}</div>
-          ${m.items.map(([k,l,d,kind])=>html`<div key=${k} class="px-3 py-2 border-t border-line flex flex-wrap items-center gap-x-3 gap-y-1">
-            <div class="min-w-[200px] flex-1"><div class="text-[13px] font-medium">${l}</div>${d&&html`<div class="text-[11.5px] text-muted">${d}</div>`}</div>
-            ${seg(k,kind,draft.perms[k],true)}</div>`)}</div>`)}`}
+        ${/* tick boxes, compact: View = can look (level 1), Change = can change (level 2, which includes View).
+             Areas that are only seen have just View; yes/no areas have just Change. */''}
+        <div class="grid xl:grid-cols-2 gap-3 items-start" id="adm-areas">${AREAS.map(m=>{
+          const vals=m.items.map(([k,,,kind])=>({k,kind,v:draft.perms[k]||0}));
+          const viewable=vals.filter(x=>x.kind!==2),changeable=vals.filter(x=>x.kind!==1);
+          const allV=viewable.length&&viewable.every(x=>x.v>=1),someV=viewable.some(x=>x.v>=1);
+          const allC=changeable.length&&changeable.every(x=>x.v>=2),someC=changeable.some(x=>x.v>=2);
+          const box=(on,some,onChange,label,id)=>html`<input type="checkbox" id=${id} class="w-3.5 h-3.5 cursor-pointer align-middle" aria-label=${label} checked=${!!on}
+            ref=${el=>{if(el)el.indeterminate=!on&&!!some}} onChange=${e=>onChange(e.target.checked)}/>`;
+          return html`<div key=${m.mod} class="rounded-lg border border-line overflow-hidden adm-mod" data-mod=${m.mod}>
+            <table class="w-full text-[12px]"><thead><tr class="bg-sunken">
+              <th class="text-left font-display text-[13px] font-semibold px-2.5 py-1.5">${m.mod}</th>
+              <th class="w-[58px] px-1 py-1.5 text-center font-normal text-[11px] text-muted"><label class="inline-flex flex-col items-center gap-0.5 cursor-pointer">View${viewable.length?box(allV,someV,on=>setModCol(m,'view',on),`View all of ${m.mod}`,null):''}</label></th>
+              <th class="w-[58px] px-1 py-1.5 text-center font-normal text-[11px] text-muted"><label class="inline-flex flex-col items-center gap-0.5 cursor-pointer">Change${changeable.length?box(allC,someC,on=>setModCol(m,'change',on),`Change all of ${m.mod}`,null):''}</label></th></tr></thead>
+            <tbody>${m.items.map(([k,l,d,kind])=>{const v=draft.perms[k]||0;
+              return html`<tr key=${k} class="border-t border-line adm-lvl" data-area=${k} title=${d||''}>
+                <td class="px-2.5 py-1 min-w-0"><span class="font-medium">${l}</span>${d&&html`<span class="text-[11px] text-muted"> · ${d}</span>`}</td>
+                <td class="px-1 py-1 text-center">${kind===2?html`<span class="text-faint">–</span>`:box(v>=1,false,on=>setLvl(k,on?1:0),`${l}: view`,'adm-v-'+k.replace(/\./g,'-'))}</td>
+                <td class="px-1 py-1 text-center">${kind===1?html`<span class="text-faint">–</span>`:box(v>=2,false,on=>setLvl(k,on?2:(kind===2?0:1)),`${l}: change`,'adm-c-'+k.replace(/\./g,'-'))}</td></tr>`})}</tbody></table></div>`})}</div>`}
         <div class="flex flex-wrap items-center gap-2 sticky bottom-0 bg-surface pt-2">
           ${!isAdm&&(del?html`<span class="text-[12.5px] font-medium" style=${{color:'var(--bad)'}} id="adm-del-confirm">${count(cur.key)?`${count(cur.key)} login${count(cur.key)===1?' has':'s have'} this role: give ${count(cur.key)===1?'it':'them'} another role first (Staff › People).`:`Delete ${cur.label}?`}</span>
               ${!count(cur.key)&&html`<button id="adm-del-go" type="button" class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} disabled=${busy} onClick=${remove}>Yes, delete</button>`}<button type="button" class="btn" onClick=${()=>setDel(false)}>Cancel</button>`
@@ -5600,7 +5619,10 @@ function App({boot,live}){
     try{return window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}catch(e){return 'light'}});
   useEffect(()=>{document.documentElement.setAttribute('data-theme',theme)},[theme]);
   const toggleTheme=()=>{const t=theme==='dark'?'light':'dark';setTheme(t);try{localStorage.setItem(KEY+':theme',t)}catch(e){}};
-  const onRename=r=>{setTab(r.type);setRenameId(r.id);setPanel(true)};
+  /* who may change a booking: leave → Leave calendar; machine downtime → Machine calendar; the rest → Schedule board (Admin › Roles) */
+  const blockArea=b=>{const k=b&&b.kind;return KINDS[k]&&KINDS[k].for==='person'?'staff.leave':KINDS[k]&&KINDS[k].for==='machine'?'fleet.calendar':'schedule'};
+  const canChangeBlock=b=>!!live.canEdit&&can(blockArea(b),2);
+  const onRename=r=>{if(!live.canEdit||!can('schedule.settings',2))return;setTab(r.type);setRenameId(r.id);setPanel(true)};
   /* collapsed sections and crew groups are remembered in this browser */
   /* paving tonnes and the asphalt plant start folded away: the crews show first (opening one is remembered) */
   const [collapsed,setCollapsed]=useState(()=>{let c={};try{c=JSON.parse(localStorage.getItem(KEY+':collapsed')||'{}')||{}}catch(e){}return {tonnes:true,aplant:true,...c}});
@@ -5634,6 +5656,7 @@ function App({boot,live}){
 
   const onCreate=({resourceId,start,end})=>{
     const t=data.resources.find(r=>r.id===resourceId)?.type||'crew';
+    if(!canChangeBlock({resourceId,kind:TYPES[t].def}))return;
     setEditing({resourceId,start,end,kind:TYPES[t].def,jobId:data.jobs.length?'':'__new',title:'',address:'',plantIds:[]});   /* no job picked: choose one or make a new one */   /* shift is picked in the booking (required) */
   };
   const onSave=(b,newMixes=[],jobPatch=null,newJob=null)=>{setData(d=>{const exists=d.blocks.some(x=>x.id===b.id);
@@ -5671,6 +5694,7 @@ function App({boot,live}){
     return {...d,resources:arr};
   });
   const onMove=b0=>{
+    if(!canChangeBlock(b0))return;
     const prev=data.blocks.find(x=>x.id===b0.id);
     const dx=prev?diffDays(parse(prev.start),parse(b0.start)):0;
     let b=b0.shiftData&&dx?{...b0,shiftData:rekeyShifts(b0.shiftData,dx)}:b0;
@@ -5681,6 +5705,7 @@ function App({boot,live}){
   };
   /* dragging an edge of a booking to change its length */
   const onResize=b=>{
+    if(!canChangeBlock(b))return;
     const prev=data.blocks.find(x=>x.id===b.id);if(!prev)return;
     /* start dragged earlier or later: every shift moves to start from the new first day (shift 1 → the new first day, and so on).
        end dragged: the shifts stay put; new days are empty shifts, days cut off are hidden (and come back if it's stretched again). */
@@ -5799,7 +5824,7 @@ function App({boot,live}){
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${subWorksOpen&&html`<${SubWorksDialog} data=${data} notify=${setToast} onClose=${()=>setSubWorksOpen(false)}/>`}
     ${suggest&&html`<${SuggestDialog} setData=${setData} notify=${setToast} onClose=${()=>setSuggest(false)}/>`}
-    ${editing&&html`<${Editor} key=${(editing.id||'new')+':'+editing.resourceId+':'+editing.start} initial=${editing} data=${data} resTypes=${screen==='staff'?['person']:fleetCal?['machine']:screen==='schedule'?((data.resources.find(r=>r.id===editing.resourceId)||{}).type==='aplant'?['aplant']:['crew']):null} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)} notify=${setToast}
+    ${editing&&html`<${Editor} readOnly=${!canChangeBlock(editing)} key=${(editing.id||'new')+':'+editing.resourceId+':'+editing.start} initial=${editing} data=${data} resTypes=${screen==='staff'?['person']:fleetCal?['machine']:screen==='schedule'?((data.resources.find(r=>r.id===editing.resourceId)||{}).type==='aplant'?['aplant']:['crew']):null} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)} notify=${setToast}
       onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}setEditing(null);goScreen('planning')}}/>`}
     ${toast&&html`<div class="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-[13px] font-medium pop" role="status"
        style=${{bottom:'calc(20px + env(safe-area-inset-bottom, 0px))',background:'var(--ink)',color:'var(--surface)'}}>${toast}</div>`}

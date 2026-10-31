@@ -68,5 +68,20 @@ set local role authenticated;
 select pg_temp.refused($$insert into public.items (kind, id, data) values ('job', 't-rl-job2', '{}')$$, 'once Jobs is only view, the database refuses');
 reset role;
 
+-- each part of the roster follows its own area: leave rights don't let someone move bookings
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000e1');
+set local role authenticated;
+update public.roles set perms = '{"schedule":1,"staff.leave":2}' where key = 'foreman';
+insert into public.items (kind, id, data) values ('block', 't-rl-bk1', '{"kind":"job","resourceId":"x","start":"2026-11-02","end":"2026-11-02"}');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000e2');
+set local role authenticated;
+insert into public.items (kind, id, data) values ('block', 't-rl-lv1', '{"kind":"leave","resourceId":"p1","start":"2026-11-02","end":"2026-11-03"}');
+select pg_temp.ok(exists (select 1 from public.items where id = 't-rl-lv1'), 'Leave calendar “change”: leave can be put on the calendar');
+select pg_temp.refused($$insert into public.items (kind, id, data) values ('block', 't-rl-bk2', '{"kind":"job","resourceId":"x","start":"2026-11-02","end":"2026-11-02"}')$$, 'but not a job booking (Schedule board is only view)');
+with u as (update public.items set data = jsonb_set(data, '{start}', '"2026-11-05"') where id = 't-rl-bk1' returning 1)
+select pg_temp.ok((select count(*) from u) = 0, 'and an existing booking can''t be moved');
+reset role;
+
 select 'ALL ROLE TESTS PASSED' as result;
 rollback;

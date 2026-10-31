@@ -113,10 +113,22 @@ begin
 end; $$;
 
 -- the roster (bookings, jobs, plans, settings, crews, staff and machines): anyone who can change one of those areas
-create or replace function public.items_can_change(k text)
+-- who may change which part of the roster (Admin › Roles), by what it is:
+--   bookings: leave (people) → Leave calendar or approvers; machine downtime → Machine calendar; the rest → Schedule board or Job planning
+--   projects → Projects, Schedule or Planning; plans → Planning; crews, machines and people → Settings, Machines or People;
+--   settings → Settings (or Machines, Planning, Ideas, which keep lists there); the change log → anyone who can change part of it
+create or replace function public.items_can_change(k text, d jsonb)
 returns boolean language sql stable security definer set search_path = public as $$
   select case
     when k in ('idea','suggestion') then public.can('ideas', 2)
+    when k = 'block' then case
+      when d->>'kind' in ('leave','sick','rdo','training') then public.can('staff.leave', 2) or public.can('staff.approve', 2)
+      when d->>'kind' in ('service','repair','inspection') then public.can('fleet.calendar', 2) or public.can('schedule', 2)
+      else public.can('schedule', 2) or public.can('planning', 2) end
+    when k = 'job' then public.can('jobs', 2) or public.can('schedule', 2) or public.can('planning', 2)
+    when k in ('plan','plan_img') then public.can('planning', 2)
+    when k = 'resource' then public.can('schedule.settings', 2) or public.can('fleet.machines', 2) or public.can('staff.people', 2)
+    when k = 'setting' then public.can('schedule.settings', 2) or public.can('fleet.machines', 2) or public.can('planning', 2) or public.can('ideas', 2)
     else public.can('schedule', 2) or public.can('schedule.settings', 2) or public.can('jobs', 2) or public.can('planning', 2)
       or public.can('fleet.machines', 2) or public.can('fleet.calendar', 2) or public.can('staff.people', 2) or public.can('staff.leave', 2) or public.can('staff.approve', 2) end
 $$;
@@ -132,9 +144,10 @@ begin
   end loop;
 end $$;
 create policy "everyone suggests" on public.items for insert to authenticated with check (kind = 'suggestion');
-create policy "roles add" on public.items for insert to authenticated with check (public.items_can_change(kind));
-create policy "roles change" on public.items for update to authenticated using (public.items_can_change(kind)) with check (public.items_can_change(kind));
-create policy "roles remove" on public.items for delete to authenticated using (public.items_can_change(kind));
+create policy "roles add" on public.items for insert to authenticated with check (public.items_can_change(kind, data));
+create policy "roles change" on public.items for update to authenticated using (public.items_can_change(kind, data)) with check (public.items_can_change(kind, data));
+create policy "roles remove" on public.items for delete to authenticated using (public.items_can_change(kind, data));
+drop function if exists public.items_can_change(text);   -- the older rule (one part of the roster for all)
 
 -- tables from the other files: their rules follow the settings too (skipped if that file isn't run yet)
 do $$
