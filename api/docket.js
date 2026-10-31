@@ -18,7 +18,7 @@ async function readBody(req) {
 }
 
 const PROMPT = ({ previous, regos }) => `This is a photo of an asphalt delivery docket (weighbridge ticket), usually from Alex Fraser.
-Read it and call the "docket" tool with what's printed on it.
+Read it and call the "docket" tool with what's printed on it (always answer by calling the tool).
 
 - docket: the number after "Delivery No" (or "Delivery Number" / "Docket No"). Digits only.
   The docket printer sometimes leaves a blank vertical strip, so one digit of the number isn't printed at all (a gap between digits).
@@ -75,7 +75,7 @@ module.exports = async (req, res) => {
       method: 'POST',
       headers: { 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: MODEL, max_tokens: 500, tools: [TOOL], tool_choice: { type: 'tool', name: 'docket' },
+        model: MODEL, max_tokens: 600, tools: [TOOL],   // (forcing the tool isn't supported on every model: it's asked for in the prompt)
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data: image } },
           { type: 'text', text: PROMPT({ previous, regos }) }
@@ -86,7 +86,11 @@ module.exports = async (req, res) => {
   const j = await r.json().catch(() => ({}));
   if (!r.ok) return send(res, 502, { error: (j.error && j.error.message) || `The docket reader answered ${r.status}` });
   const use = (j.content || []).find(c => c.type === 'tool_use');
-  const x = (use && use.input) || {};
+  let x = (use && use.input) || null;
+  if (!x) {   // answered in text instead: take the JSON out of it
+    const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n');
+    const m = txt.match(/\{[\s\S]*\}/); try { x = m ? JSON.parse(m[0]) : {}; } catch (e) { x = {}; }
+  }
   // tidy what came back
   let docket = String(x.docket || '').toUpperCase().replace(/[^0-9?]/g, '');
   const gapAt = docket.indexOf('?');
