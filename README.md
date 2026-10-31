@@ -175,6 +175,7 @@ Lab in the left menu (administrators only until it's released in Settings): ever
 - Supervisors and administrators can **dismiss** a defect with a reason (not a fault, duplicate). Defects are never deleted.
 
 ### In the planner
+- **Your own trucks, linked to Fleet:** Schedule › Settings › Trucks has *Trucks in Fleet*: link each transport truck in Fleet to its name on the truck list (or **Add to list** / **Add all**). When a linked truck is put on a booking's Trucks tab, its row warns like a machine: restricted (do not use), in for maintenance that day (a scheduled work order), service due or overdue, open defects, or already on another job that day. The Trucks tab shows ⚠, the booking bar a red ! when a truck on it is restricted or in for maintenance, and the job lists it as an issue. Hired trucks (not linked) are unchanged.
 - A **restricted** machine can't be ticked on a booking's Machines tab or in a plan's *Machines needed*, and the database refuses it from any route (copies, plan pushes, imports).
 - Bookings that already had it keep it, but are flagged: a red ⚠ on the booking bar (today onwards), a warning when the booking opens, ⚠ on the Machines tab. A plan with a newly added restricted machine can't be sent to the schedule.
 - Machine pickers also warn (without blocking) when a machine's **service is overdue or due soon**, or it has **open defects**. Fleet › Calendar marks restricted machines.

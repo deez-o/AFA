@@ -1033,6 +1033,7 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
             ${night&&html`<span class="shrink-0 inline-flex" title="Night works">${Icon.moon}</span>`}
             ${(src=>src&&src.kind==='job'&&html`
               ${src.end>=iso(TODAY)&&restrictedIn(data,src.plantIds).length>0&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px] bar-restricted" style=${{width:15,height:14,background:'hsl(0 75% 46%)',color:'#fff'}} title=${'Restricted machine on this job: '+restrictedIn(data,src.plantIds).map(id=>(data.resources.find(r=>r.id===id)||{}).name).join(', ')+'. Swap it for another machine.'}>${Icon.alert}</span>`}
+              ${src.end>=iso(TODAY)&&(tal=>tal.length>0&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px] bar-truck-alert text-[10px] font-bold" style=${{width:15,height:14,background:'hsl(0 75% 46%)',color:'#fff'}} title=${'Truck problem: '+tal.map(x=>`${x.name} (${fmtShort(parse(x.day))}): ${x.alert.text}`).join('; ')}>!</span>`)(bookingTruckAlerts(data,src,iso(TODAY)).filter(x=>x.alert.tone==='var(--bad)'))}
               ${!src.sapEntered&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:13,background:'hsl(38 95% 55%)',color:'hsl(30 60% 12%)'}} title="Not entered into SAP">${Icon.sap}</span>`}
               ${src.inductionReq&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-[3px]" style=${{width:15,height:14,background:src.inductionDone?'hsl(145 60% 34%)':'hsl(0 75% 46%)',color:'#fff'}} title=${src.inductionDone?'Site induction required: paperwork sent':'Site induction required: paperwork not sent yet'}>${Icon.induct}</span>`}
               ${src.creditIssue&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-full font-bold" style=${{width:14,height:14,fontSize:10,lineHeight:1,background:'hsl(0 75% 46%)',color:'#fff',boxShadow:'0 0 0 1.5px #fff'}} title="Credit issue">$</span>`}`)(v?(it.b.cover?it.b.parent:null):it.b)}
@@ -1596,7 +1597,7 @@ const BOOKING_TABS=[
   {id:'machines',label:'Machines',applies:f=>f.kind==='job',badge:(f,d)=>(f.plantIds||[]).length?`${restrictedIn(d,f.plantIds).length?'⚠ ':''}${(f.plantIds||[]).length}`:null,
     render:p=>html`<${PlantPicker} f=${p.f} set=${p.set} data=${p.data}/>`},
   {id:'trucks',label:'Trucks',applies:(f,d)=>f.kind==='job'&&!isSealCrew(d.resources.find(r=>r.id===f.resourceId)),
-    badge:f=>{const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&q.trucks)||[]).filter(truckHas).length,0);return n?`${n}`:null},
+    badge:(f,d)=>{const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&q.trucks)||[]).filter(truckHas).length,0);return n?`${bookingTruckAlerts(d,f,iso(TODAY)).length?'⚠ ':''}${n}`:null},
     render:p=>html`<${ProgramShifts} key="trucks" part="trucks" f=${p.f} set=${p.set} data=${p.data}/>`},
   {id:'program',label:'Subcontractors',applies:f=>f.kind==='job',
     badge:f=>{const n=Object.values(f.shiftData||{}).reduce((a,q)=>a+((q&&q.subs)||[]).filter(subHas).length,0);return n?`${n}`:null},
@@ -2640,6 +2641,7 @@ function jobSummary(data,j){
     if(bs.some(b=>b.creditIssue))issues.push('Credit issue');
     if(live.some(b=>b.inductionReq&&!b.inductionDone))issues.push('Induction paperwork not sent');
     if(live.some(b=>restrictedIn(data,b.plantIds).length))issues.push('Restricted machine booked');
+    if(live.some(b=>bookingTruckAlerts(data,b,today).some(x=>x.alert.tone==='var(--bad)')))issues.push('Truck restricted or in for maintenance');
     if(status==='finished')issues.push('All shifts done: complete the job');}
   return {bs,t,a,shifts,done,next,first,last,crews,status,issues,mixes:[...mixes].sort((x,y)=>y[1]-x[1])}}
 /* on now: green · upcoming: blue · issues: red · waiting to be completed: amber */
@@ -3274,6 +3276,22 @@ const programLocsOf=d=>d&&Array.isArray(d.programLocs)?d.programLocs:PROGRAM_LOC
 const truckDefsOf=d=>d&&d.truckDefs&&typeof d.truckDefs==='object'?d.truckDefs:{};
 const truckDefOf=(d,name)=>{const m=truckDefsOf(d);const n=String(name||'').trim().toLowerCase();const k=Object.keys(m).find(x=>x.toLowerCase()===n);return k?m[k]:{}};
 const truckCosOf=d=>d&&Array.isArray(d.truckCos)?d.truckCos:DEFAULT_TRUCKS;
+/* trucks linked to Fleet (Settings › Trucks): the machine behind a truck on the list */
+const truckAsset=(d,name)=>{const id=truckDefOf(d,name).assetId;return id&&(d.resources||[]).some(r=>r.id===id&&r.type==='machine')?id:null};
+/* trucks on a booking's shift (each truck's list name) */
+const trucksOnDay=(b,k)=>((((b.shiftData||{})[k]||{}).trucks)||[]).filter(truckHas).map(t=>String(t.co||'').trim()).filter(Boolean);
+/* what to tell the planner about a linked truck on a day: restricted (red), in for maintenance that day, service due, defects, or already on another job */
+const truckAlert=(d,name,day,selfId)=>{const id=truckAsset(d,name);if(!id)return null;
+  const al=typeof machAlert==='function'?machAlert(d,id):null;if(al&&al.block)return al;
+  const down=day&&(d.blocks||[]).find(b=>b.resourceId===id&&KINDS[b.kind]&&KINDS[b.kind].down&&b.start<=day&&b.end>=day);
+  if(down)return {tone:'var(--bad)',text:`In for maintenance: ${down.title||KINDS[down.kind].label}`+(al?' · '+al.text:'')};
+  const n=String(name).trim().toLowerCase();
+  const other=day&&(d.blocks||[]).find(b=>b.id!==selfId&&b.kind==='job'&&b.start<=day&&b.end>=day&&trucksOnDay(b,day).some(x=>x.toLowerCase()===n));
+  if(other){const c=(d.resources||[]).find(r=>r.id===other.resourceId);return {tone:'var(--warn)',text:`Already on ${c?c.name:'another crew'}'s job that day`+(al?' · '+al.text:'')}}
+  return al};
+/* a booking's linked trucks with something to say, from today on: [{name, day, alert}] */
+const bookingTruckAlerts=(d,b,fromDay)=>{const out=[];Object.keys(b.shiftData||{}).sort().forEach(k=>{if(fromDay&&k<fromDay)return;
+  trucksOnDay(b,k).forEach(nm=>{const al=truckAlert(d,nm,k,b.id);if(al)out.push({name:nm,day:k,alert:al})})});return out};
 const subCosOf=d=>d&&Array.isArray(d.subCos)?d.subCos:DEFAULT_SUBS;
 const truckHas=t=>!!t&&!!(t.co||t.driver||t.w||t.time||t.loc);
 const subHas=s=>!!s&&!!(s.name||s.info||s.time);
@@ -3296,8 +3314,9 @@ function TrucksManager({data,setData}){
       hint="Truck companies offered in a booking's Trucks & Subcontractors tab, in this order. Click the pencil to rename one or set its default driver and weight."
       items=${truckCosOf(data)} setItems=${setter('truckCos')} truckOf=${t=>truckDefOf(data,t)}
       onRenamed=${(d,from,to,ed)=>{const m={...truckDefsOf(d)};const prev=m[from]||{};delete m[from];
-        const v=ed&&('driver' in ed||'w' in ed)?{driver:(ed.driver||'').trim(),w:ed.w||''}:prev;if(v.driver||v.w)m[to]=v;return {...d,truckDefs:m}}}
+        const v=ed&&('driver' in ed||'w' in ed)?{...prev,driver:(ed.driver||'').trim(),w:ed.w||''}:prev;if(v.driver||v.w||v.assetId)m[to]=v;return {...d,truckDefs:m}}}   /* keeps a Fleet link */
       onRemoved=${(d,t)=>{const m={...truckDefsOf(d)};delete m[t];return {...d,truckDefs:m}}}/>
+    <${FleetTrucks} data=${data} setData=${setData}/>
     </div>
     <div id="locs-col" class="min-w-0 border-t md:border-t-0 md:border-l border-line md:min-h-full">
     <${ListManager} title="Locations" field="progloc" placeholder="e.g. BALD HILLS YARD" data=${data} setData=${setData}
@@ -3308,6 +3327,39 @@ function TrucksManager({data,setData}){
       onRemoved=${(d,t)=>{const m={...locColorsOf(d)};delete m[t];return {...d,locColors:m}}}/>
     </div>
   </div>`;
+}
+/* Settings › Trucks: the transport trucks in Fleet, linked to names on the truck list, so a booked truck warns like a machine
+   (restricted, in for maintenance that day, service due, open defects, already on another job) */
+const TRUCKISH=/truck|tipper|prime ?mover|semi|float|trailer|tanker|spray|water ?cart|bogie|ute/i;
+function FleetTrucks({data,setData}){
+  const [all,setAll]=useState(false);
+  const machines=data.resources.filter(r=>r.type==='machine').sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+  const isTruck=m=>TRUCKISH.test([machCatOf(m),m.name,m.sub].join(' '));
+  const list=truckCosOf(data);const defs=truckDefsOf(data);
+  const nameFor=id=>Object.keys(defs).find(k=>defs[k]&&defs[k].assetId===id&&list.some(x=>x.toLowerCase()===k.toLowerCase()))||null;
+  const shown=machines.filter(m=>all||isTruck(m)||nameFor(m.id));
+  const link=(id,name)=>setData(d=>{const m={...truckDefsOf(d)};Object.keys(m).forEach(k=>{if(m[k]&&m[k].assetId===id){const {assetId,...rest}=m[k];if(rest.driver||rest.w)m[k]=rest;else delete m[k]}});
+    if(name)m[name]={...(m[name]||{}),assetId:id};return {...d,truckDefs:m}});
+  const addNew=mc=>setData(d=>{const l=[...truckCosOf(d)];let nm=mc.name.trim();if(l.some(x=>x.toLowerCase()===nm.toLowerCase())&&!nameFor(mc.id))nm=`${mc.name} ${mc.sub||''}`.trim();
+    if(!l.some(x=>x.toLowerCase()===nm.toLowerCase()))l.push(nm);const m={...truckDefsOf(d)};Object.keys(m).forEach(k=>{if(m[k]&&m[k].assetId===mc.id){const {assetId,...rest}=m[k];m[k]=rest}});
+    m[nm]={...(m[nm]||{}),assetId:mc.id};return {...d,truckCos:l,truckDefs:m}});
+  const addAll=()=>shown.filter(m=>isTruck(m)&&!nameFor(m.id)).forEach(addNew);
+  const nNew=shown.filter(m=>isTruck(m)&&!nameFor(m.id)).length;
+  return html`<section class="px-4 py-3 border-t border-line grid gap-2" id="fleet-trucks">
+    <div class="flex flex-wrap items-center gap-2"><h3 class="font-display text-[15px] font-semibold flex-1">Trucks in Fleet</h3>
+      ${nNew>0&&html`<button id="ft-add-all" type="button" class="btn btn-primary" style=${{height:30,fontSize:12.5}} onClick=${addAll}>${Icon.plus} Add all ${nNew} to the list</button>`}</div>
+    <p class="text-[12px] text-muted">Link each of your transport trucks to its name on the truck list. A linked truck booked on a job then warns like a machine: restricted, in for maintenance that day, service due, open defects, or already on another job.</p>
+    ${!shown.length&&html`<div class="text-[12.5px] text-muted">No trucks found in Fleet. ${machines.length?'Tick “Show all machines” to pick from every machine.':'Add them in Fleet › Machines first.'}</div>`}
+    <div class="grid gap-1">${shown.map(m=>{const nm=nameFor(m.id);const al=typeof machAlert==='function'?machAlert(data,m.id):null;
+      return html`<div key=${m.id} class="flex flex-wrap items-center gap-2 py-1 border-b border-line fleet-truck" data-id=${m.id}>
+        <div class="min-w-0 flex-1"><div class="text-[13px] font-medium truncate">${m.name} <span class="text-muted font-normal">${m.sub||''}</span>${m.rego?html` <span class="mono text-[12px] text-muted">${m.rego}</span>`:''}</div>
+          ${al&&html`<div class="text-[11.5px] font-medium" style=${{color:al.tone}}>${al.text}</div>`}</div>
+        <select class="field field-sm" style=${{width:'auto',maxWidth:200,height:30,fontSize:12.5}} value=${nm||''} onChange=${e=>link(m.id,e.target.value||null)} aria-label=${`Truck list name for ${m.name}`}>
+          <option value="">Not linked</option>${list.map(x=>html`<option key=${x} value=${x}>${x}</option>`)}</select>
+        ${!nm&&html`<button type="button" class="btn" style=${{height:30,fontSize:12.5}} onClick=${()=>addNew(m)}>${Icon.plus} Add to list</button>`}
+      </div>`})}</div>
+    <label class="flex items-center gap-2 text-[12px] text-muted cursor-pointer"><input type="checkbox" class="w-3.5 h-3.5" checked=${all} onChange=${e=>setAll(e.target.checked)}/> Show all machines (not just ones that look like trucks)</label>
+  </section>`;
 }
 function SubsManager({data,setData}){
   const setter=key=>(list,extra)=>setData(d=>{const n={...d,[key]:list};return extra?extra(n):n});
@@ -3478,7 +3530,7 @@ function ProgramShifts({f,set,data,part}){
             </div>
             <div class="px-2.5 py-2 grid gap-1.5">
               <div class=${'hidden sm:grid '+TC}><span class="label">Truck</span><span class="label">Driver</span><span class="label">Weight</span><span class="label">Time</span><span class="label">Location</span><span></span></div>
-              ${g.items.map(({t,j})=>html`<div key=${j} class=${TC}>
+              ${g.items.map(({t,j})=>{const tal=truckHas(t)&&truckAlert(data,t.co,k,f.id);return html`${tal&&html`<div key=${'al'+j} class="text-[12px] font-medium truck-alert" style=${{color:tal.tone}}>⚠ ${t.co}: ${tal.text}</div>`}<div key=${j} class=${TC}>
                 <${Combo} id=${`pg-t${j}-co`} style=${fs} placeholder="Truck" value=${t.co||''} onChange=${v=>setT(j,{co:v})} label=${`Truck ${j+1} company`} options=${truckCosOf(data)}/>
                 <input id=${`pg-t${j}-dr`} class="field field-sm" style=${fs} placeholder="Driver" value=${t.driver||''} onInput=${e=>setT(j,{driver:e.target.value})} aria-label=${`Truck ${j+1} driver`}/>
                 <select id=${`pg-t${j}-w`} class="field field-sm mono" style=${{...fs,color:t.w?'var(--ink)':'var(--faint)'}} value=${t.w||''} onChange=${e=>setT(j,{w:e.target.value})} aria-label=${`Truck ${j+1} weight`}>
@@ -3488,7 +3540,7 @@ function ProgramShifts({f,set,data,part}){
                   ${t.manual?html`<button type="button" class="w-6 h-6 shrink-0 inline-flex items-center justify-center rounded text-[13px] text-muted hover:text-ink hover:bg-sunken" onClick=${()=>autoTime(j)} title="Set by hand. Click to go back to the location's timing" aria-label=${`Truck ${j+1}: go back to automatic time`}>↺</button>`:html`<span class="w-6 shrink-0 text-[10px] text-faint text-center" title="Timed from the location">auto</span>`}</span>
                 <${Combo} id=${`pg-t${j}-loc`} style=${fs} placeholder="Location" value=${t.loc||''} onChange=${v=>setT(j,{loc:v})} label=${`Truck ${j+1} location`} options=${locs}/>
                 <button type="button" class=${iconX} onClick=${()=>removeTruck(j)} aria-label=${`Remove truck ${j+1}`} title="Remove">${Icon.x}</button>
-              </div>`)}
+              </div>`})}
               <div class="flex flex-wrap gap-3 pt-0.5">
                 <button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>addTruck(g.label)}>${Icon.plus} Add truck${g.label?` at ${g.label}`:''}</button>
                 ${g.items.length>0&&html`<button type="button" class="inline-flex items-center gap-1 text-[12px] font-medium text-muted hover:text-ink" onClick=${()=>addTruck(g.label,g.items[g.items.length-1].t)}>${Icon.plus} Same truck again</button>`}
