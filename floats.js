@@ -237,7 +237,9 @@ function closeGaps(runs,cfg,travel){
       const from=sh[0].leave,to=sh[sh.length-1].done;
       for(let S=new Date(from);S<=to;S=addMin(S,5)){
         let t=S,loc=startLoc,ok=true;const plan=[];
-        for(const r of ord){const dh=travel(loc,r.from);const leave=t;let pick=addMin(leave,dh.min||0);if(pick<r.earliest)pick=new Date(r.earliest);
+        for(const r of ord){const dh=travel(loc,r.from);let leave=t;let pick=addMin(leave,dh.min||0);
+          /* the machine isn't free yet: the float leaves later (it waits where it is, not on the road) */
+          if(pick<r.earliest){pick=new Date(r.earliest);leave=addMin(pick,-(dh.min||0))}
           const tr=r.drive;const depart=addMin(pick,L*r.moves.length),arrive=addMin(depart,tr.min||0),done=addMin(arrive,U*r.moves.length);
           if((!r.late&&done>r.latest)||(r.late&&done>r.done)||(!r.curfew&&inCurfew(leave,done,cfg))||(!r.outHours&&!inHours(leave,done,cfg))||dayOf(pick)!==dayOf(r.pick)){ok=false;break}
           plan.push({r,leave,pick,depart,arrive,done,deadhead:dh,fromLoc:loc});t=done;loc=r.to}
@@ -337,7 +339,7 @@ function FloatsScreen({data,setData,notify}){
     /* tidy: ticks and times more than 3 weeks old */
     const cut=iso(addDays(new Date(),-21));Object.keys(P).forEach(k=>{const m=/@(\d{4}-\d{2}-\d{2})/.exec(k);if(m&&m[1]<cut)delete P[k]});return {...d,floatPlan:P}});
   const names=r=>r.moves.map(m=>m.name).join(' + ');
-  const runsOn=k=>F.runs.filter(r=>dayOf(r.pick)===k);
+  const runsOn=k=>F.runs.filter(r=>dayOf(r.pick)===k).sort((a,b)=>onRoad(a)-onRoad(b));
   const dayRuns=runsOn(day);
   const nextId=(F.runs.find(r=>!r.ticked&&r.leave>now)||{}).id;
   const live=day===today?F.runs.find(r=>!r.ticked&&r.leave<=now&&now<r.done)||F.runs.find(r=>!r.ticked&&r.leave>now):null;
@@ -587,7 +589,7 @@ function FloatLoads({data,cfg,set:set0}){
 /* ---------- the run sheet ---------- */
 function runSheetText(cfg,runs,k){
   const d=parse(k);const L=[`${cfg.floatName||'Float'} run sheet – ${WD[d.getDay()]} ${fmtShort(d)} ${d.getFullYear()}`];if(cfg.driver)L.push(`Driver: ${cfg.driver}`);L.push('');
-  runs.forEach((r,i)=>{L.push(`${i+1}. On the road ${hm(onRoad(r))}: ${r.moves.map(m=>m.name+(m.rego?' ('+m.rego+')':'')).join(' + ')}`);
+  runs.forEach((r,i)=>{L.push(`${i+1}. On the road ${hm(onRoad(r))}`);r.moves.forEach(m=>L.push(`   - ${m.name}${m.desc?' - '+m.desc:''}${m.cat?' ('+m.cat+')':''}${m.rego?' - rego '+m.rego:''}`));
     L.push(`   From: ${r.from.job}${r.from.crew?' – '+r.from.crew:''}${r.from.addr?', '+r.from.addr:''}`);
     L.push(`   To:   ${r.to.job}${r.to.crew?' – '+r.to.crew:''}${r.to.addr?', '+r.to.addr:''}`);
     L.push(`   Free from ${whenTxt(r.earliest,k)} · ${r.to.yard?'back at the yard by':'needed by'} ${whenTxt(r.latest,k)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km, ':''}${durTxt(r.drive.min)} drive`);
@@ -597,29 +599,75 @@ function runSheetText(cfg,runs,k){
     const u=mapsDir(r.from,r.to);if(u)L.push(`   Map: ${u}`);L.push('')});
   if(!runs.length)L.push('No moves.');if(cfg.curfew)L.push('Curfew: no float work (driving, loading or unloading) 7-9am and 4-6pm, Monday to Friday.');return L.join('\n')}
 async function runSheetPdf(data,cfg,runs,k){
-  const JsPDF=await loadJsPDF();const doc=new JsPDF({unit:'mm',format:'a4'});const W=210,M=12;let y=M;const d=parse(k);
-  const clean=s=>String(s==null?'':s).replace(/[–—]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^\n\x20-\x7E\u00A0-\u00FF]/g,'');
-  const font=(s,b)=>{doc.setFont('helvetica',b?'bold':'normal');doc.setFontSize(s)};
-  const room=h=>{if(y+h>285){doc.addPage();y=M}};
-  doc.setFillColor(155,10,30);doc.rect(0,0,W,4,'F');y+=4;
-  font(16,true);doc.setTextColor(0);doc.text(clean(`${cfg.floatName||'Float'} run sheet`),M,y+4);font(11,false);doc.text(clean(`${WD[d.getDay()]} ${fmtShort(d)} ${d.getFullYear()}`),W-M,y+4,{align:'right'});y+=9;
-  font(9.5,false);doc.setTextColor(90);doc.text(clean(`${cfg.driver?'Driver: '+cfg.driver+'   ':''}${runs.length} trip${runs.length===1?'':'s'}, ${runs.reduce((a,r)=>a+r.moves.length,0)} machines. Start from ${cfg.yardName}.`),M,y);y+=6;doc.setTextColor(0);
-  if(!runs.length){font(11,false);doc.text('No moves.',M,y+4)}
+  const JsPDF=await loadJsPDF();const doc=new JsPDF({unit:'mm',format:'a4'});const W=210,M=12,CW=W-2*M;let y=0;const d=parse(k);
+  const RED=[155,10,30],INK=[25,25,25],MUTE=[105,105,105],LINE=[200,200,200];
+  const clean=s=>String(s==null?'':s).replace(/[–—]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/·/g,'-').replace(/[^\n\x20-\x7E -ÿ]/g,'');
+  const font=(s,b,c)=>{doc.setFont('helvetica',b?'bold':'normal');doc.setFontSize(s);doc.setTextColor(...(c||INK))};
+  const lines=(t,w,s,b)=>{font(s,b);return doc.splitTextToSize(clean(t),w)};
+  const LH=s=>s*0.42;   /* line height in mm for a font size */
+  /* the page header: Alex Fraser logo, FraserFlow, the title and the day */
+  const header=(first)=>{doc.setFillColor(...RED);doc.rect(0,0,W,3,'F');
+    try{doc.addImage(AFA_LOGO,'PNG',M,7,first?40:30,first?15.5:11.6)}catch(e){}
+    const fx=W-M;font(first?11:9,true);const fw=doc.getTextWidth('Flow');doc.setTextColor(...RED);doc.text('Flow',fx,first?11:10,{align:'right'});
+    doc.setTextColor(...INK);doc.text('Fraser',fx-fw,first?11:10,{align:'right'});
+    if(first){font(16,true);doc.text(clean(`${cfg.floatName||'Float'} run sheet`),fx,18.5,{align:'right'});
+      font(11,true,RED);doc.text(clean(`${WD[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`),fx,24,{align:'right'});y=30}
+    else{font(9,false,MUTE);doc.text(clean(`${cfg.floatName||'Float'} run sheet - ${WD[d.getDay()]} ${fmtShort(d)} (continued)`),fx,15,{align:'right'});y=22}
+    doc.setDrawColor(...LINE);doc.setLineWidth(.3);doc.line(M,y,W-M,y);y+=4};
+  const room=h=>{if(y+h>282){doc.addPage();header(false)}};
+  header(true);
+  font(9.5,false,MUTE);
+  const info=[cfg.driver?`Driver: ${cfg.driver}`:'',`${runs.length} trip${runs.length===1?'':'s'}, ${runs.reduce((a,r)=>a+r.moves.length,0)} machine${runs.reduce((a,r)=>a+r.moves.length,0)===1?'':'s'}`,`Starts from ${cfg.yardName||'the yard'}`].filter(Boolean).join('     ');
+  doc.text(clean(info),M,y+3);y+=8;
+  if(!runs.length){font(12,false);doc.text('No moves.',M,y+5)}
+  const colW=(CW-14)/2;
   runs.forEach((r,i)=>{
-    const from=doc.splitTextToSize(clean(`${r.from.job}${r.from.crew?' - '+r.from.crew:''}\n${r.from.addr||''}`),88),to=doc.splitTextToSize(clean(`${r.to.job}${r.to.crew?' - '+r.to.crew:''}\n${r.to.addr||''}`),88);
-    const h=16+Math.max(from.length,to.length)*4.2+(r.note?5:0);room(h);
-    doc.setDrawColor(200);doc.setLineWidth(.3);doc.roundedRect(M,y,W-2*M,h,1.5,1.5);
-    font(13,true);doc.text(`${i+1}.  ${hm(onRoad(r))}`,M+3,y+6);font(10.5,true);doc.text(clean(r.moves.map(m=>m.name+(m.rego?' ('+m.rego+')':'')).join(' + ')),M+30,y+6);
-    font(8.5,false);doc.setTextColor(90);doc.text(clean(`${r.deadhead.min>0?'Leave '+hm(r.leave)+' · ':''}load ${hm(r.pick)}-${hm(r.depart)} · drive ${hm(r.depart)}-${hm(r.arrive)} · unloaded ${hm(r.done)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km':''}`),W-M-3,y+6,{align:'right'});doc.setTextColor(0);
-    font(8,true);doc.text('PICK UP',M+3,y+11.5);doc.text('DROP OFF',M+98,y+11.5);font(9.5,false);doc.text(from,M+3,y+15.5);doc.text(to,M+98,y+15.5);
-    const yy=y+15.5+Math.max(from.length,to.length)*4.2;font(8.5,false);doc.setTextColor(40,110,60);doc.text(clean(`Free from ${whenTxt(r.earliest,k)}`),M+3,yy);doc.setTextColor(30,70,140);doc.text(clean(`${r.to.yard?'Back at the yard by':'Needed by'} ${whenTxt(r.latest,k)}`),M+98,yy);
-    if(r.curfew&&!r.late){font(8.5,true);doc.setTextColor(180,20,30);doc.text('IN PEAK-HOUR CURFEW',M+135,yy);font(8.5,false)}
-    if(r.late){font(8.5,true);doc.setTextColor(180,20,30);doc.text(clean(`LATE: gets there ${durTxt((r.done-r.latest)/60000)} after`),M+135,yy);font(8.5,false)}doc.setTextColor(0);
-    const u=mapsDir(r.from,r.to);if(u){doc.setTextColor(30,70,140);doc.textWithLink('Directions',W-M-20,yy,{url:u});doc.setTextColor(0)}
-    if(r.note){font(9,true);doc.text(clean('Note: '+r.note),M+3,yy+5)}
-    y+=h+3});
-  if(cfg.curfew){font(8,false);doc.setTextColor(90);doc.text('Curfew: no float work (driving, loading or unloading) 7-9am and 4-6pm, Monday to Friday.',M,287)}
-  font(7.5,false);doc.setTextColor(140);doc.text(clean(`Made ${fmtShort(new Date())} ${hm(new Date())} in FraserFlow. Drive times from OpenStreetMap, x${cfg.slow} for the float.`),M,292);
+    const P=4;   /* padding inside the box */
+    /* the gear: a shaded row per machine - number, what it is, category, rego */
+    const gear=r.moves.map(m=>({no:clean(m.name),what:lines(m.desc||'-',CW-2*P-28-62,9.5,false),cat:clean(m.cat||''),rego:clean(m.rego||'')}));
+    const gearH=gear.reduce((a,g)=>a+Math.max(7,g.what.length*LH(9.5)+3)+1.2,0);
+    const fromL=[...lines(`${r.from.job}${r.from.crew?' - '+r.from.crew:''}`,colW,9.5,true),...(r.from.addr?lines(r.from.addr,colW,9,false):[])];
+    const toL=[...lines(`${r.to.job}${r.to.crew?' - '+r.to.crew:''}`,colW,9.5,true),...(r.to.addr?lines(r.to.addr,colW,9,false):[])];
+    const steps=lines(stepsOf(r).map(([l,a,b])=>`${l} ${hm(a)}-${hm(b)}`).join('     '),CW-2*P,9,false);
+    const note=r.note?lines('Note: '+r.note,CW-2*P,9.5,true):[];
+    const flags=r.ticked?['Done']:[r.late?`LATE: gets there ${durTxt((r.done-r.latest)/60000)} after it's needed`:'',r.curfew?'IN THE PEAK-HOUR CURFEW - check the timing':'',r.fatigue?"BREAKS THE DRIVER'S HOURS RULES":''].filter(Boolean);
+    const colH=Math.max(fromL.length,toL.length)*LH(9.5)+1;
+    const h=P+8+gearH+3+4+colH+5+3+steps.length*LH(9)+3+(note.length?note.length*LH(9.5)+2:0)+(flags.length?flags.length*LH(9)+2:0)+P;
+    room(h+3);
+    const x0=M,top=y;doc.setDrawColor(...LINE);doc.setLineWidth(.35);doc.roundedRect(x0,top,CW,h,2,2);
+    if(!r.ticked&&(r.late||r.curfew||r.fatigue)){doc.setFillColor(...RED);doc.rect(x0,top+1,1.2,h-2,'F')}
+    let yy=top+P+5;
+    /* number and when the float is on the road; done time and distance on the right */
+    font(14,true);doc.text(`${i+1}.`,x0+P,yy);font(14,true);doc.text(hm(onRoad(r)),x0+P+9,yy);
+    const ow=doc.getTextWidth(hm(onRoad(r)));font(9,false,MUTE);doc.text('on the road',x0+P+9+ow+2,yy);
+    font(9,false,MUTE);doc.text(clean(`done ${hm(r.done)}${r.drive.km!=null?'   -   '+Math.round(r.drive.km)+' km':''}   -   ${durTxt(r.drive.min)} drive`),x0+CW-P,yy,{align:'right'});
+    yy+=3;
+    gear.forEach(g=>{const gh=Math.max(7,g.what.length*LH(9.5)+3);doc.setFillColor(243,243,241);doc.setDrawColor(225,225,222);doc.roundedRect(x0+P,yy,CW-2*P,gh,1.2,1.2,'FD');
+      const ty=yy+4.6;font(11,true);doc.text(g.no,x0+P+3,ty);
+      font(9.5,false);doc.text(g.what,x0+P+28,ty);
+      font(8.5,false,MUTE);if(g.cat)doc.text(g.cat,x0+CW-P-30,ty,{align:'right'});
+      if(g.rego){font(8.5,true);doc.text('Rego '+g.rego,x0+CW-P-3,ty,{align:'right'})}
+      yy+=gh+1.2});
+    yy+=3;
+    /* pick up / drop off side by side */
+    const cx=x0+P,cx2=x0+P+colW+6;
+    font(7.5,true,MUTE);doc.text('PICK UP',cx,yy);doc.text('DROP OFF',cx2,yy);yy+=4;
+    const drawCol=(L,x)=>{let yl=yy;L.forEach((ln,n)=>{const bold=n<lines(L===fromL?`${r.from.job}${r.from.crew?' - '+r.from.crew:''}`:`${r.to.job}${r.to.crew?' - '+r.to.crew:''}`,colW,9.5,true).length;font(bold?9.5:9,bold,bold?INK:MUTE);doc.text(ln,x,yl);yl+=LH(9.5)})};
+    drawCol(fromL,cx);drawCol(toL,cx2);yy+=colH;
+    font(8.5,true,[40,110,60]);doc.text(clean(`Free from ${whenTxt(r.earliest,k)}`),cx,yy+1);
+    font(8.5,true,r.late?RED:[30,70,140]);doc.text(clean(`${r.to.yard?'Back at the yard by':'Needed by'} ${whenTxt(r.latest,k)}`),cx2,yy+1);yy+=5;
+    /* the steps */
+    doc.setDrawColor(230,230,230);doc.line(x0+P,yy-1.5,x0+CW-P,yy-1.5);yy+=2.5;
+    font(9,false);doc.text(steps,x0+P,yy);yy+=steps.length*LH(9)+3;
+    if(note.length){font(9.5,true);doc.text(note,x0+P,yy);yy+=note.length*LH(9.5)+2}
+    if(flags.length){font(9,true,r.ticked?[40,110,60]:RED);doc.text(flags,x0+P,yy);yy+=flags.length*LH(9)+2}
+    const u=mapsDir(r.from,r.to);if(u){font(9,true,[30,70,140]);doc.textWithLink('Directions',x0+CW-P-doc.getTextWidth('Directions'),top+h-P,{url:u})}
+    y=top+h+4});
+  /* footer on every page */
+  const pages=doc.getNumberOfPages();for(let pg=1;pg<=pages;pg++){doc.setPage(pg);
+    if(cfg.curfew){font(8,false,MUTE);doc.text('Curfew: no float work (driving, loading or unloading) 7-9am and 4-6pm, Monday to Friday.',M,289)}
+    font(7.5,false,[140,140,140]);doc.text(clean(`Made ${fmtShort(new Date())} ${hm(new Date())} in FraserFlow. Drive times from OpenStreetMap, x${cfg.slow} for the float.`),M,293);
+    doc.text(`Page ${pg} of ${pages}`,W-M,293,{align:'right'})}
   const blob=doc.output('blob');const dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null;
   const name=`${clean(cfg.floatName||'Float')} run sheet ${k}.pdf`;
   if(dl){await dl.save({filename:name,data:blob});return}
