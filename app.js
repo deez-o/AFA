@@ -5537,7 +5537,6 @@ function App({boot,live}){
   const reloadAll=async()=>{try{const nd={...rowsToData(await fetchAllRows(live.sb))};nd.sectionOrder=nd.sectionOrder||[...DEFAULT_ORDER];setDataRaw(cur=>{const x={...nd,alerts:cur.alerts};remoteRef.current=x;return x})}catch(e){}};
   useMachineAlerts(live,fn=>setDataRaw(cur=>{const nd=fn(cur);if(nd!==cur)remoteRef.current=nd;return nd}));
   useEffect(()=>{
-    writeLocal(LOCAL_HIDDEN,data.resources.filter(r=>r.visible===false).map(r=>r.id));
     if(data.sectionOrder)writeLocal(LOCAL_ORDER,data.sectionOrder);
     if(remoteRef.current===data){savedRef.current=data;return}
     if(!live.canEdit)return;
@@ -5844,16 +5843,15 @@ function App({boot,live}){
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion'],['ideas','idea'],['plans','plan'],['planImgs','plan_img']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
 const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','fleetTruckHide','fleetTruckShow','machineCats','ideasVault','ideasPub','previewOnly','previewKnown','planQuick','planSteps'];
-const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
+const LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
 
-/* what gets stored for one record (per-person fields removed) */
-const storedForm=(coll,item,i)=>{const {visible,pos,...rest}=item;return ORDERED.has(coll)?{...rest,pos:i}:rest};
+/* what gets stored for one record. "Show on board" is shared: a hidden resource is stored with visible:false (shown ones leave it out) */
+const storedForm=(coll,item,i)=>{const {visible,pos,...rest}=item;const base=coll==='resources'&&visible===false?{...rest,visible:false}:rest;return ORDERED.has(coll)?{...base,pos:i}:base};
 
 /* rows from Supabase -> the app's data object */
 function rowsToData(rows){
-  const hidden=new Set(readLocal(LOCAL_HIDDEN,[]));
   const d={resources:[],jobs:[],blocks:[],quoteChanges:[],changeLog:[],suggestions:[],ideas:[],plans:[],planImgs:[]};
   rows.forEach(r=>{
     if(r.kind==='setting'){if(SETTINGS.includes(r.id))d[r.id]=r.data&&r.data.value;return}
@@ -5861,7 +5859,7 @@ function rowsToData(rows){
     d[c[0]].push({id:r.id,...r.data});
   });
   ['resources','jobs'].forEach(c=>d[c].sort((a,b)=>(a.pos??0)-(b.pos??0)));
-  d.resources=d.resources.map(r=>({...r,visible:!hidden.has(r.id)}));
+  d.resources=d.resources.map(r=>({...r,visible:r.visible!==false}));
   const order=readLocal(LOCAL_ORDER,null);if(order)d.sectionOrder=order;d.orderV=2;
   return d;
 }
@@ -5892,7 +5890,7 @@ function applyRemote(d,ev){
   if(ev.eventType!=='DELETE'){
     const old=(d[coll]||[]).find(x=>x.id===row.id);
     const item={id:row.id,...row.data};
-    if(coll==='resources')item.visible=old?old.visible:!new Set(readLocal(LOCAL_HIDDEN,[])).has(row.id);
+    if(coll==='resources')item.visible=item.visible!==false;
     if(ORDERED.has(coll)){const at=Math.max(0,Math.min(list.length,row.data.pos??list.length));list=[...list.slice(0,at),item,...list.slice(at)]}
     else list=[...list,item];
   }

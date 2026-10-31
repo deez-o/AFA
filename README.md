@@ -77,7 +77,7 @@ When a job is **completed**, its bars on the schedule are greyed out. When an op
 
 ## What is shared and what is personal
 Shared by everyone: crews, staff, machines, asphalt plants, jobs, bookings, quantities, mixes, binders and quote-change history.
-Personal to each person's browser: hidden rows, section order, view length, dark mode and notification settings.
+Shared with everyone: which crews, machines and people are shown on the board (Show on board / Hide from board in Schedule settings). Personal to each person's browser: section order, view length, dark mode and notification settings.
 
 ## Fleet & Maintenance
 
