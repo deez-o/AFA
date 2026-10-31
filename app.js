@@ -3938,14 +3938,14 @@ const AFA_LOGO='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAcIAAACvCAIAAADhZ0
 /* ---------- machines: rego, category and importing the fleet list ---------- */
 const machCatOf=r=>((r&&r.category)||'').trim();
 /* every category in use, in the saved order (from the fleet list), then any others */
-const MACHINE_CATS_BUILTIN=['Brooms'];   /* always offered in the category box */
+const MACHINE_CATS_BUILTIN=['Brooms','Watercarts','Crew Trucks'];   /* always offered in the category box, and shown in Settings › Machines */
 const machineCatsOf=d=>{const out=[];const add=c=>{c=(c||'').trim();if(c&&!out.some(x=>x.toLowerCase()===c.toLowerCase()))out.push(c)};
   (d.machineCats||[]).forEach(add);d.resources.forEach(r=>{if(r.type==='machine')add(r.category)});MACHINE_CATS_BUILTIN.forEach(add);return out};
 function groupMachines(rows,d,withEmpty=false){
   const ord=machineCatsOf(d).map(x=>x.toLowerCase());const m=new Map();
   rows.forEach(r=>{const c=machCatOf(r);const k=c.toLowerCase()||'~';if(!m.has(k))m.set(k,{key:k,label:c||'No category',rows:[]});m.get(k).rows.push(r)});
   /* categories added by hand (or emptied) still show, so machines can be put in them */
-  if(withEmpty)(d.machineCats||[]).forEach(c=>{c=(c||'').trim();const k=c.toLowerCase();if(c&&!m.has(k))m.set(k,{key:k,label:c,rows:[],empty:true})});
+  if(withEmpty)[...(d.machineCats||[]),...MACHINE_CATS_BUILTIN].forEach(c=>{c=(c||'').trim();const k=c.toLowerCase();if(c&&!m.has(k))m.set(k,{key:k,label:c,rows:[],empty:true})});
   return [...m.values()].sort((a,b)=>a.key==='~'?1:b.key==='~'?-1:(ord.indexOf(a.key)<0?999:ord.indexOf(a.key))-(ord.indexOf(b.key)<0?999:ord.indexOf(b.key)));
 }
 function loadSheetJS(){
