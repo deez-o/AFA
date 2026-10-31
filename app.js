@@ -2934,16 +2934,18 @@ const FLEET_TABS=[['dash','Dashboard'],['mc','Machines'],['cal','Calendar'],['wo
 const homeScreen=(role,d)=>{const h=roleOpt('home');if(h&&screenOK(h,role,d))return h;return Object.keys(SCREENS).find(k=>screenOK(k,role,d))||'schedule'};
 /* "prestart" users (operators) see Site QA as "Sign on" */
 const signOnRole=()=>!!FF_PERM&&FF_PERM.role==='prestart';
+/* a screen still being built can carry preview:true: only the administrator sees it until it's released
+   (Settings menu › Features in progress). None at the moment: everything is released. */
 const SCREENS={
   schedule:{label:'Schedule',title:'Schedule',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
   jobs:{label:'Projects',title:'Projects',only:[],legend:[],head:''},
   planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
-  fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',tab:'machine',preview:true},   /* maintenance: not for operators or viewers */
-  qa:{get label(){return signOnRole()?'Sign on':'QA'},get title(){return signOnRole()?'Sign on':'Site QA'},only:[],legend:[],head:'',preview:true},   /* JSA and toolbox meetings per booking shift: supervisors fill them in, the crew sign */
-  lab:{label:'Lab',title:'Lab',only:[],legend:[],head:'',preview:true},   /* past shifts by job: laid from the QA, QA PDFs, lab reports */
-  prestarts:{label:'Prestarts',title:'Prestarts',only:[],legend:[],head:'',preview:true},   /* the phone checklist; the only screen operators see */
+  fleet:{label:'Fleet',title:'Fleet & Maintenance',only:[],legend:[],head:'',tab:'machine'},   /* maintenance: not for operators or viewers */
+  qa:{get label(){return signOnRole()?'Sign on':'QA'},get title(){return signOnRole()?'Sign on':'Site QA'},only:[],legend:[],head:''},   /* JSA and toolbox meetings per booking shift: supervisors fill them in, the crew sign */
+  lab:{label:'Lab',title:'Lab',only:[],legend:[],head:''},   /* past shifts by job: laid from the QA, QA PDFs, lab reports */
+  prestarts:{label:'Prestarts',title:'Prestarts',only:[],legend:[],head:''},   /* the phone checklist; the only screen operators see */
   admin:{label:'Admin',title:'Admin',only:[],legend:[],head:'',bottom:true},   /* roles and what each can do: the administrator only */
   ideas:{label:'Ideas',title:'Ideas',only:[],legend:[],head:'',bottom:true},   /* the administrator only, never superusers; always at the bottom of the menu */   /* administrators only (button hidden for everyone else) */
 };
@@ -3181,7 +3183,7 @@ function SettingsMenu({theme,toggleTheme,prefs,setPrefs,account,onLog,preview,ma
         ${!simple&&sectionLabel('Notifications')}
         ${!simple&&html`<${NotifGroup} id="schedule" label="Schedule" types=${NOTIF_TYPES.filter(t=>!t.maint)} prefs=${prefs} setPrefs=${setPrefs}/>`}
         ${!simple&&maint&&html`<${NotifGroup} id="maint" label="Fleet & Maintenance" types=${NOTIF_TYPES.filter(t=>t.maint)} prefs=${prefs} setPrefs=${setPrefs}/>`}
-        ${preview&&html`${sectionLabel('Features in progress')}
+        ${preview&&previewKeys().length>0&&html`${sectionLabel('Features in progress')}
           <div class="px-2 pb-1 text-[12px] text-muted">Only you see these until you release them. Then everyone whose role allows it sees them.</div>
           ${Object.entries(SCREENS).filter(([,s])=>s.preview).map(([k,s])=>html`<${SwitchRow} key=${k} id=${'pv-'+k} label=${'Release '+s.title} desc=${preview.list.includes(k)?'In progress: only you can see it':'Released to everyone with access'}
             on=${!preview.list.includes(k)} onChange=${v=>preview.set(v?preview.list.filter(x=>x!==k):[...preview.list,k])}/>`)}`}
