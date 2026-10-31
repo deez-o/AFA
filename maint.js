@@ -840,9 +840,19 @@ function ReadingsHistory({a,ctx}){
 
 /* Machines: the fleet list, added, changed and removed here (they are the schedule's machine rows) */
 function MachinesTab({ctx,open}){
-  const {M,data,perms,canEdit}=ctx;
+  const {M,data,perms,canEdit,setData,sb,db,notify,reload}=ctx;
   const [q,setQ]=useState('');const [cat,setCat]=useState('');const [ret,setRet]=useState(false);const [dlg,setDlg]=useState(null);
   const [svc,setSvc]=useState('');   /* last service: '' all, 'set', 'notset' */
+  /* rename a category: its machines move with it (into an existing one if the name is taken), and so do service plans */
+  const [catEd,setCatEd]=useState(null);   /* {from, to} */
+  const renameCat=async()=>{const c=catEd;setCatEd(null);if(!c)return;const to=(c.to||'').trim(),from=c.from;if(!to||to===from)return;
+    const lf=from.toLowerCase();const same=x=>(x||'').trim().toLowerCase()===lf;
+    const existing=machineCatsOf(data).find(x=>x.toLowerCase()===to.toLowerCase());const name=existing||to;
+    setData(d=>{const list=[];machineCatsOf(d).forEach(x=>{const y=same(x)?name:x;if(!list.some(o=>o.toLowerCase()===y.toLowerCase()))list.push(y)});
+      return {...d,machineCats:list,resources:d.resources.map(r=>r.type==='machine'&&same(r.category)?{...r,category:name}:r)}});
+    try{for(const pl of db.service_plans.filter(pl=>planCatList(pl).some(same))){
+        const cats=[...new Set(planCatList(pl).map(x=>same(x)?name:x))];const {error}=await sb.from('service_plans').update({categories:cats,category:cats[0]||null}).eq('id',pl.id);if(error)throw error}
+      notify(`“${from}” is now “${name}”`);reload()}catch(e){notify('Machines renamed; service plans not updated: '+errMsg(e))}};
   const svcState=a=>{const ps=a.plans||[];if(!ps.length)return 'noplan';return ps.every(x=>x.last)?'set':'notset'};
   const ql=q.trim().toLowerCase();const nRet=M.assets.filter(a=>a.retired).length;
   const hit=a=>(ret||!a.retired)&&(!svc||svcState(a)===svc)&&(!cat||machCatOf(a.m).toLowerCase()===cat.toLowerCase())&&(!ql||[a.m.name,a.m.sub,a.m.rego,machCatOf(a.m),a.crew&&a.crew.name,a.p&&a.p.make,a.p&&a.p.model,a.p&&a.p.serial].join(' ').toLowerCase().includes(ql));
@@ -863,7 +873,11 @@ function MachinesTab({ctx,open}){
     </div>
     <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="mc-table">
       <thead><tr class="text-left">${['','Machine','Rego','Make / model','Last service','Year','Meters','Avg / year',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
-      ${groups.map(g=>html`<tbody key=${g.key}><tr class="border-t border-line bg-sunken"><td colspan="9" class="py-1.5 px-3 label">${g.label} <span class="text-faint font-normal">${g.rows.length}</span></td></tr>
+      ${groups.map(g=>html`<tbody key=${g.key}><tr class="border-t border-line bg-sunken"><td colspan="9" class="py-1.5 px-3 label">${catEd&&catEd.from===g.label?html`<span class="inline-flex items-center gap-2 normal-case tracking-normal" style=${{fontWeight:400}}>
+            <input id="mc-cat-name" class="field field-sm" style=${{height:28,width:220}} value=${catEd.to} autoFocus=${true} onInput=${e=>setCatEd({...catEd,to:e.target.value})} onKeyDown=${e=>{if(e.key==='Enter')renameCat();if(e.key==='Escape')setCatEd(null)}} aria-label="Category name"/>
+            <button type="button" id="mc-cat-save" class="btn btn-primary" style=${{height:28}} onClick=${renameCat}>Rename</button><button type="button" class="btn" style=${{height:28}} onClick=${()=>setCatEd(null)}>Cancel</button>
+            <span class="text-[11.5px] text-muted">Its ${g.rows.length} machine${g.rows.length===1?'':'s'} and service plans move with it</span></span>`
+          :html`${g.label} <span class="text-faint font-normal">${g.rows.length}</span>${canEdit&&g.key!=='~'&&html` <button type="button" class="mc-cat-edit ml-1 align-middle text-muted hover:text-ink" title=${'Rename '+g.label} aria-label=${'Rename '+g.label} onClick=${()=>setCatEd({from:g.label,to:g.label})}>${Icon.pencil}</button>`}`}</td></tr>
         ${g.rows.map(r=>{const a=M.byId.get(r.id);const p=a.p||{};return html`<tr key=${r.id} class="border-t border-line hover:bg-sunken" data-machine=${r.name}>
           <td class="py-2 pl-3 pr-1 w-0">${stDot(a.status)}</td>
           <td class="py-2 px-3"><button type="button" class="text-left mc-open" onClick=${()=>open({k:'asset',id:r.id})}><span class="block font-medium hover:underline">${r.name}${a.retired?html` <span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted">Retired</span>`:''}</span><span class="block text-[11.5px] text-muted truncate max-w-[280px]">${r.sub||''}</span></button></td>
