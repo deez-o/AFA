@@ -212,8 +212,29 @@ function planFloat(trips,cfg,travel,plan,opt={}){
     out.push({...t,pick,leave,depart,arrive,done,drive:tr,deadhead:dh,fixed,late,tight,early,outHours,weekend,curfew,fatigue,shiftStart:drv.shiftStart,fromLoc:loc,
       ticked:!!(P[t.id]&&P[t.id].done),tickedAt:P[t.id]&&P[t.id].doneAt,note:(P[t.id]&&P[t.id].note)||''});
     clock=done;loc=t.to}
-  closeGaps(out,cfg,travel);
+  closeGaps(out,cfg,travel);roundTimes(out,cfg);
   return {runs:out,skipped}}
+/* "loaded & leaving" on the nearest 10 minutes: each move shifts a few minutes so the time the gear leaves is
+   round (7:40, not 7:43). Earlier if that still works (machine free, float done with the last move, out of the
+   curfew), otherwise later. A later move after it waits for it if needed. Hand-set times and ticked moves stay. */
+function roundTimes(runs,cfg){
+  const R=10*6e4;let prev=null;
+  runs.forEach(r=>{
+    const sh=d=>{if(!d)return;['leave','pick','depart','arrive','done'].forEach(k=>{r[k]=new Date(+r[k]+d)})};
+    if(!r.fixed&&!r.ticked){
+      const down=Math.floor(+r.depart/R)*R-r.depart,up=Math.ceil(+r.depart/R)*R-r.depart;
+      const ok=d=>{const pick=new Date(+r.pick+d),leave=new Date(+r.leave+d),done=new Date(+r.done+d);
+        const restWas=prev&&(r.leave-prev.done)/6e4>=REST_MIN;   /* don't cut into the driver's 10-hour break */
+        return pick>=r.earliest&&(!prev||leave>=prev.done)&&(!restWas||(leave-prev.done)/6e4>=REST_MIN)&&(r.curfew||!inCurfew(leave,done,cfg))};
+      const first=Math.abs(down)<=Math.abs(up)?down:up,second=first===down?up:down;
+      sh(ok(first)?first:ok(second)?second:0)}
+    if(prev&&r.leave<prev.done&&!r.fixed&&!r.ticked){const need=prev.done-r.leave;sh(Math.ceil((+r.depart+need)/R)*R-r.depart)}   /* make room after the move before */
+    prev=r});
+  /* the labels follow the final times */
+  let start=null;runs.forEach((r,i)=>{const p=runs[i-1];if(!p||(r.leave-p.done)/6e4>=REST_MIN)start=r.leave;r.shiftStart=start;
+    r.late=r.done>r.latest;r.tight=!r.late&&r.done>addMin(r.latest,-30);r.curfew=inCurfew(r.leave,r.done,cfg);r.early=r.pick<r.earliest;
+    r.outHours=!inHours(r.leave,r.done,cfg);r.weekend=isWeekend(r.leave)||isWeekend(r.done)});
+}
 /* the float shouldn't sit about mid-shift (e.g. waiting at a site or the yard for a curfew to end): each
    shift is re-planned to start later and/or in another order so its moves run back to back, as long as every move stays
    on time, out of the curfew, in the driver's hours, on the same day, and the shift keeps to the 12-hour / 10-hour rules.

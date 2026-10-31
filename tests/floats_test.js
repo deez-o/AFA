@@ -235,4 +235,13 @@ for (const mins of [10, 15, 20]) {
   const r = R[0];
   ok(!r.curfew && r.leave >= t('2026-11-10 09:00') && r.pick >= t('2026-11-10 09:00') && r.done <= t('2026-11-10 16:00'), 'two machines from the yard: loading starts 9am, not 8am; all done before 4pm (' + hm(r.pick) + '–' + hm(r.done) + ')');
 }
+
+// loaded & leaving on the nearest 10 minutes
+{
+  const tr = () => ({ min: 37, km: 30 });
+  const mk = (id, a, b, e, l) => ({ id, moves: [{ m: id, name: 'T' + id }], from: { key: a }, to: { key: b }, earliest: t(e), latest: t(l) });
+  const R = planFloat([mk('1', 'A', 'B', '2026-11-10 09:00', '2026-11-10 15:00'), mk('2', 'C', 'D', '2026-11-10 09:00', '2026-11-10 15:00'), mk('3', 'E', 'F', '2026-11-10 09:00', '2026-11-11 15:00')], cfgOf({}), tr, {}).runs;
+  ok(R.every(r => r.depart.getMinutes() % 10 === 0 && r.depart.getSeconds() === 0), 'every “loaded & leaving” time is on a 10-minute mark (' + R.map(r => hm(r.depart)).join(', ') + ')');
+  ok(R.every((r, i) => i === 0 || r.leave >= R[i - 1].done) && R.every(r => r.pick >= r.earliest && !r.curfew), 'still one move after another, never before the machine is free, out of the curfew');
+}
 console.log(fails ? `${fails} FAILED` : 'ALL FLOAT TESTS PASSED'); process.exit(fails ? 1 : 0);
