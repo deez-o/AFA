@@ -107,7 +107,7 @@ const REPORTS=[
       cols:[{h:'Machine',w:1.8},{h:'Category',w:1.1},{h:'Scheduled service',w:.9,right:1},{h:'Breakdown / repair',w:.9,right:1},{h:'Restricted',w:.8,right:1},{h:'Total days down',w:.9,right:1},{h:'Of the period',w:.8,right:1}],
       rows:rows.map(r=>[`${r.a.m.name} · ${r.a.m.sub||''}`,machCatOf(r.a.m),r.svc,r.rep,r.res,r.all,pct(r.all,days.length)]),empty:'No downtime in this period.'}]}}},
   {id:'breakdowns',label:'Breakdowns',make:(ctx,{from,to,cat})=>{const {db,M}=ctx;const ok=inCat(M,cat);
-    const wos=db.work_orders.filter(w=>w.wo_type==='breakdown'&&localDay(w.created_at)>=from&&localDay(w.created_at)<=to&&ok(w.asset_id)).sort((a,b)=>b.created_at.localeCompare(a.created_at));
+    const wos=db.work_orders.filter(w=>w.wo_type==='breakdown'&&w.status!=='cancelled'&&localDay(w.created_at)>=from&&localDay(w.created_at)<=to&&ok(w.asset_id)).sort((a,b)=>b.created_at.localeCompare(a.created_at));
     const done=wos.filter(w=>w.completed_at);const avg=done.length?Math.round(done.reduce((s,w)=>s+daysBetween(w.created_at,w.completed_at),0)/done.length*10)/10:'–';
     const per={};wos.forEach(w=>{per[w.asset_id]=(per[w.asset_id]||0)+1});const top=Object.entries(per).sort((a,b)=>b[1]-a[1])[0];
     return {sections:[{heading:'Breakdowns reported',summary:[['breakdowns',wos.length],['not safe to operate',wos.filter(w=>w.safe_to_operate===false).length],['average days to fix',avg],['most',top?`${mName(M,top[0])} (${top[1]})`:'–']],
@@ -167,7 +167,7 @@ function ReportsTab({ctx}){
 /* ---------- one machine's history, as a PDF ---------- */
 async function machinePdf(ctx,a){
   const {db,M,data}=ctx;const p=a.p||{};const id=a.m.id;
-  const wos=db.work_orders.filter(w=>w.asset_id===id).sort((x,y)=>y.number-x.number);
+  const wos=db.work_orders.filter(w=>w.asset_id===id&&w.status!=='cancelled').sort((x,y)=>y.number-x.number);
   const recs=db.service_records.filter(r=>r.asset_id===id).sort((x,y)=>y.done_on.localeCompare(x.done_on));
   const ds=(db.defects||[]).filter(d=>d.asset_id===id).sort((x,y)=>y.number-x.number);
   const ps=db.prestarts.filter(x=>x.asset_id===id);

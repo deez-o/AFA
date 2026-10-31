@@ -429,7 +429,7 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
   /* administrators and mechanics can delete a finished work order (its service record, readings, defects and files stay) */
   const [delAsk,setDelAsk]=useState(false);
   const delWo=async()=>{setErr('');setBusy(true);try{const ok=await deleteWorkOrder(sb,wo);
-      if(!ok)throw new Error('It wasn’t deleted: only completed or closed work orders, by an administrator or mechanic.');
+      if(!ok)throw new Error('It wasn’t deleted. Only completed, closed or cancelled work orders can be deleted, by an administrator or mechanic. If this one is cancelled, the database needs updating: run supabase/maintenance.sql (or delete_cancelled_wos.sql) in Supabase.');
       notify(`${woNo(wo)} deleted`);reload();onClose()}catch(e){setErr(errMsg(e));setDelAsk(false)}finally{setBusy(false)}};
   const acts=isNew?[]:[
     ...(['open','scheduled','awaiting_parts'].includes(cur)?[['in_progress',cur==='awaiting_parts'?'Resume work':'Start work']]:[]),
