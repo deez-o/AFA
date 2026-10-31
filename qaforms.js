@@ -264,6 +264,18 @@ function prepDocket(file){return new Promise((res,rej)=>{const r=new FileReader(
       for(let k=0;k<gr.length;k++){const v=Math.round(.3*px[k*4]+.59*px[k*4+1]+.11*px[k*4+2]);gr[k]=v;if(v<lo)lo=v;if(v>hi)hi=v}
       const span=Math.max(1,hi-lo);for(let k=0;k<gr.length;k++){const v=Math.round((gr[k]-lo)*255/span);px[k*4]=px[k*4+1]=px[k*4+2]=v}g.putImageData(d,0,0)}catch(e){}
     res(c)};im.onerror=()=>rej(new Error('That photo couldn’t be opened.'));im.src=r.result};r.onerror=rej;r.readAsDataURL(file)})}
+/* the docket photo for the AI reader: colour JPEG, long edge at most 1568 px (what Claude reads without shrinking it further) */
+function docketJpeg(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{
+    const k=Math.min(1,1568/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
+    c.getContext('2d').drawImage(im,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',.85))};im.onerror=()=>rej(new Error('That photo couldn’t be opened.'));im.src=r.result};r.onerror=rej;r.readAsDataURL(file)})}
+/* read a docket with Claude on the server (api/docket.js); null when it can't (offline, not set up): the phone's reader is used instead */
+async function aiReadDocket(dataUrl,previous,regos){
+  const live=window.__ffLive;const sb=live&&live.sb;if(!sb||(typeof navigator!=='undefined'&&navigator.onLine===false))return null;
+  try{const {data:{session}}=await sb.auth.getSession();
+    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),25000);
+    const r=await fetch('/api/docket',{method:'POST',signal:ctl.signal,headers:{'Content-Type':'application/json',Authorization:'Bearer '+(session&&session.access_token||'')},
+      body:JSON.stringify({image:dataUrl.split(',')[1],mediaType:'image/jpeg',previous,regos})});clearTimeout(t);
+    if(!r.ok)return null;const j=await r.json();return j&&(j.docket||j.tonnes||j.rego)?j:null}catch(e){return null}}
 /* the fields we need from an Alex Fraser delivery docket's text */
 /* reading a scanned docket: the docket number follows "Delivery No:", the tonnes "Net Weight", the truck "Rego".
    OCR is forgiving: the value may be on the same line or the next, with stray punctuation or units around it */
@@ -337,21 +349,26 @@ function LayingEditor({f}){
   const d=f.pack.forms.laying;const set=p=>f.set('laying',x=>({...x,...p}));const rows=d.rows||[];
   const setRow=(i,p)=>f.set('laying',x=>({...x,rows:x.rows.map((r,k)=>k===i?{...r,...p}:r)}));
   const [open,setOpen]=useState(()=>{const k=rows.findIndex(r=>!rowDone(r));return k});   /* the load being filled in */
-  const [busy,setBusy]=useState('');const [err,setErr]=useState('');const fileRef=useRef(null);const [tried,setTried]=useState(-1);   /* Add load pressed with something missing */
+  const [busy,setBusy]=useState('');const [err,setErr]=useState('');const fileRef=useRef(null);const [photo,setPhoto]=useState(null);   /* the docket just scanned, shown beside its load to check */const [tried,setTried]=useState(-1);   /* Add load pressed with something missing */
   const blocker=rows.findIndex(r=>!rowDone(r));   /* a load still missing its docket, tonnes or temperature */
   /* a new load starts at the last load's run location (until it's changed; later loads follow the new one) */
   const addRow=r=>{f.set('laying',x=>{const l=x.rows||[];const prev=l.length?l[l.length-1].comments:'';return {...x,rows:[...l,{...r,comments:blank(r.comments)?(prev||''):r.comments}]}});setTried(-1);setOpen(rows.length)};
   const scan=async file=>{if(!file)return;setErr('');setBusy('Reading the docket…');const time=hhmm();
-    try{const [w,c]=await Promise.all([loadOcr(),prepDocket(file)]);const {data}=await w.recognize(c);const got=parseDocket(data.text||'');
+    try{const known0=[...rows.map(r=>r.rego),...((f.data&&f.data.resources)||[]).filter(r=>r.type==='machine').map(r=>r.rego)].filter(Boolean);
+      /* the AI reader first (Claude, on the server); the phone's own reader when there's no reception or it isn't set up */
+      const pic=await docketJpeg(file);let got=await aiReadDocket(pic,rows.map(r=>r.docket).filter(Boolean),known0),ai=!!got;
+      if(!got){const [w,c]=await Promise.all([loadOcr(),prepDocket(file)]);const {data}=await w.recognize(c);got=parseDocket(data.text||'')}
+      setPhoto({i:rows.length,url:pic});
       const gap=fillDocketGap(got.docket,rows.map(r=>r.docket),got.docketGapAt);
       const odd=!gap.guess&&!!got.docket&&gap.odd;
       const known=[...rows.map(r=>r.rego),...((f.data&&f.data.resources)||[]).map(r=>r.rego)];
-      addRow({...layRow(),time,docket:gap.docket||'',rego:snapRego(got.rego,known)||'',tonnes:got.tonnes||'',product:got.product||'',docket_load:got.load||'',scanned:true,docket_check:!!got.docket});   /* always check a scanned docket number */
+      addRow({...layRow(),time,docket:gap.docket||'',rego:snapRego(got.rego,known)||'',tonnes:got.tonnes||'',product:got.product||'',docket_load:got.load||'',scanned:ai?'ai':true,docket_check:!!got.docket});   /* always check a scanned docket number */
       if(gap.guess){const k=gap.guess.digit!=null?rows.findIndex(r=>r.docket===gap.guess.from):-1;
         setErr(gap.guess.digit!=null?`One digit of the docket number wasn’t printed (the printer leaves a gap). It’s been filled in as ${gap.guess.digit} from load ${k+1}: check it against the docket.`
           :'One digit of the docket number wasn’t printed (the printer leaves a gap). Type the missing digit in place of the “?”.')}
       else if(odd)setErr('The docket number didn’t read cleanly (it isn’t the usual length): check it against the docket.')
-      else if(!got.docket||!got.tonnes)setErr('Some of the docket couldn’t be read. Check it and fill in what’s missing.')}
+      else if(!got.docket||!got.tonnes)setErr('Some of the docket couldn’t be read. Check it and fill in what’s missing.')
+      else if(ai&&(got.unsure||[]).length)setErr(`Check against the docket: the ${got.unsure.map(k=>({docket:'docket number',tonnes:'tonnes',rego:'rego',product:'product',load:'load number'})[k]||k).join(', ')} ${got.unsure.length===1?'wasn’t':'weren’t'} clear${got.note?' ('+got.note+')':''}.`)}
     catch(e){addRow({...layRow(),time});setErr((e&&e.message)||'The docket couldn’t be read. Type the details in.')}
     finally{setBusy('')}};
   const close=i=>{const miss=layMissing(rows[i]);if(miss.length){setTried(i);setErr('Fill in: '+miss.map(([,l])=>l).join(', ')+'.');return}setTried(-1);setErr('');setOpen(-1)};
@@ -363,7 +380,8 @@ function LayingEditor({f}){
     <div class="grid gap-2" id="qa-lay-rows">
       ${rows.map((r,i)=>{run+=n0(r.tonnes);const isOpen=i===open&&f.canEdit;
         return isOpen?html`<div key=${i} class=${rowStyle+' qa-row-laying qa-lay-open'} style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
-            <div class="flex items-center gap-2 text-[12.5px]"><span class="font-semibold whitespace-nowrap">Load ${i+1}</span><span class="text-muted">${r.scanned?'from the docket · ':''}progressive total ${fmt2((run))} t</span></div>
+            <div class="flex items-center gap-2 text-[12.5px]"><span class="font-semibold whitespace-nowrap">Load ${i+1}</span><span class="text-muted">${r.scanned==='ai'?'read from the docket by AI · ':r.scanned?'from the docket · ':''}progressive total ${fmt2((run))} t</span></div>
+            ${photo&&photo.i===i&&html`<details class="qa-lay-photo" open=${true}><summary class="text-[12px] text-muted cursor-pointer">The docket photo: check the numbers against it</summary><img src=${photo.url} alt="Docket photo" class="mt-1 w-full max-h-[340px] object-contain rounded-md border border-line bg-white"/></details>`}
             ${(()=>{const k=rows.findIndex((x,j)=>j!==i&&!blank(r.docket)&&x.docket===r.docket);return k>=0&&html`<div id="qa-lay-dup" class="text-[12.5px] font-medium rounded-md px-2 py-1" style=${{background:'hsl(38 90% var(--blk-l))'}}>Docket ${r.docket} is already on load ${k+1}. Scanned twice?</div>`})()}
             ${(()=>{const box=(k,id,extra)=>html`<input id=${id} class="field" style=${{...fs,...(k==='docket'&&r.docket_check&&!bad(i,k)?{boxShadow:'inset 0 0 0 1.5px hsl(38 90% 48%)',borderColor:'hsl(38 90% 48%)'}:{}),...(bad(i,k)||{})}} value=${r[k]==null?'':r[k]}
                 onInput=${e=>setRow(i,{[k]:k==='rego'?e.target.value.toUpperCase():e.target.value,...(k==='docket'?{docket_check:false}:{})})} ...${extra||{}}/>`;
@@ -388,9 +406,9 @@ function LayingEditor({f}){
     </div>
     ${err&&html`<div id="qa-lay-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
     ${f.canEdit&&html`<div class="flex flex-wrap items-center gap-2">
-      ${/* docket scanning is switched off while it's being improved: dockets are typed in */''}
-      <span class="btn opacity-50 pointer-events-none select-none" style=${{height:42}} id="qa-lay-scan" aria-disabled="true" title="Docket scanning is under construction">${Icon.plus} Scan docket <span class="text-[10.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style=${{background:'hsl(38 95% 50% / .2)',color:'hsl(30 90% 32%)'}}>Under construction</span></span>
-      <button id="qa-lay-add" type="button" class="btn btn-primary" style=${{height:42}} disabled=${!(canAdd&&open<0)} onClick=${()=>addRow(layRow())}>${Icon.plus} Add docket</button>
+      <label class=${'btn btn-primary '+(canAdd&&open<0?'cursor-pointer':'opacity-50 pointer-events-none')} style=${{height:42}} id="qa-lay-scan">${busy||html`${Icon.plus} Scan docket`}
+        <input ref=${fileRef} id="qa-lay-file" type="file" accept="image/*" capture="environment" class="sr-only" disabled=${!(canAdd&&open<0)} onChange=${e=>{const fl=e.target.files&&e.target.files[0];e.target.value='';scan(fl)}}/></label>
+      <button id="qa-lay-add" type="button" class="btn" style=${{height:42}} disabled=${!(canAdd&&open<0)} onClick=${()=>addRow(layRow())}>Add without scanning</button>
       ${blocker>=0&&open<0&&html`<span class="text-[12px]" style=${{color:'hsl(30 90% 38%)'}}>Finish load ${blocker+1} (${blank(rows[blocker].temp)?'temperature':'docket and tonnes'}) before adding another.</span>`}</div>`}
     <div class="text-[13.5px] font-semibold" id="qa-lay-total">Total: ${fmt2((tot))} t</div><//>`;
 }

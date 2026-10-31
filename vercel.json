@@ -1,13 +1,86 @@
 {
   "headers": [
-    { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }] },
-    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }] },
-    { "source": "/app.js", "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }] },
-    { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }, { "key": "Service-Worker-Allowed", "value": "/" }] },
-    { "source": "/manifest.json", "headers": [{ "key": "Content-Type", "value": "application/manifest+json" }, { "key": "Cache-Control", "value": "no-cache" }] },
-    { "source": "/(maint|prestart|defects|reports|qa|qaforms|lab|floats).js", "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }] }
+    {
+      "source": "/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/app.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, must-revalidate"
+        },
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        }
+      ]
+    },
+    {
+      "source": "/manifest.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/(maint|prestart|defects|reports|qa|qaforms|lab|floats).js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, must-revalidate"
+        }
+      ]
+    }
   ],
-  "rewrites": [{ "source": "/api/servicem8-hook/:key", "destination": "/api/servicem8?hook=:key" }],
-  "functions": { "api/servicem8.js": { "maxDuration": 60 } },
-  "crons": [{ "path": "/api/servicem8?cron=1", "schedule": "0 19 * * *" }]
+  "rewrites": [
+    {
+      "source": "/api/servicem8-hook/:key",
+      "destination": "/api/servicem8?hook=:key"
+    }
+  ],
+  "functions": {
+    "api/servicem8.js": {
+      "maxDuration": 60
+    },
+    "api/docket.js": {
+      "maxDuration": 30
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/servicem8?cron=1",
+      "schedule": "0 19 * * *"
+    }
+  ]
 }
