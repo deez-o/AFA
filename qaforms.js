@@ -286,7 +286,12 @@ function parseDocket(t){
      The label must be a word of its own: "MORETON BAY REGIONAL" is not "Rego" + "IONA1". The Truck line's rego comes first. */
   const REGO=/(?:^|[^A-Za-z])R[e3]?[gq9](?:[o0c]|istration)?\.?(?![A-Za-z])[ \t]*(?:No\.?|Number)?[ \t]*[:.,\-]?[ \t]*([A-Z0-9]{2,8})(?:[ \-]([A-Z0-9]{2,4})\b)?/i;
   const truckLine=t.split('\n').find(l=>/[tT1Il]?r?uck\b[^\n]*R[e3]?[gq9][o0c]/i.test(l)&&!/trail/i.test(l.slice(0,12)));
-  const rg=(truckLine&&truckLine.match(REGO))||t.split('\n').filter(l=>!/trail/i.test(l)).map(l=>l.match(REGO)).find(Boolean);
+  let rg=(truckLine&&truckLine.match(REGO))||null;
+  if(!rg){   /* the label misread ("Rem:", "Reso:"): the plate is still what follows the last colon on the Truck line */
+    const tl=t.split('\n').find(l=>/^\W{0,3}[tT7][rn]?[uvw]?c?k\s*[:;.]/.test(l)&&!/trail/i.test(l.slice(0,12)));
+    const m=tl&&tl.match(/^\W{0,3}[tT7][rn]?[uvw]?c?k\s*[:;.]\s*\S+.*[:;]\s*([A-Z0-9]{2,8})(?:[ \-]([A-Z0-9]{2,4})\b)?\W{0,3}$/i);
+    if(m)rg=m}
+  if(!rg)rg=t.split('\n').filter(l=>!/trail/i.test(l)).map(l=>l.match(REGO)).find(Boolean);
   if(rg){let v=(rg[1]+(rg[2]&&rg[1].length<=4&&rg[1].length+rg[2].length<=8?rg[2]:'')).toUpperCase();
     const m=v.match(/^([A-Z]{2,3})([A-Z0-9]{2,4})$/);if(m)v=m[1]+m[2].replace(/O/g,'0').replace(/[IL]/g,'1');
     if(v.length>=4)out.rego=v.slice(0,9)}
@@ -294,6 +299,19 @@ function parseDocket(t){
   const ld=t.match(/Load\s*No\s*[:.,]?\s*(\d{1,5})/i);if(ld)out.load=String(+ld[1]);
   return out}
 window.__parseDocket=parseDocket;
+/* a scanned rego a character or two out ("XBI0XX", "XBS0XX") is taken as the rego it nearly matches: one already on this
+   record (the same truck comes back load after load) or a truck in Fleet. Look-alike characters (0/O, 1/I, 5/S, 8/B…) count half. */
+const LOOK=['0O','0D','0Q','1I','1L','1T','5S','8B','2Z','4A','6G','KX','MH','VY'];
+const lookAlike=(a,b)=>LOOK.some(p=>p.includes(a)&&p.includes(b));
+function regoDist(a,b){const m=a.length,n=b.length;let prev=[...Array(n+1).keys()];
+  for(let i=1;i<=m;i++){const cur=[i];for(let j=1;j<=n;j++){const x=a[i-1],y=b[j-1];const sub=x===y?0:lookAlike(x,y)?.5:1;
+    cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+sub)}prev=cur}return prev[n]}
+function snapRego(v,known){v=String(v||'').toUpperCase();if(!v)return v;
+  const list=[...new Set((known||[]).map(x=>String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'')).filter(x=>x.length>=4))];
+  if(list.includes(v))return v;
+  let best=null,bd=9,tie=false;list.forEach(k=>{if(Math.abs(k.length-v.length)>1)return;const d=regoDist(v,k);if(d<bd){bd=d;best=k;tie=false}else if(d===bd)tie=true});
+  return best&&!tie&&bd<=1.5?best:v}
+window.__snapRego=snapRego;
 /* The docket printer can leave a blank column (a dead strip on its head), so one digit of the delivery number isn't on
    the paper at all. Dockets are 9 digits (or the usual length of this record's other loads): when one comes back a digit
    short, the gap is filled from an earlier load that shares the start of the number (to be checked), or marked "?" to type. */
@@ -326,7 +344,8 @@ function LayingEditor({f}){
     try{const [w,c]=await Promise.all([loadOcr(),prepDocket(file)]);const {data}=await w.recognize(c);const got=parseDocket(data.text||'');
       const gap=fillDocketGap(got.docket,rows.map(r=>r.docket),got.docketGapAt);
       const odd=!gap.guess&&!!got.docket&&gap.odd;
-      addRow({...layRow(),time,docket:gap.docket||'',rego:got.rego||'',tonnes:got.tonnes||'',product:got.product||'',docket_load:got.load||'',scanned:true,docket_check:!!got.docket});   /* always check a scanned docket number */
+      const known=[...rows.map(r=>r.rego),...((f.data&&f.data.resources)||[]).map(r=>r.rego)];
+      addRow({...layRow(),time,docket:gap.docket||'',rego:snapRego(got.rego,known)||'',tonnes:got.tonnes||'',product:got.product||'',docket_load:got.load||'',scanned:true,docket_check:!!got.docket});   /* always check a scanned docket number */
       if(gap.guess){const k=gap.guess.digit!=null?rows.findIndex(r=>r.docket===gap.guess.from):-1;
         setErr(gap.guess.digit!=null?`One digit of the docket number wasn’t printed (the printer leaves a gap). It’s been filled in as ${gap.guess.digit} from load ${k+1}: check it against the docket.`
           :'One digit of the docket number wasn’t printed (the printer leaves a gap). Type the missing digit in place of the “?”.')}
