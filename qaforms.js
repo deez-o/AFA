@@ -264,12 +264,28 @@ function prepDocket(file){return new Promise((res,rej)=>{const r=new FileReader(
       const span=Math.max(1,hi-lo);for(let k=0;k<gr.length;k++){const v=Math.round((gr[k]-lo)*255/span);px[k*4]=px[k*4+1]=px[k*4+2]=v}g.putImageData(d,0,0)}catch(e){}
     res(c)};im.onerror=()=>rej(new Error('That photo couldn’t be opened.'));im.src=r.result};r.onerror=rej;r.readAsDataURL(file)})}
 /* the fields we need from an Alex Fraser delivery docket's text */
+/* reading a scanned docket: the docket number follows "Delivery No:", the tonnes "Net Weight", the truck "Rego".
+   OCR is forgiving: the value may be on the same line or the next, with stray punctuation or units around it */
 function parseDocket(t){
-  const out={};const fix=v=>v.replace(/[Oo]/g,'0').replace(/[Il|]/g,'1').replace(/[Ss](?=\d)/g,'5');
-  const dn=t.match(/Deliv\w*\s*\w{0,3}[:.,]?\s*([0-9OIl|]{6,12})/i);if(dn)out.docket=fix(dn[1]);
-  const rg=t.match(/R[e3]g[o0c]\s*[:.,]?\s*([A-Z0-9]{3,8})/i);
-  if(rg){let v=rg[1].toUpperCase();const m=v.match(/^([A-Z]{2,3})([A-Z0-9]{2,4})$/);if(m)v=m[1]+m[2].replace(/O/g,'0').replace(/[IL]/g,'1');out.rego=v}
-  const nw=t.match(/Net\s*W\w*[:.,]?\s*([0-9]{1,3}[.,][0-9]{1,3})/i);if(nw)out.tonnes=nw[1].replace(',','.');
+  const out={};t=String(t||'').replace(/\r/g,'');
+  const fix=v=>v.replace(/[Oo]/g,'0').replace(/[Il|]/g,'1').replace(/[Ss](?=\d)/g,'5');
+  /* the docket number: "Delivery No: 1234567" (also "Delivery Number", "Delivery Docket No", "Del No") */
+  const dn=t.match(/\bDel(?:iv\w*)?\s*(?:Docket\s*)?(?:No\.?|Number|#)\s*[:.,\-]?\s*\n?\s*([A-Z]{0,3}[0-9OIl|]{3,14}(?: [0-9OIl|]{2,8})?)/i)||t.match(/\bDeliv\w*[^\n0-9]{0,12}([0-9OIl|]{4,14})/i);
+  if(dn)out.docket=fix(dn[1].replace(/ /g,'')).replace(/^([A-Z]{0,3})/i,(m)=>m.toUpperCase());
+  /* the tonnes: "Net Weight 17.160 Tonnes" (OCR often garbles "Weight": "Net Veleit «17.160 Tomes"), "Net Weight 25,480 kg" → 25.48;
+     if the net line can't be read, Gross − Tare */
+  const tn=(m,unit)=>{if(!m)return null;let v=m;const kg=/kg/i.test(unit||'')||(/^\d{4,6}$/.test(v));
+    if(/^\d{1,3},\d{3}$/.test(v)&&!/t/i.test(unit||''))v=v.replace(',','');v=v.replace(',','.');let n=parseFloat(v);if(kg||n>100)n=n/1000;return isFinite(n)&&n>0?n:null};
+  const wt=re=>{const m=t.match(re);return m?tn(m[1],m[2]):null};
+  let net=wt(/\bNet\b[^\n0-9]{0,18}\n?[^\n0-9]{0,6}(\d{1,3}[.,]\d{1,3}|\d{4,6})\s*(kg|t\b|ton\w*|tom\w*)?/i);
+  if(net==null){const g=wt(/\bGross\b[^\n0-9]{0,18}\n?[^\n0-9]{0,6}(\d{1,3}[.,]\d{1,3}|\d{4,6})\s*(kg|t\b|ton\w*|tom\w*)?/i),ta=wt(/\bTare\b[^\n0-9]{0,18}\n?[^\n0-9]{0,6}(\d{1,3}[.,]\d{1,3}|\d{4,6})\s*(kg|t\b|ton\w*|tom\w*)?/i);if(g!=null&&ta!=null&&g>ta)net=g-ta}
+  if(net!=null)out.tonnes=String(Math.round(net*1000)/1000).replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'');
+  /* the truck: "Rego: 123ABC" / "Rego No ABC 123" / "Truck Rego XX12YY": the whole plate, spaces dropped */
+  /* (stays on its own line, so an empty "Trailer Rego:" never picks up the next line; a space joins "ABC 123" but not "XB30XX Net") */
+  const rg=t.match(/R[e3]g(?:[o0c]|istration)?\.?[ \t]*(?:No\.?|Number)?[ \t]*[:.,\-]?[ \t]*([A-Z0-9]{2,8})(?:[ \-]([A-Z0-9]{2,4})\b)?/i);
+  if(rg){let v=(rg[1]+(rg[2]&&rg[1].length<=4&&rg[1].length+rg[2].length<=8?rg[2]:'')).toUpperCase();
+    const m=v.match(/^([A-Z]{2,3})([A-Z0-9]{2,4})$/);if(m)v=m[1]+m[2].replace(/O/g,'0').replace(/[IL]/g,'1');
+    if(v.length>=4)out.rego=v.slice(0,9)}
   const pr=t.match(/Product\s*[:.,]?[^\n\-–]*[\-–]\s*([A-Z0-9][A-Z0-9/]{3,})/i)||t.match(/Product\s*[:.,]?\s*([A-Z]{2}\d[A-Z0-9/]{2,})/i);if(pr)out.product=pr[1].replace(/^4C/,'AC');
   const ld=t.match(/Load\s*No\s*[:.,]?\s*(\d{1,5})/i);if(ld)out.load=String(+ld[1]);
   return out}
