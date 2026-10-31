@@ -848,7 +848,7 @@ function packLanes(items){
 }
 
 /* ---------- board ---------- */
-function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,onRename,onReorder,onExport,collapsed,toggleSection,notifPrefs,only,headLabel}){
+function Board({data,days,view,narrow,tall=narrow,readOnly,onCreate,onEdit,onMove,onResize,onRename,onReorder,onExport,collapsed,toggleSection,notifPrefs,only,headLabel}){
   /* ---- drag to reorder sections and rows (by their grip handles) ---- */
   const boxRef=React.useRef(null);
   const [reo,setReo]=useState(null);
@@ -893,8 +893,8 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
   const N=days.length;
   const colMin=view===3?54:view===7?(narrow?64:120):view===14?68:view===60?26:40;
   const nameW=narrow?(readOnly?104:118):view===7?210:180;
-  /* phones: taller bars so the job's name wraps onto a few lines and can be read */
-  const LANE=narrow?58:32,BAR_H=narrow?54:28;
+  /* phones (upright or sideways): taller bars so the job's name wraps onto a few lines and can be read */
+  const LANE=tall?58:32,BAR_H=tall?54:28;
   const rangeStart=days[0];
   const todayIdx=diffDays(rangeStart,TODAY);
   const [sel,setSel]=useState(null);
@@ -1023,9 +1023,9 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
           const dragging=preview&&preview.id===it.b.id;
           const jobDone=(it.b.kind==='job'||it.b.kind==='onjob'||v)&&!!(data.jobs.find(j=>j.id===it.b.jobId)||{}).completed;
           return html`<div key=${it.b.id} class=${'blk'+(dragging?' dragging':'')+(pend?' blk-pending':'')+(jobDone?' blk-done':'')} data-done=${jobDone?'1':null} role="button" tabindex="0" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
-            style=${{...blockStyle(it.b,data),top:10+it.lane*LANE,...(narrow?{height:BAR_H,flexDirection:'column',alignItems:'stretch',justifyContent:'center',gap:1,padding:'2px 4px',whiteSpace:'normal'}:{}),left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
+            style=${{...blockStyle(it.b,data),top:10+it.lane*LANE,...(tall?{height:BAR_H,flexDirection:'column',alignItems:'stretch',justifyContent:'center',gap:1,padding:'2px 4px',whiteSpace:'normal'}:{}),left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
               borderTopLeftRadius:it.cutL?0:6,borderBottomLeftRadius:it.cutL?0:6,borderTopRightRadius:it.cutR?0:6,borderBottomRightRadius:it.cutR?0:6,
-              ...(narrow?{}:{justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined})}}
+              ...(tall?{}:{justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined})}}
             title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.crewSize?`\n${it.b.crewSize} man crew`:''}${it.b.kind==='job'&&it.b.inductionReq?(it.b.inductionDone?'\nSite induction: paperwork sent':'\nSite induction required: paperwork not sent'):''}${it.b.kind==='job'&&!it.b.sapEntered?'\nNot entered into SAP':''}${it.b.kind==='job'&&it.b.creditIssue?'\nCredit issue':''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
             onPointerDown=${e=>v||pend?e.stopPropagation():startDrag(e,it.b)}
             onClick=${v?()=>onEdit(it.b.parent):pend?()=>onEdit(it.b):undefined}
@@ -1034,7 +1034,7 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
             ${(it.b.kind==='job'||it.b.kind==='onjob')&&days.slice(it.s,it.e+1).map((d,i)=>{const src=it.b.kind==='onjob'?it.b.parent:it.b;
                 const off=!worksOn(it.b,d),cov=!off&&!it.b.cover&&coverOf(src,iso(d));if(!off&&!cov)return null;
                 return html`<span key=${'w'+i} class=${'wkoff'+(cov?' cov':'')} aria-hidden="true" style=${{left:`${i/span*100}%`,width:`${100/span}%`}}></span>`})}
-            <span class=${narrow?'blk-icons':'contents'}>
+            <span class=${tall?'blk-icons':'contents'}>
             ${it.cutL&&html`<span aria-hidden="true">‹</span>`}
             ${night&&html`<span class="shrink-0 inline-flex" title="Night works">${Icon.moon}</span>`}
             ${(src=>src&&src.kind==='job'&&html`
@@ -1047,13 +1047,13 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
             ${!v&&quoteFresh.has(it.b.id)&&html`<span class="shrink-0 w-2 h-2 rounded-full" style=${{background:'var(--accent)',boxShadow:'0 0 0 2px var(--surface)'}} title="Quote number changed in the last 48 hours"></span>`}
             ${v&&!compact&&!it.b.cover&&html`<span class="shrink-0 inline-flex opacity-80">${Icon.pin}</span>`}
             </span>
-            ${narrow
+            ${tall
               ?(sl=>html`<span class="blk-m"><span class="font-semibold">${sl[0]}</span>${sl[1]&&html` <span class="opacity-80">${sl[1]}</span>`}</span>`)(shortLabel(it.b))
               :compact
               ?(sl=>html`<span class="flex flex-col min-w-0 max-w-full leading-[1.15] text-center"><span class="t text-[10px] font-semibold">${sl[0]}</span>${sl[1]&&html`<span class="t text-[9.5px] opacity-80">${sl[1]}</span>`}</span>`)(shortLabel(it.b))
               :html`<span class="t">${title}</span>`}
-            ${!narrow&&!compact&&span>=2&&view===7&&html`<span class="ml-auto mono text-[10.5px] opacity-70 shrink-0">${span}d</span>`}
-            ${!narrow&&it.cutR&&html`<span aria-hidden="true" class=${compact?'':'ml-auto'}>›</span>`}
+            ${!tall&&!compact&&span>=2&&view===7&&html`<span class="ml-auto mono text-[10.5px] opacity-70 shrink-0">${span}d</span>`}
+            ${!tall&&it.cutR&&html`<span aria-hidden="true" class=${compact?'':'ml-auto'}>›</span>`}
             ${!v&&!pend&&!readOnly&&!it.cutL&&html`<span class="blk-edge blk-edge-l" aria-hidden="true" title="Drag to change the start date" onPointerDown=${e=>startDrag(e,it.b,'start')} onClick=${e=>e.stopPropagation()}></span>`}
             ${!v&&!pend&&!readOnly&&!it.cutR&&html`<span class="blk-edge blk-edge-r" aria-hidden="true" title="Drag to extend or shorten" onPointerDown=${e=>startDrag(e,it.b,'end')} onClick=${e=>e.stopPropagation()}></span>`}
           </div>`;})}
@@ -5657,16 +5657,19 @@ function App({boot,live}){
   /* phones: a narrower layout, and a 3-day view that starts today */
   const [narrow,setNarrow]=useState(()=>{try{return window.matchMedia('(max-width: 639px)').matches}catch(e){return false}});
   useEffect(()=>{let m;try{m=window.matchMedia('(max-width: 639px)')}catch(e){return}const h=()=>setNarrow(m.matches);try{m.addEventListener('change',h)}catch(e){m.addListener&&m.addListener(h)}return()=>{try{m.removeEventListener('change',h)}catch(e){}}},[]);
+  /* any phone, upright or turned sideways: tall schedule bars, and bookings open as a read-only overview (except for the administrator) */
+  const [phone,setPhone]=useState(()=>{try{return window.matchMedia('(max-width: 639px), (pointer: coarse) and (max-height: 520px)').matches}catch(e){return false}});
+  useEffect(()=>{let m;try{m=window.matchMedia('(max-width: 639px), (pointer: coarse) and (max-height: 520px)')}catch(e){return}const h=()=>setPhone(m.matches);try{m.addEventListener('change',h)}catch(e){m.addListener&&m.addListener(h)}return()=>{try{m.removeEventListener('change',h)}catch(e){}}},[]);
   const todayNoon=()=>{const d=new Date(TODAY);d.setHours(12,0,0,0);return d};
-  /* a phone opens the schedule on the week when upright and on 30 days when turned sideways (and switches when it's turned) */
+  /* a phone opens the schedule on the week, upright or turned sideways (and goes back to the week when it's turned) */
   const phoneWay=()=>{try{if(window.matchMedia('(max-width: 639px)').matches)return 'up';
     if(window.matchMedia('(pointer: coarse) and (orientation: landscape) and (max-height: 520px)').matches)return 'side'}catch(e){}return ''};
-  const [view,setView]=useState(()=>{const pw=phoneWay();if(pw==='up')return 7;if(pw==='side')return 30;try{const v=Number(localStorage.getItem(KEY+':view'));return [7,14,30,60].includes(v)?v:7}catch(e){return 7}});
+  const [view,setView]=useState(()=>{const pw=phoneWay();if(pw==='up'||pw==='side')return 7;try{const v=Number(localStorage.getItem(KEY+':view'));return [7,14,30,60].includes(v)?v:7}catch(e){return 7}});
   const [anchor,setAnchor]=useState(()=>view===3?todayNoon():mondayOf(TODAY));
   useEffect(()=>{if(narrow&&view!==7||view===3){setView(7);setAnchor(mondayOf(TODAY))}},[narrow]);   /* upright phone: the week only (no 3-day view) */
   useEffect(()=>{let ms;try{ms=[window.matchMedia('(max-width: 639px)'),window.matchMedia('(pointer: coarse) and (orientation: landscape) and (max-height: 520px)')]}catch(e){return}
     let last=phoneWay();
-    const h=()=>{const pw=phoneWay();if(pw===last)return;last=pw;if(pw==='up'){setView(7);setAnchor(mondayOf(TODAY))}else if(pw==='side'){setView(30);setAnchor(mondayOf(TODAY))}};
+    const h=()=>{const pw=phoneWay();if(pw===last)return;last=pw;if(pw==='up'){setView(7);setAnchor(mondayOf(TODAY))}else if(pw==='side'){setView(7);setAnchor(mondayOf(TODAY))}};
     ms.forEach(m=>{try{m.addEventListener('change',h)}catch(e){m.addListener&&m.addListener(h)}});
     return()=>ms.forEach(m=>{try{m.removeEventListener('change',h)}catch(e){}})},[]);
   const [editing,setEditing]=useState(null);
@@ -5904,7 +5907,7 @@ function App({boot,live}){
       </section>`}
 
       <section class="panel flex-1 min-h-[320px] flex flex-col overflow-hidden">
-        <${Board} data=${screen==='staff'&&LR.list.some(r=>r.status==='pending')?{...data,blocks:[...data.blocks,...LR.list.filter(r=>r.status==='pending'&&data.resources.some(x=>x.id===r.person_id)).map(r=>({id:'lr-'+r.id,resourceId:r.person_id,kind:r.kind,start:r.start_date,end:r.end_date,title:'Waiting for approval'+(r.note?' · '+r.note:''),pending:true,req:r}))]}:data} days=${days} view=${view} narrow=${narrow} readOnly=${!(live.canEdit&&can(screen==='staff'?'staff.leave':fleetCal?'fleet.calendar':'schedule',2))} onCreate=${screen==='staff'&&leaveReqOnly?b=>setLeaveDlg({personId:b.resourceId,start:b.start,end:b.end}):onCreate} onEdit=${b=>b.pending?setLeaveReq(b.req):setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
+        <${Board} data=${screen==='staff'&&LR.list.some(r=>r.status==='pending')?{...data,blocks:[...data.blocks,...LR.list.filter(r=>r.status==='pending'&&data.resources.some(x=>x.id===r.person_id)).map(r=>({id:'lr-'+r.id,resourceId:r.person_id,kind:r.kind,start:r.start_date,end:r.end_date,title:'Waiting for approval'+(r.note?' · '+r.note:''),pending:true,req:r}))]}:data} days=${days} view=${view} narrow=${narrow} tall=${phone} readOnly=${!(live.canEdit&&can(screen==='staff'?'staff.leave':fleetCal?'fleet.calendar':'schedule',2))} onCreate=${screen==='staff'&&leaveReqOnly?b=>setLeaveDlg({personId:b.resourceId,start:b.start,end:b.end}):onCreate} onEdit=${b=>b.pending?setLeaveReq(b.req):setEditing(b)} onMove=${onMove} onResize=${onResize} onRename=${onRename} onReorder=${onReorder} onExport=${wks=>setExporting(wks)} notifPrefs=${notifPrefs} only=${SCR.only} headLabel=${SCR.head}
           collapsed=${collapsed} toggleSection=${t=>setCollapsed(c=>({...c,[t]:!c[t]}))}/>
         <div class="border-t border-line px-4 py-2.5 hidden sm:flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
           ${legend.filter(([g])=>SCR.legend.includes(g)).map(([g,ks])=>html`<span key=${g} class="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -5929,7 +5932,7 @@ function App({boot,live}){
     ${exporting&&html`<${ExportDialog} data=${data} onClose=${()=>setExporting(null)} notify=${setToast}/>`}
     ${subWorksOpen&&html`<${SubWorksDialog} data=${data} notify=${setToast} onClose=${()=>setSubWorksOpen(false)}/>`}
     ${suggest&&html`<${SuggestDialog} setData=${setData} notify=${setToast} onClose=${()=>setSuggest(false)}/>`}
-    ${editing&&narrow&&live.role!=='admin'&&editing.id&&editing.kind==='job'&&!editing.pending&&data.blocks.some(x=>x.id===editing.id)?html`<${BookingOverview} key=${'ov-'+editing.id} b=${data.blocks.find(x=>x.id===editing.id)} data=${data} onClose=${()=>setEditing(null)}/>`:editing&&html`<${Editor} readOnly=${!canChangeBlock(editing)} key=${(editing.id||'new')+':'+editing.resourceId+':'+editing.start} initial=${editing} data=${data} resTypes=${screen==='staff'?['person']:fleetCal?['machine']:screen==='schedule'?((data.resources.find(r=>r.id===editing.resourceId)||{}).type==='aplant'?['aplant']:['crew']):null} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)} notify=${setToast}
+    ${editing&&phone&&live.role!=='admin'&&editing.id&&editing.kind==='job'&&!editing.pending&&data.blocks.some(x=>x.id===editing.id)?html`<${BookingOverview} key=${'ov-'+editing.id} b=${data.blocks.find(x=>x.id===editing.id)} data=${data} onClose=${()=>setEditing(null)}/>`:editing&&html`<${Editor} readOnly=${!canChangeBlock(editing)} key=${(editing.id||'new')+':'+editing.resourceId+':'+editing.start} initial=${editing} data=${data} resTypes=${screen==='staff'?['person']:fleetCal?['machine']:screen==='schedule'?((data.resources.find(r=>r.id===editing.resourceId)||{}).type==='aplant'?['aplant']:['crew']):null} onSave=${onSave} onDelete=${onDelete} onClose=${()=>setEditing(null)} notify=${setToast}
       onOpenPlan=${id=>{try{localStorage.setItem(KEY+':plan',id)}catch(e){}setEditing(null);goScreen('planning')}}/>`}
     ${toast&&html`<div class="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-[13px] font-medium pop" role="status"
        style=${{bottom:'calc(20px + env(safe-area-inset-bottom, 0px))',background:'var(--ink)',color:'var(--surface)'}}>${toast}</div>`}
