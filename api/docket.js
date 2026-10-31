@@ -100,7 +100,7 @@ module.exports = async (req, res) => {
     tonnes: isFinite(tonnes) && tonnes > 0 && tonnes < 100 ? String(Math.round(tonnes * 1000) / 1000) : '',
     rego: String(x.rego || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 9),
     product: String(x.product || '').trim().slice(0, 20),
-    load: String(x.load || '').replace(/[^0-9]/g, '').slice(0, 5),
+    load: (d => d ? String(+d) : '')(String(x.load || '').replace(/[^0-9]/g, '').slice(0, 6)),
     unsure: Array.isArray(x.unsure) ? x.unsure : [],
     note: String(x.note || '').slice(0, 200),
     model: MODEL,
