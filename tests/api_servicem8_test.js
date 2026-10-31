@@ -36,6 +36,19 @@ function pureChecks() {
   ok(r.patch.status === 'completed' && r.patch.completion_notes === 'Replaced hose. Hours: 4530', 'Completed → Completed, his Work Done as the completion notes');
   ok(r.patch.parts.length === 1 && r.patch.parts[0].part === 'Hydraulic hose' && r.patch.parts[0].qty === '2', 'his materials → parts (deleted lines left out, "2.0000" → "2")');
   ok(r.meters.length === 1 && r.meters[0].value === 4530 && !r.service, 'a repair: the hours become a meter reading');
+  {
+    const sent = 'FraserFlow WO 1042 · Breakdown · High priority\nMachine: R12\n\nHose burst\n\nLeft boom';
+    r = mapJob({ job: { active: 1, status: 'Completed', work_done_description: '', job_description: sent + '\nAlso found worn pins, replaced\nHours: 4600' },
+      notes: [{ active: 1, note: 'Ordered hose from Pirtek', create_date: '2026-11-03 08:10:00' }, { active: 0, note: 'deleted' }, { active: 1, note: 'Fitted hose, tested OK', create_date: '2026-11-04 13:00:00' }],
+      sent, activities: [], materials: [], wo, cfg, profile: { meter_type: 'hours' }, latest: { hours: 4500 } });
+    ok(/Notes:\n- 2026-11-03 08:10: Ordered hose from Pirtek\n- 2026-11-04 13:00: Fitted hose, tested OK/.test(r.patch.completion_notes) && !/deleted/.test(r.patch.completion_notes),
+      'completed: his job notes come through, oldest first (deleted ones left out)');
+    ok(/From the job description:\nAlso found worn pins, replaced/.test(r.patch.completion_notes) && !/Left boom/.test(r.patch.completion_notes), 'what he added to the job description comes through, not FraserFlow’s own text');
+    ok(r.meters.length === 1 && r.meters[0].value === 4600, 'a reading in his notes or description is picked up too');
+    r = mapJob({ job: { active: 1, status: 'Completed', work_done_description: 'Replaced hose' }, notes: [], sent, activities: [], materials: [],
+      wo: { ...wo, status: 'completed', completion_notes: 'Completed in ServiceM8 (job 501)' }, cfg, profile: { meter_type: 'hours' }, latest: {} });
+    ok(r.patch.completion_notes === 'Replaced hose' && !r.patch.status, 'a work order completed before this fix gets his notes on the next refresh');
+  }
   r = mapJob({ job: { active: 1, status: 'Completed', work_done_description: 'Hours: 12' }, activities: [], materials: [], wo, cfg, profile: { meter_type: 'hours' }, latest: { hours: 4500 } });
   ok(r.meters.length === 0, 'a reading lower than the machine’s last one is ignored');
   r = mapJob({ job: { active: 1, status: 'Completed', work_done_description: '', completion_date: '2026-11-04 14:00:00' }, activities: [], materials: [], wo: { ...wo, wo_type: 'service' }, cfg,

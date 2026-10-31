@@ -31,7 +31,7 @@ const crypto = require('crypto');
 const SM8 = 'https://api.servicem8.com/api_1.0';
 const SM8_HOOKS = 'https://api.servicem8.com/webhook_subscriptions';
 const OAUTH = 'https://go.servicem8.com/oauth';
-const SCOPES = 'read_jobs create_jobs manage_jobs read_schedule read_job_materials read_job_queues read_customers manage_customers publish_job_notes';
+const SCOPES = 'read_jobs create_jobs manage_jobs read_schedule read_job_materials read_job_queues read_customers manage_customers read_job_notes publish_job_notes';
 const HOOK_FIELDS = ['status', 'queue_uuid', 'work_done_description', 'active', 'job_is_scheduled_until_stamp', 'total_invoice_amount'];
 const HOOK_FIELDS_MIN = ['status', 'queue_uuid', 'work_done_description', 'active'];
 const ACTIVITY_FIELDS = ['start_date', 'end_date', 'active', 'activity_was_scheduled', 'activity_was_recorded'];   // bookings and time on a job
@@ -175,11 +175,26 @@ function parseMeters(text, meterType) {
   return out.filter(x => isFinite(x.value) && x.value > 0);
 }
 
+const PLACEHOLDER = /^Completed in ServiceM8\b/;
+function completionText({ job, notes, sent }) {
+  const parts = [];
+  const done = String(job.work_done_description || '').trim();
+  if (done) parts.push(done);
+  const ns = (notes || []).filter(n => yes(n.active == null ? 1 : n.active) && String(n.note || '').trim() && !/^Cancelled in FraserFlow/.test(String(n.note).trim()))
+    .sort((a, b) => String(a.create_date || a.edit_date || '').localeCompare(String(b.create_date || b.edit_date || '')));
+  if (ns.length) parts.push('Notes:\n' + ns.map(n => { const d = String(n.create_date || n.edit_date || '').slice(0, 16); return `- ${d ? d + ': ' : ''}${String(n.note).trim()}`; }).join('\n'));
+  // lines he added to (or changed in) the job description; FraserFlow's own lines are left out
+  const ours = new Set(String(sent || '').split('\n').map(l => l.trim()).filter(Boolean));
+  const extra = String(job.job_description || '').split('\n').map(l => l.trim()).filter(l => l && !ours.has(l) && !/^FraserFlow WO \d+/.test(l) && !/^When it's done, please put the meter reading/.test(l));
+  if (extra.length) parts.push('From the job description:\n' + extra.join('\n'));
+  return parts.join('\n\n');
+}
+
 const qtyTxt = v => { const n = Number(v); return isFinite(n) && String(v).trim() !== '' ? String(+n.toFixed(3)) : String(v || '1').trim() || '1'; };
 
 // A ServiceM8 job (with its bookings and materials) → what should change on the work order.
 // Returns { patch, service, meters, job } for servicem8_apply, or null when nothing should change.
-function mapJob({ job, activities, materials, wo, cfg, profile, latest, prev }) {
+function mapJob({ job, activities, materials, wo, cfg, profile, latest, prev, notes, sent }) {
   const st = String(job.status || '');
   const was = prev || {};   // what the job looked like last time: only changes made in ServiceM8 move the work order
   const jobInfo = { job_no: job.generated_job_id != null ? String(job.generated_job_id) : null, sm8_status: st || null, queue_uuid: job.queue_uuid || '' };
@@ -201,10 +216,12 @@ function mapJob({ job, activities, materials, wo, cfg, profile, latest, prev }) 
   let next = wo.status, service = null, meters = null;
   if (st === 'Completed') {
     next = 'completed';
+    const text = completionText({ job, notes, sent });
+    if (wo.status === 'completed' && text && PLACEHOLDER.test(wo.completion_notes || '')) patch.completion_notes = text;   // fill in what was missed before
     if (wo.status !== 'completed') {
-      patch.completion_notes = String(job.work_done_description || '').trim() || `Completed in ServiceM8${jobInfo.job_no ? ' (job ' + jobInfo.job_no + ')' : ''}`;
+      patch.completion_notes = text || `Completed in ServiceM8${jobInfo.job_no ? ' (job ' + jobInfo.job_no + ')' : ''}`;
       const cur = latest || {};
-      meters = parseMeters(job.work_done_description, profile && profile.meter_type).filter(x => cur[x.kind] == null || x.value >= cur[x.kind]);
+      meters = parseMeters(text, profile && profile.meter_type).filter(x => cur[x.kind] == null || x.value >= cur[x.kind]);
       if (wo.wo_type === 'service') {
         const mv = Object.fromEntries(meters.map(x => [x.kind, x.value]));
         service = { done_on: day(job.completion_date) || todayBne(), hours: mv.hours ?? null, km: mv.km ?? null, mechanic: cfg.contractor_name || 'ServiceM8' };
@@ -311,7 +328,12 @@ async function pullOne(D, S, cfg, link, wo, ctx) {
   const f = filt(`job_uuid eq '${link.job_uuid}' and active eq 1`);
   const [activities, materials] = yes(job.active) ? await Promise.all([S.get(`/jobactivity.json?${f}`), S.get(`/jobmaterial.json?${f}`)]) : [[], []];
   ctx = ctx || await jobContext(D, wo);
-  const m = mapJob({ job, activities, materials, wo, cfg, profile: ctx.profile, latest: ctx.latest, prev: link });
+  // his notes, when they're needed: the job has just been completed (or was completed without them)
+  let notes = null;
+  if (yes(job.active) && job.status === 'Completed' && (wo.status !== 'completed' || PLACEHOLDER.test(wo.completion_notes || ''))) {
+    notes = await S.get(`/note.json?${filt(`related_object_uuid eq '${link.job_uuid}' and active eq 1`)}`).catch(() => null);   // needs read_job_notes
+  }
+  const m = mapJob({ job, activities, materials, wo, cfg, profile: ctx.profile, latest: ctx.latest, prev: link, notes, sent: describeJob({ wo, ...ctx }) });
   return D.rpc('servicem8_apply', { p_wo: wo.id, p_patch: m.patch || {}, p_service: m.service, p_meters: m.meters || [], p_job: m.job });
 }
 
