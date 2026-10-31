@@ -292,6 +292,16 @@ function Sm8Settings({ctx,onClose}){
     </div><//>`;
 }
 
+/* delete a (finished) work order and what it put in the machine's history: the service it recorded and the hours/km
+   reading taken when it was completed. Returns false if the database didn't let it go. */
+async function deleteWorkOrder(sb,wo){
+  /* the service records it made (the link is cleared when the work order goes, so find them first) */
+  const {data:svc,error:e0}=await sb.from('service_records').select('id').eq('work_order_id',wo.id);if(e0)throw e0;
+  const {data:gone,error}=await sb.from('work_orders').delete().eq('id',wo.id).select('id');if(error)throw error;if(!gone||!gone.length)return false;
+  if(svc&&svc.length){const r1=await sb.from('service_records').delete().in('id',svc.map(x=>x.id));if(r1.error)throw r1.error}
+  const r2=await sb.from('meter_readings').delete().eq('asset_id',wo.asset_id).eq('source','work_order').eq('note',woNo(wo));if(r2.error)throw r2.error;
+  return true}
+
 /* ---------- dialogs ---------- */
 function ServiceDialog({ctx,a,plan,baseline,onClose}){
   const {sb,notify,reload,staff}=ctx;const px=plan&&!baseline&&a.plans.find(y=>y.plan.id===plan.id);const stg=px&&px.stage;
@@ -418,8 +428,8 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
   const cur=isNew?null:wo.status;
   /* administrators and mechanics can delete a finished work order (its service record, readings, defects and files stay) */
   const [delAsk,setDelAsk]=useState(false);
-  const delWo=async()=>{setErr('');setBusy(true);try{const {data:gone,error}=await sb.from('work_orders').delete().eq('id',wo.id).select('id');if(error)throw error;
-      if(!gone||!gone.length)throw new Error('It wasn’t deleted: only completed or closed work orders, by an administrator or mechanic.');
+  const delWo=async()=>{setErr('');setBusy(true);try{const ok=await deleteWorkOrder(sb,wo);
+      if(!ok)throw new Error('It wasn’t deleted: only completed or closed work orders, by an administrator or mechanic.');
       notify(`${woNo(wo)} deleted`);reload();onClose()}catch(e){setErr(errMsg(e));setDelAsk(false)}finally{setBusy(false)}};
   const acts=isNew?[]:[
     ...(['open','scheduled','awaiting_parts'].includes(cur)?[['in_progress',cur==='awaiting_parts'?'Resume work':'Start work']]:[]),
@@ -618,7 +628,7 @@ function AssetPanel({ctx,a,onClose,open,behind}){
   const down=data.blocks.filter(b=>b.resourceId===a.m.id&&KINDS[b.kind]&&KINDS[b.kind].for==='machine'&&!b.fromMaintenance);
   const hist=[
     ...recs.map(r=>({del:{table:'service_records',id:r.id,what:'this service'},ts:r.done_on===localDay(r.created_at)?r.created_at:r.done_on+'T12:00:00',ic:'svc',t:`${r.baseline?'Last service before FraserFlow: ':''}${r.service_type}`,d:[r.hours!=null&&`${fmtN(+r.hours)} h`,r.km!=null&&`${fmtN(+r.km)} km`,r.mechanic,r.work_done,(r.parts||[]).length&&'Parts: '+partsTxt(r.parts),r.notes].filter(Boolean).join(' · ')})),
-    ...a.wos.flatMap(w=>[{del:['completed','closed'].includes(w.status)?{table:'work_orders',id:w.id,what:`${woNo(w)} (the whole work order)`}:null,ts:w.created_at,ic:'wo',t:`${woNo(w)} raised: ${w.title}`,d:`${WO_TYPE[w.wo_type]} · ${PRI[w.priority]}${w.wo_type==='breakdown'&&w.safe_to_operate===false?' · not safe to operate':''}`,wo:w},
+    ...a.wos.flatMap(w=>[{del:['completed','closed'].includes(w.status)?{table:'work_orders',id:w.id,what:`${woNo(w)} and everything it added to this history`}:null,ts:w.created_at,ic:'wo',t:`${woNo(w)} raised: ${w.title}`,d:`${WO_TYPE[w.wo_type]} · ${PRI[w.priority]}${w.wo_type==='breakdown'&&w.safe_to_operate===false?' · not safe to operate':''}`,wo:w},
       ...(w.completed_at?[{ts:w.completed_at,ic:'done',t:`${woNo(w)} completed`,d:[w.completion_notes,(w.parts||[]).length&&'Parts: '+partsTxt(w.parts)].filter(Boolean).join(' · '),wo:w}]:[]),
       ...(w.verified_at?[{ts:w.verified_at,ic:'ok',t:`${woNo(w)} verified and closed`,d:'',wo:w}]:[])]),
     ...reads.map(r=>({del:{table:'meter_readings',id:r.id,what:'this reading'},ts:r.read_at,ic:'meter',t:`${r.kind==='hours'?'Hours':'Km'} reading ${fmtN(+r.value)}${r.source==='correction'?' (correction)':r.source==='replacement'?' (new meter)':''}`,d:r.note||''})),
@@ -632,6 +642,7 @@ function AssetPanel({ctx,a,onClose,open,behind}){
   const isAdmin=FF_PERM.role==='admin';const [delAsk,setDelAsk]=useState(null);const [delBusy,setDelBusy]=useState(false);
   const delItem=async h=>{const x=h.del;setDelBusy(true);try{
       if(x.block){ctx.setData(d=>({...d,blocks:d.blocks.filter(b=>b.id!==x.block)}))}
+      else if(x.table==='work_orders'){if(!await deleteWorkOrder(ctx.sb,h.wo))throw new Error('Not removed: only an administrator can delete it, and only once it’s completed or closed.')}
       else{const {data:gone,error}=await ctx.sb.from(x.table).delete().eq('id',x.id).select('id');if(error)throw error;if(!gone||!gone.length)throw new Error('Not removed: only an administrator can delete it'+(x.table==='work_orders'?', and only once it’s completed or closed':'')+'.')}
       ctx.notify('Removed from the history');setDelAsk(null);ctx.reload()}catch(e){ctx.notify(errMsg(e))}finally{setDelBusy(false)}};
   const IC={svc:'hsl(145 55% 36%)',wo:'var(--accent)',done:'hsl(212 75% 48%)',ok:'hsl(145 55% 36%)',meter:'var(--faint)',down:'hsl(252 60% 55%)',ps:'hsl(30 90% 46%)',unsafe:'hsl(0 72% 47%)'};
