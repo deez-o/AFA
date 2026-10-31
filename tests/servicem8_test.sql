@@ -100,6 +100,13 @@ reset role;
 select pg_temp.ok((pg_temp.wo('00000000-0000-0000-0000-00000000d002')).start_date = current_date + 2 and (pg_temp.wo('00000000-0000-0000-0000-00000000d002')).assigned_to = 'Test Mechanical',
   'with his dates, and the contractor as Assigned');
 select pg_temp.ok(exists (select 1 from public.items where kind = 'block' and id = 'wo-00000000-0000-0000-0000-00000000d002'), 'his booking shows on the schedule board as the machine’s downtime');
+select pg_temp.as_server();
+set local role service_role;
+select public.servicem8_apply('00000000-0000-0000-0000-00000000d002', '{}', null, '[]',
+  '{"description":"Also check pins","notes":[{"at":"2026-11-03 08:10","text":"Ordered hose"}]}');
+reset role;
+select pg_temp.ok((pg_temp.link('00000000-0000-0000-0000-00000000d002')).sm8_description = 'Also check pins' and (pg_temp.link('00000000-0000-0000-0000-00000000d002')).sm8_notes->0->>'text' = 'Ordered hose',
+  'his description and notes are kept, live, for the work order');
 select pg_temp.ok((pg_temp.link('00000000-0000-0000-0000-00000000d002')).job_no = '501' and not (pg_temp.link('00000000-0000-0000-0000-00000000d002')).dirty,
   'his job number is kept, and a change from ServiceM8 isn’t sent back to it');
 
