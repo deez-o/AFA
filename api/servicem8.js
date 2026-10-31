@@ -394,7 +394,8 @@ async function pullOne(D, S, cfg, link, wo, ctx) {
   // his photos and PDFs (a problem here doesn't stop the rest of the update; it is tried again next time)
   if (yes(job.active) && !['closed', 'cancelled'].includes(wo.status) && env) {
     let problem = null;
-    try { await syncAttachments(D, S, env, http, wo, link); } catch (e) { problem = errText(e); }
+    try { const r = await syncAttachments(D, S, env, http, wo, link); if (r.skipped.length) problem = 'Not copied (only JPG, PNG, WebP or PDF, up to 15 MB): ' + r.skipped.join(', '); }
+    catch (e) { problem = errText(e); }
     if (problem !== (link.files_error || null)) await D.patch(`servicem8_jobs?work_order_id=eq.${wo.id}`, { files_error: problem }).catch(() => null);   // shown on the work order
   }
   return result;
@@ -405,8 +406,10 @@ const FILE_TYPES = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image
 async function syncAttachments(D, S, env, http, wo, link, limit = 8) {
   const list = await S.get(`/attachment.json?${filt(`related_object_uuid eq '${link.job_uuid}' and active eq 1`)}`);
   const extOf = a => { const t = String(a.file_type || '').trim().toLowerCase(); const e = t ? (t.startsWith('.') ? t : '.' + t) : ((String(a.attachment_name || '').match(/\.[a-z0-9]+$/i) || [''])[0].toLowerCase()); return e; };
-  const want = (list || []).filter(a => safeId(a.uuid) && FILE_TYPES[extOf(a)]);
-  if (!want.length) return 0;
+  const all = (list || []).filter(a => safeId(a.uuid));
+  const want = all.filter(a => FILE_TYPES[extOf(a)]);
+  const skipped = all.filter(a => !FILE_TYPES[extOf(a)]).map(a => `${a.attachment_name || 'a file'}${extOf(a) && !String(a.attachment_name || '').toLowerCase().endsWith(extOf(a)) ? ' (' + extOf(a) + ')' : ''}`);
+  if (!want.length) return { n: 0, skipped };
   const have = new Set(((await D.get(`maintenance_files?sm8_uuid=in.(${want.map(a => q(a.uuid)).join(',')})&select=sm8_uuid`)) || []).map(f => f.sm8_uuid));
   const storage = (env.SUPABASE_URL || '').replace(/\/$/, '') + '/storage/v1/object/maintenance/';
   let n = 0;
@@ -416,7 +419,7 @@ async function syncAttachments(D, S, env, http, wo, link, limit = 8) {
     try { data = await S.bytes(`/attachment/${a.uuid}.file`); }
     catch (e) { data = await S.bytes(`/attachment/${a.uuid}/download`); }
     if (!data || !data.length) throw new Error(`ServiceM8 sent an empty file for ${a.attachment_name || a.uuid}`);
-    if (data.length > 15 * 1024 * 1024) continue;   // the store takes files up to 15 MB
+    if (data.length > 15 * 1024 * 1024) { skipped.push(`${a.attachment_name || 'a file'} (over 15 MB)`); continue; }   // the store's limit
     const path = `assets/${wo.asset_id}/sm8/${a.uuid}${ext}`;
     const up = await http(storage + path.split('/').map(q).join('/'), { method: 'POST', body: data,
       headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + env.SUPABASE_SERVICE_ROLE_KEY, 'Content-Type': mime, 'x-upsert': 'true' } });
@@ -428,7 +431,7 @@ async function syncAttachments(D, S, env, http, wo, link, limit = 8) {
       path, mime, size: data.length, work_order_id: wo.id, sm8_uuid: a.uuid });
     n++;
   }
-  return n;
+  return { n, skipped };
 }
 
 // send what's waiting, pass on changes, and refresh the jobs not heard from for a while

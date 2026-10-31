@@ -197,11 +197,14 @@ function Sm8Panel({ctx,wo}){
         ${Array.isArray(l.sm8_notes)&&l.sm8_notes.length?l.sm8_notes.map((n,i)=>html`<div key=${i} class="text-[13px] break-words"><span class="text-[11.5px] text-muted mono">${n.at?n.at.slice(8,10)+'/'+n.at.slice(5,7)+' '+n.at.slice(11,16):''}</span> <span class="whitespace-pre-wrap">${n.text}</span></div>`)
           :html`<div class="text-[12.5px] text-muted">${Array.isArray(l.sm8_notes)?'No notes on the job yet.':'Notes show here once ServiceM8 is reconnected (Fleet › Work orders › ServiceM8).'}</div>`}</div>
     </div>`}
-    ${st==='sent'&&l.files_error&&html`<div class="text-[12px]" style=${{color:'var(--bad)'}}>His photos/documents couldn’t be copied: ${l.files_error}</div>`}
-    ${(()=>{const files=(db.maintenance_files||[]).filter(f=>f.work_order_id===wo.id);if(!files.length)return null;
+    ${(()=>{const files=(db.maintenance_files||[]).filter(f=>f.work_order_id===wo.id);if(!files.length&&st!=='sent')return null;
+      const oldDb=st==='sent'&&!('files_error' in l);   /* servicem8.sql hasn't been run again since photos were added */
       const openFile=async f=>{const w=window.open('','_blank');try{const o=window.FFP?await window.FFP.signedUrls(sb,[f.path]):{};if(o[f.path]){if(w)w.location=o[f.path];else location.href=o[f.path]}else{if(w)w.close();setErr('Couldn’t open that file.')}}catch(e){if(w)w.close();setErr(errMsg(e))}};
-      return html`<div id="wo-sm8-files" class="grid gap-1 pt-1"><span class="label">His photos and documents</span>
-        ${files.map(f=>html`<button key=${f.id} type="button" class="text-left text-[13px] hover:underline truncate" style=${{color:'var(--accent)'}} onClick=${()=>openFile(f)}>${f.name.replace(/^WO \d+ · /,'')}</button>`)}</div>`})()}
+      return html`<div id="wo-sm8-files" class="rounded-md border border-line bg-sunken p-2.5 grid gap-1 content-start"><span class="label">Photos and documents (from ServiceM8)</span>
+        ${files.map(f=>html`<button key=${f.id} type="button" class="text-left text-[13px] hover:underline truncate" style=${{color:'var(--accent)'}} onClick=${()=>openFile(f)}>${f.name.replace(/^WO \d+ · /,'')}</button>`)}
+        ${!files.length&&!oldDb&&!l.files_error&&html`<div class="text-[12.5px] text-muted">None yet. Photos (JPG, PNG) and PDFs he attaches to the job show here.</div>`}
+        ${oldDb&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>To bring his photos across, an administrator runs supabase/servicem8.sql again in Supabase → SQL Editor.</div>`}
+        ${l&&l.files_error&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${l.files_error}</div>`}</div>`})()}
     ${err&&html`<div class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
   </div>`;
 }

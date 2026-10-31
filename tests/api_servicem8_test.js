@@ -247,6 +247,7 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
     { uuid: '00000000-0000-0000-0000-0000000000d4', related_object: 'job', related_object_uuid: JOB_OTHER, attachment_name: 'Someone else', file_type: '.jpg', active: 1 }];
   r = await call({ token: 'tok-mech', body: { action: 'sync', wo: WO1 } });
   ok(r.statusCode === 200 && db.files.length === 2 && db.uploads.length === 2, 'his photo and PDF are copied in (a video is skipped)');
+  ok(/Not copied .*Clip \(\.mov\)/.test(db.links[0].files_error || ''), 'the skipped video is named on the work order, with why');
   const ph = db.files.find(f => f.sm8_uuid === '00000000-0000-0000-0000-0000000000d1'), pdf = db.files.find(f => f.sm8_uuid === '00000000-0000-0000-0000-0000000000d2');
   ok(ph && ph.kind === 'photo' && ph.mime === 'image/jpeg' && ph.name === 'WO 1042 · Burst hose.jpg' && ph.work_order_id === WO1 && ph.path === 'assets/m1/sm8/00000000-0000-0000-0000-0000000000d1.jpg'
     && pdf && pdf.kind === 'document' && pdf.name === 'WO 1042 · Pirtek invoice.pdf', 'they’re kept with the machine’s files, linked to the work order, named with the WO number');
@@ -265,7 +266,7 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   ok(r.statusCode === 200 && /work_order_id/.test(db.links[0].files_error || ''), 'when a photo can’t be copied, the reason shows on the work order (the rest of the update still happens)');
   db.filesBroken = false;
   r = await call({ token: 'tok-mech', body: { action: 'sync', wo: WO1 } });
-  ok(db.files.some(f => f.sm8_uuid === '00000000-0000-0000-0000-0000000000d6' && f.mime === 'image/jpeg') && db.links[0].files_error === null, 'a file type given without the dot ("jpeg") is copied, and the problem clears');
+  ok(db.files.some(f => f.sm8_uuid === '00000000-0000-0000-0000-0000000000d6' && f.mime === 'image/jpeg') && !/work_order_id/.test(db.links[0].files_error || ''), 'a file type given without the dot ("jpeg") is copied, and the problem clears');
 
   // a change made in FraserFlow
   db.links[0].sm8_status = 'Work Order'; db.jobs[link.job_uuid].status = 'Work Order';
