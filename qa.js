@@ -424,33 +424,37 @@ function QaScreen({data,live,notify}){
 
 /* ---------- every QA pack in one list (planners, superusers, administrators) ---------- */
 function AllPacks({sb,data,onOpen,onDay}){
-  const [rows,setRows]=useState(null);const [err,setErr]=useState('');const [q,setQ]=useState('');const [st,setSt]=useState('');
+  const [rows,setRows]=useState(null);const [err,setErr]=useState('');const [q,setQ]=useState('');const [st,setSt]=useState('');const [fc,setFc]=useState('');const [fj,setFj]=useState('');
   useEffect(()=>{let off=false;(async()=>{try{const {data:ps,error}=await sb.from('qa_packs').select('id,block_id,shift_date,status,label,submitted_at,submitted_name,job_id,crew_id,created_at,jsa,toolbox');if(error)throw error;if(!off)setRows(ps||[])}catch(x){if(!off){setErr(errMsg(x));setRows([])}}})();return()=>{off=true}},[]);
   const info=p=>{const b=data.blocks.find(x=>x.id===p.block_id);const j=data.jobs.find(x=>x.id===(p.job_id||(b&&b.jobId)));const crewId=p.crew_id||(b&&(coverOf(b,p.shift_date)||b.resourceId));const crew=data.resources.find(r=>r.id===crewId);
     const hd=(p.jsa||{}).head||{};return {b,j,crew,hd}};
   const all=(rows||[]).map(p=>({p,...info(p)}));
+  /* the crews and jobs that have packs, for the filters */
+  const uniq=(xs,key,lab)=>[...new Map(xs.filter(Boolean).map(x=>[key(x),lab(x)])).entries()].sort((a,b)=>a[1].localeCompare(b[1]));
+  const crewOpts=uniq(all.map(x=>x.crew),c=>c.id,c=>c.name),jobOpts=uniq(all.map(x=>x.j),j=>j.id,j=>jobLabel(j));
   const ql=q.trim().toLowerCase();
-  const shown=all.filter(x=>(!st||x.p.status===st)&&(!ql||[x.j&&jobLabel(x.j),x.j&&x.j.projectNo,x.j&&x.j.address,x.crew&&x.crew.name,x.p.label,x.p.submitted_name,x.hd.foreman,x.hd.supervisor,x.hd.job_no,x.hd.location,x.p.shift_date,fmtShort(parse(x.p.shift_date))].filter(Boolean).join(' ').toLowerCase().includes(ql)))
+  const shown=all.filter(x=>(!st||x.p.status===st)&&(!fc||(x.crew&&x.crew.id===fc))&&(!fj||(x.j&&x.j.id===fj))&&(!ql||[x.j&&jobLabel(x.j),x.j&&x.j.projectNo,x.j&&x.j.address,x.crew&&x.crew.name,x.p.label,x.p.submitted_name,x.hd.foreman,x.hd.supervisor,x.hd.job_no,x.hd.location,x.p.shift_date,fmtShort(parse(x.p.shift_date))].filter(Boolean).join(' ').toLowerCase().includes(ql)))
     .sort((a,b)=>String(b.p.shift_date).localeCompare(String(a.p.shift_date))||String(b.p.created_at||'').localeCompare(String(a.p.created_at||'')));
   return html`<div class="flex-1 min-h-0 overflow-y-auto pr-1 grid grid-cols-[minmax(0,1fr)] gap-3 content-start" id="qa-all">
     <div class="panel px-4 py-3 flex flex-wrap items-center gap-2">
       <button type="button" class="btn" onClick=${onDay}>${Icon.chevL} By day</button>
       <div class="font-display text-[16px] font-semibold mr-2">All QA packs</div>
       <input id="qa-all-search" class="field flex-1 min-w-[200px]" style=${fs} placeholder="Search job, project, crew, supervisor, date" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search QA packs"/>
-      <select id="qa-all-status" class="field w-auto" style=${fs} value=${st} onChange=${e=>setSt(e.target.value)} aria-label="Status"><option value="">All</option><option value="submitted">Submitted</option><option value="draft">In progress</option></select>
+      <select id="qa-all-crew" class="field w-auto max-w-[220px]" style=${fs} value=${fc} onChange=${e=>setFc(e.target.value)} aria-label="Crew"><option value="">All crews</option>${crewOpts.map(([id,l])=>html`<option key=${id} value=${id}>${l}</option>`)}</select>
+      <select id="qa-all-job" class="field w-auto max-w-[260px]" style=${fs} value=${fj} onChange=${e=>setFj(e.target.value)} aria-label="Job"><option value="">All jobs</option>${jobOpts.map(([id,l])=>html`<option key=${id} value=${id}>${l}</option>`)}</select>
+      <select id="qa-all-status" class="field w-auto" style=${fs} value=${st} onChange=${e=>setSt(e.target.value)} aria-label="Status"><option value="">All statuses</option><option value="submitted">Submitted</option><option value="draft">In progress</option></select>
       <span class="text-[12.5px] text-muted">${rows?`${shown.length} pack${shown.length===1?'':'s'}`:''}</span></div>
     ${err&&html`<div class="panel px-4 py-3 text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
-    ${!rows?html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`:html`<div class="panel overflow-x-auto"><table class="w-full text-[12.5px] min-w-[760px]" id="qa-all-table">
-      <thead><tr class="text-left">${['Date','Job','Crew','Pack','Status','Submitted by',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+    ${!rows?html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`:html`<div class="panel overflow-x-auto"><table class="w-full text-[12.5px] min-w-[680px]" id="qa-all-table">
+      <thead><tr class="text-left">${['Date','Job','Crew','Status','Submitted',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
       <tbody>${shown.map(x=>html`<tr key=${x.p.id} class="border-t border-line hover:bg-sunken cursor-pointer qa-all-row" tabindex="0" onClick=${()=>x.b&&onOpen(x.p)} onKeyDown=${e=>{if(e.key==='Enter'&&x.b)onOpen(x.p)}}>
           <td class="py-2 px-3 whitespace-nowrap font-medium">${WD[parse(x.p.shift_date).getDay()]} ${fmtShort(parse(x.p.shift_date))} ${parse(x.p.shift_date).getFullYear()}</td>
           <td class="py-2 px-3"><div class="font-medium truncate max-w-[280px]">${x.j?jobLabel(x.j):(x.hd.location||'Job')}</div><div class="text-[11.5px] text-muted truncate max-w-[280px]">${[x.j&&x.j.projectNo&&'P '+x.j.projectNo,x.hd.supervisor&&'Supervisor '+x.hd.supervisor].filter(Boolean).join(' · ')}</div></td>
           <td class="py-2 px-3 whitespace-nowrap">${x.crew?x.crew.name:'–'}</td>
-          <td class="py-2 px-3 whitespace-nowrap">${x.p.label||'Pack'}${x.p.toolbox?html` <span class="text-[11px] text-muted">· toolbox</span>`:''}</td>
           <td class="py-2 px-3 whitespace-nowrap">${x.p.status==='submitted'?html`<span class="text-[11.5px] font-semibold px-1.5 py-0.5 rounded" style=${{background:'hsl(145 55% 36% / .14)',color:'hsl(145 55% 28%)'}}>Submitted</span>`:html`<span class="text-[11.5px] font-semibold px-1.5 py-0.5 rounded" style=${{background:'hsl(38 95% 50% / .16)',color:'hsl(30 90% 32%)'}}>In progress</span>`}</td>
           <td class="py-2 px-3 whitespace-nowrap">${x.p.submitted_name?html`${x.p.submitted_name}<div class="text-[11.5px] text-muted">${fmtDT(x.p.submitted_at)}</div>`:html`<span class="text-faint">–</span>`}</td>
           <td class="py-2 px-3 text-right whitespace-nowrap">${x.b?html`<span class="text-[12px] font-medium" style=${{color:'var(--accent)'}}>Open ${Icon.chevR}</span>`:html`<span class="text-[11.5px] text-muted">Booking removed</span>`}</td></tr>`)}
-        ${!shown.length&&html`<tr><td colspan="7" class="px-3 py-6 text-center text-muted">${ql||st?'No QA packs match.':'No QA packs yet.'}</td></tr>`}</tbody></table></div>`}
+        ${!shown.length&&html`<tr><td colspan="6" class="px-3 py-6 text-center text-muted">${ql||st||fc||fj?'No QA packs match.':'No QA packs yet.'}</td></tr>`}</tbody></table></div>`}
   </div>`;
 }
 
