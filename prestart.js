@@ -238,7 +238,7 @@ function PsDone({res,a,onHome,onView}){
 }
 
 /* ---------- a submitted prestart (read only) ---------- */
-function PrestartView({ctx,ps,onClose}){
+function PrestartView({ctx,ps,onClose,onDefect}){
   const {sb,M,db}=ctx;const [rows,setRows]=useState(null);const [err,setErr]=useState('');
   const [del,setDel]=useState(null);const [busy,setBusy]=useState(false);   /* the administrator can delete one (e.g. a test), giving a reason */
   const remove=async()=>{if(!(del||'').trim()){setErr('Say why it’s being deleted.');return}setBusy(true);setErr('');
@@ -270,10 +270,118 @@ function PrestartView({ctx,ps,onClose}){
             ${r.comment&&html`<div class="text-[12.5px] font-medium" style=${{color:'hsl(0 72% 40%)'}}>${r.comment}</div>`}</div></div>
           ${(r.photos||[]).length>0&&html`<div class="flex flex-wrap gap-2 pl-8">${r.photos.map(p=>html`<a key=${p} href=${urls[p]||'#'} target="_blank" rel="noopener"><img src=${urls[p]||''} alt="Photo" class="w-20 h-20 rounded-lg object-cover border border-line bg-sunken"/></a>`)}</div>`}
         </div>`)}</div></section>`)}
+      ${(()=>{const ds=db.p4?(db.defects||[]).filter(d=>d.prestart_id===ps.id||d.last_prestart_id===ps.id):[];if(!ds.length)return null;
+        return html`<section class="grid gap-1" id="ps-view-defects"><div class="label">Defects from this prestart: how they’re going</div>
+          <div class="rounded-lg border border-line divide-y" style=${{borderColor:'var(--line)'}}>${ds.map(d=>{const wo=d.work_order_id&&db.work_orders.find(w=>w.id===d.work_order_id);const p=progressOf(d,wo);
+            return html`<button key=${d.id} type="button" class="w-full text-left px-3 py-2 grid gap-1 hover:bg-sunken" style=${{borderColor:'var(--line)'}} disabled=${!onDefect} onClick=${()=>onDefect&&onDefect(d)}>
+              <div class="text-[13px] font-medium">${d.title}</div><div class="text-[12.5px] font-medium" style=${{color:p.color}}>${p.label}</div><${Steps} p=${p}/></button>`})}</div></section>`})()}
       ${ps.notes&&html`<div class="grid gap-1"><div class="label">Notes</div><div class="text-[13px] whitespace-pre-line">${ps.notes}</div></div>`}
       <div class="grid gap-1"><div class="label">Signed</div><div class="rounded-lg border border-line bg-white p-1 max-w-[320px]">${urls[ps.signature]?html`<img id="ps-view-sign" src=${urls[ps.signature]} alt="Signature" class="w-full"/>`:html`<div class="h-16"></div>`}</div>
         <div class="text-[12px] text-muted">${ps.operator_name} · ${fmtDT(ps.submitted_at)}</div></div>
     </div><//>`;
+}
+
+/* ---------- feedback for the person who reported it: how their defects are going ---------- */
+const STEPS=['Reported','Seen','Work order','Being fixed','Fixed'];
+const WOST={open:'Open',scheduled:'Booked in',in_progress:'Being fixed',awaiting_parts:'Waiting on parts',completed:'Completed',closed:'Completed and checked',cancelled:'Cancelled'};
+const dayTxt=k=>k?new Date(k+'T12:00:00').toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'}):'';
+/* where a defect is up to, in plain words */
+function progressOf(d,wo){
+  const green='hsl(145 55% 32%)',blue='hsl(212 75% 42%)',amber='hsl(30 90% 38%)',grey='var(--muted)';
+  if(d.status==='dismissed')return {step:-1,label:'Closed without a repair',color:grey,done:true};
+  if(d.status==='closed')return {step:4,label:'Fixed and checked',color:green,done:true};
+  if(d.status==='repaired'||(wo&&wo.status==='completed'))return {step:4,label:'Fixed: being checked',color:green};
+  if(wo&&wo.status!=='cancelled'){
+    if(wo.status==='in_progress')return {step:3,label:'Being fixed',color:blue};
+    if(wo.status==='awaiting_parts')return {step:3,label:'Waiting on parts',color:amber};
+    if(wo.status==='scheduled'&&wo.start_date)return {step:2,label:`Booked in for ${dayTxt(wo.start_date)}`,color:blue};
+    return {step:2,label:`Work order ${wo.number} raised`,color:blue};
+  }
+  if(d.status==='acknowledged')return {step:1,label:'Seen by the workshop',color:amber};
+  return {step:0,label:'Reported: waiting for the workshop',color:amber};
+}
+/* has anything changed since they last looked? (kept on this phone) */
+const SEENK=me=>'ff:dseen:'+me;
+const readSeen=me=>{try{return JSON.parse(localStorage.getItem(SEENK(me))||'{}')}catch(e){return {}}};
+const sigOf=(d,wo,l)=>JSON.stringify([d.status,d.resolution,wo&&wo.status,wo&&wo.start_date,wo&&wo.completion_notes,wo&&(wo.parts||[]).length,l&&(l.sm8_notes||[]).length,l&&l.sm8_description]);
+function Steps({p}){
+  if(p.step<0)return null;
+  return html`<div class="flex items-center gap-1 ps-steps" aria-label=${'Progress: '+STEPS[p.step]}>${STEPS.map((s,i)=>html`<div key=${s} class="flex-1 grid gap-1 min-w-0">
+    <div class="h-1.5 rounded-full" style=${{background:i<=p.step?p.color:'var(--line)'}}></div>
+    <div class="text-[10.5px] truncate ${i===p.step?'font-semibold':'text-muted'}" style=${i===p.step?{color:p.color}:null}>${s}</div></div>`)}</div>`;
+}
+const linkOf=(db,woId)=>woId&&db.sm8?(db.servicem8_jobs||[]).find(l=>l.work_order_id===woId):null;
+
+/* one defect, read-only: what was reported, the work order, the mechanic's notes, the fix */
+function DefectProgress({ctx,d,onClose}){
+  const {db,sb,M}=ctx;const a=M.byId.get(d.asset_id);const wo=d.work_order_id&&db.work_orders.find(w=>w.id===d.work_order_id);const l=wo&&linkOf(db,wo.id);
+  const p=progressOf(d,wo);const restr=(db.restrictions||[]).find(r=>r.defect_id===d.id&&r.active);
+  const urls=useSigned(sb,d.photos||[]);
+  const notes=l&&Array.isArray(l.sm8_notes)?l.sm8_notes:[];
+  const tl=[[d.created_at,'You reported it'],d.times_reported>1&&[d.last_reported_at,`Reported again (${d.times_reported} times in all)`],
+    wo&&[wo.created_at,`Work order ${wo.number} raised`],wo&&wo.start_date&&!['open'].includes(wo.status)&&[wo.start_date+'T00:00:00',`Booked in${wo.assigned_to?' with '+wo.assigned_to:''}`,true],
+    (d.repaired_at||(wo&&wo.completed_at))&&[d.repaired_at||wo.completed_at,'Fixed'],d.closed_at&&d.status==='closed'&&[d.closed_at,'Checked and signed off'],
+    d.status==='dismissed'&&[d.closed_at||d.updated_at,'Closed without a repair']].filter(Boolean).sort((x,y)=>String(x[0]).localeCompare(String(y[0])));
+  const Box=({label,children,id})=>html`<section id=${id} class="rounded-lg border border-line p-3 grid gap-1.5"><div class="label">${label}</div>${children}</section>`;
+  return html`<${Modal} title=${html`<span class="inline-flex items-center gap-2 flex-wrap">${d.title} ${window.FFD?window.FFD.sevChip(d.severity):''}</span>`}
+    sub=${`D-${d.number} · ${a?`${a.m.name} · ${a.m.sub||''}`:d.asset_id}`} onClose=${onClose}
+    foot=${html`<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Close</button>`}>
+    <div class="grid gap-3" id="dp-view">
+      <div class="grid gap-2"><div class="text-[15px] font-semibold" style=${{color:p.color}} id="dp-status">${p.label}</div><${Steps} p=${p}/></div>
+      ${restr&&html`<div class="text-[13px] font-semibold rounded-lg px-3 py-2" style=${{background:'hsl(0 72% 47%)',color:'#fff'}}>This machine is tagged out: don’t use it until the workshop returns it to service.</div>`}
+      <${Box} label="What was reported" id="dp-reported">
+        ${d.description?html`<div class="text-[13px] whitespace-pre-line">${d.description}</div>`:html`<div class="text-[13px] text-muted">No details.</div>`}
+        <div class="text-[12px] text-muted">${d.reported_name?d.reported_name+' · ':''}${fmtDT(d.created_at)}</div>
+        ${(d.photos||[]).length>0&&html`<div class="flex flex-wrap gap-2">${d.photos.map(ph=>html`<a key=${ph} href=${urls[ph]||'#'} target="_blank" rel="noopener"><img src=${urls[ph]||''} alt="Photo" class="w-20 h-20 rounded-lg object-cover border border-line bg-sunken"/></a>`)}</div>`}
+      <//>
+      ${wo?html`<${Box} label=${`Work order ${wo.number}`} id="dp-wo">
+          <div class="text-[13.5px] font-medium">${wo.title}</div>
+          <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[12.5px]">
+            ${[['Status',WOST[wo.status]||wo.status],['Mechanic',wo.assigned_to],['Booked',wo.start_date?(wo.end_date&&wo.end_date!==wo.start_date?`${dayTxt(wo.start_date)} – ${dayTxt(wo.end_date)}`:dayTxt(wo.start_date)):''],['ServiceM8 job',l&&l.job_no]]
+              .filter(([,v])=>v).map(([k,v])=>html`<div key=${k} class="min-w-0"><span class="text-muted">${k}</span><div class="truncate">${v}</div></div>`)}
+          </div>
+        <//>`
+        :d.status!=='dismissed'&&html`<div class="text-[12.5px] text-muted px-1">No work order yet. The workshop raises one when the repair is planned.</div>`}
+      ${(notes.length>0||(l&&l.sm8_description))&&html`<${Box} label="Mechanic’s notes" id="dp-notes">
+        ${l&&l.sm8_description&&html`<div class="text-[13px] whitespace-pre-line">${l.sm8_description}</div>`}
+        ${notes.map((n,i)=>html`<div key=${i} class="text-[13px]"><span class="text-[11.5px] text-muted mono">${n.at?n.at.slice(8,10)+'/'+n.at.slice(5,7)+' '+n.at.slice(11,16):''}</span> <span class="whitespace-pre-line">${n.text}</span></div>`)}
+      <//>`}
+      ${wo&&((wo.parts||[]).length>0||wo.completion_notes)&&html`<${Box} label="The fix" id="dp-fix">
+        ${wo.completion_notes&&html`<div class="text-[13px] whitespace-pre-line">${wo.completion_notes}</div>`}
+        ${(wo.parts||[]).length>0&&html`<div class="text-[12.5px]"><span class="text-muted">Parts: </span>${wo.parts.map(x=>`${x.qty&&x.qty!=='1'?x.qty+' × ':''}${x.part}`).join(', ')}</div>`}
+      <//>`}
+      ${d.resolution&&(!wo||d.resolution!==wo.completion_notes)&&html`<${Box} label=${d.status==='dismissed'?'Why it was closed':'Resolution'} id="dp-resolution"><div class="text-[13px] whitespace-pre-line">${d.resolution}</div><//>`}
+      <section class="grid gap-1" id="dp-timeline"><div class="label">Timeline</div>
+        ${tl.map(([t,txt,dateOnly],i)=>html`<div key=${i} class="flex items-baseline gap-2 text-[12.5px]"><span class="text-muted whitespace-nowrap mono" style=${{minWidth:110}}>${dateOnly?dayTxt(String(t).slice(0,10)):fmtDT(t)}</span><span>${txt}</span></div>`)}</section>
+    </div><//>`;
+}
+
+/* on the Prestarts screen: the defects this person reported, and how each is going */
+function MyDefects({ctx,me,onOpen}){
+  const {db,M}=ctx;
+  if(!db.p4)return null;
+  const myPs=new Set(db.prestarts.filter(p=>p.operator===me).map(p=>p.id));
+  const since=Date.now()-30*864e5;
+  const seen=readSeen(me);
+  const list=(db.defects||[]).filter(d=>d.reported_by===me||myPs.has(d.prestart_id)||myPs.has(d.last_prestart_id))
+    .filter(d=>!['closed','dismissed'].includes(d.status)||new Date(d.updated_at).getTime()>since)
+    .map(d=>{const wo=d.work_order_id&&db.work_orders.find(w=>w.id===d.work_order_id);const l=wo&&linkOf(db,wo.id);const sig=sigOf(d,wo,l);
+      return {d,wo,p:progressOf(d,wo),fresh:seen[d.id]!=null&&seen[d.id]!==sig,sig}})
+    .sort((x,y)=>(y.fresh-x.fresh)||((x.p.done?1:0)-(y.p.done?1:0))||String(y.d.updated_at).localeCompare(String(x.d.updated_at)));
+  if(!list.length)return null;
+  /* the first time a defect is shown, it isn't marked as updated */
+  const first=list.filter(x=>seen[x.d.id]==null);
+  if(first.length){try{localStorage.setItem(SEENK(me),JSON.stringify({...seen,...Object.fromEntries(first.map(x=>[x.d.id,x.sig]))}))}catch(e){}}
+  const nNew=list.filter(x=>x.fresh).length;
+  return html`<section class="grid gap-2" id="ps-my-defects"><h3 class="font-display text-[15px] font-semibold px-1 flex items-center gap-2">Your defect reports
+      ${nNew>0&&html`<span class="text-[11px] font-semibold px-1.5 py-0.5 rounded-full" style=${{background:'var(--accent)',color:'#fff'}}>${nNew} updated</span>`}</h3>
+    <div class="panel divide-y overflow-hidden" style=${{borderColor:'var(--line)'}}>${list.map(({d,wo,p,fresh,sig})=>{const a=M.byId.get(d.asset_id);
+      return html`<button key=${d.id} type="button" class="w-full text-left px-3 py-2.5 grid gap-1.5 hover:bg-sunken ps-defect" style=${{borderColor:'var(--line)'}}
+          onClick=${()=>{try{const s2=readSeen(me);s2[d.id]=sig;localStorage.setItem(SEENK(me),JSON.stringify(s2))}catch(e){}onOpen(d)}}>
+        <div class="flex items-center gap-2 min-w-0"><span class="text-[14px] font-medium truncate flex-1">${d.title} <span class="text-muted font-normal">· ${a?a.m.name:d.asset_id}</span></span>
+          ${fresh&&html`<span class="text-[10.5px] font-bold uppercase tracking-wide shrink-0" style=${{color:'var(--accent)'}}>Updated</span>`}</div>
+        <div class="text-[12.5px] font-medium" style=${{color:p.color}}>${p.label}</div>
+        <${Steps} p=${p}/></button>`})}</div></section>`;
 }
 
 /* ---------- the Prestarts screen (phones) ---------- */
@@ -290,7 +398,7 @@ function PrestartScreen({data,live,notify}){
     const done=e=>{refresh();if(e.detail&&e.detail.sent){notify(`${e.detail.sent} prestart${e.detail.sent===1?'':'s'} sent`);reload()}};
     refresh();go();window.addEventListener('online',go);window.addEventListener('ff-outbox',done);const iv=setInterval(()=>{if(navigator.onLine)go()},30000);
     return()=>{off=true;window.removeEventListener('online',go);window.removeEventListener('ff-outbox',done);clearInterval(iv)}},[]);
-  const [view,setView]=useState({k:'home'});const [q,setQ]=useState('');const [show,setShow]=useState(null);
+  const [view,setView]=useState({k:'home'});const [q,setQ]=useState('');const [show,setShow]=useState(null);const [showD,setShowD]=useState(null);
   const inst=window.ffUseInstall?window.ffUseInstall():null;const [hideInst,setHideInst]=useState(()=>{try{return localStorage.getItem(KEY+':ps-noinstall')==='1'}catch(e){return false}});
   const M=useMemo(()=>db?buildModel(data,db):null,[db,data.resources,data.blocks]);
   useEffect(()=>{const el=document.getElementById('ps-scroll');if(el)el.scrollTop=0},[view.k,view.a&&view.a.m.id]);
@@ -353,13 +461,15 @@ function PrestartScreen({data,live,notify}){
             ${t?html`<span class="text-right shrink-0"><span class="block">${t.result==='unsafe'?resChip('unsafe'):html`<span class="inline-flex items-center text-[11.5px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ps-done-chip" style=${{color:'hsl(145 55% 32%)',background:'var(--sunken)',boxShadow:'inset 0 0 0 1px hsl(145 55% 36%)'}}>Prestart done</span>`}</span><span class="block text-[11.5px] text-muted mt-0.5">${fmtTime(t.submitted_at)} · ${t.operator_name.split(' ')[0]}</span></span>`:tpl&&html`<span class="text-muted shrink-0">${Icon.chevR}</span>`}</button>`})}
         ${!list.length&&html`<div class="px-3 py-6 text-center text-[13px] text-muted">No machines match.</div>`}
       </section>
+      <${MyDefects} ctx=${ctx} me=${me} onOpen=${d=>setShowD(d)}/>
       ${mine.length>0&&html`<section class="grid gap-2"><h3 class="font-display text-[15px] font-semibold px-1">Your recent prestarts</h3>
         <div class="panel divide-y overflow-hidden" style=${{borderColor:'var(--line)'}}>${mine.map(p=>{const a=M.byId.get(p.asset_id);return html`<button key=${p.id} type="button" class="w-full text-left px-3 py-2.5 flex items-center gap-3 hover:bg-sunken" style=${{borderColor:'var(--line)'}} onClick=${()=>setShow(p)}>
           <div class="min-w-0 flex-1"><div class="text-[14px] font-medium truncate">${a?a.m.name:p.asset_id} <span class="text-muted font-normal">${a?a.m.sub||'':''}</span></div><div class="text-[12px] text-muted">${fmtDT(p.submitted_at)}</div></div>${resChip(p.result)}</button>`})}</div></section>`}
     </div>`;
   }
   return html`<div id="ps-scroll" class="flex-1 min-h-0 overflow-y-auto"><div class="max-w-[640px] mx-auto w-full px-1">${body}</div>
-    ${show&&html`<${PrestartView} ctx=${ctx} ps=${show} onClose=${()=>setShow(null)}/>`}</div>`;
+    ${show&&html`<${PrestartView} ctx=${ctx} ps=${show} onClose=${()=>setShow(null)} onDefect=${d=>{setShow(null);setShowD(d)}}/>`}
+    ${showD&&html`<${DefectProgress} ctx=${ctx} d=${(db.defects||[]).find(x=>x.id===showD.id)||showD} onClose=${()=>setShowD(null)}/>`}</div>`;
 }
 
 /* ---------- Fleet › Prestarts: inspection history ---------- */
