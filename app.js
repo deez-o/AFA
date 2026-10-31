@@ -3337,14 +3337,20 @@ function FleetTrucks({data,setData}){
   const isTruck=m=>TRUCKISH.test([machCatOf(m),m.name,m.sub].join(' '));
   const list=truckCosOf(data);const defs=truckDefsOf(data);
   const nameFor=id=>Object.keys(defs).find(k=>defs[k]&&defs[k].assetId===id&&list.some(x=>x.toLowerCase()===k.toLowerCase()))||null;
-  const shown=machines.filter(m=>all||isTruck(m)||nameFor(m.id));
+  /* removed with the X (shared): hidden unless “Show all machines” is ticked */
+  const hidden=new Set(Array.isArray(data.fleetTruckHide)?data.fleetTruckHide:[]);
+  const shown=machines.filter(m=>all||((isTruck(m)||nameFor(m.id))&&!hidden.has(m.id)));
+  const hide=m=>setData(d=>{const h=Array.isArray(d.fleetTruckHide)?d.fleetTruckHide:[];if(h.includes(m.id))return d;
+    const t={...truckDefsOf(d)};Object.keys(t).forEach(k=>{if(t[k]&&t[k].assetId===m.id){const {assetId,...rest}=t[k];if(rest.driver||rest.w)t[k]=rest;else delete t[k]}});   /* and its link goes */
+    return {...d,fleetTruckHide:[...h,m.id],truckDefs:t}});
+  const unhide=m=>setData(d=>({...d,fleetTruckHide:(Array.isArray(d.fleetTruckHide)?d.fleetTruckHide:[]).filter(x=>x!==m.id)}));
   const link=(id,name)=>setData(d=>{const m={...truckDefsOf(d)};Object.keys(m).forEach(k=>{if(m[k]&&m[k].assetId===id){const {assetId,...rest}=m[k];if(rest.driver||rest.w)m[k]=rest;else delete m[k]}});
     if(name)m[name]={...(m[name]||{}),assetId:id};return {...d,truckDefs:m}});
   const addNew=mc=>setData(d=>{const l=[...truckCosOf(d)];let nm=mc.name.trim();if(l.some(x=>x.toLowerCase()===nm.toLowerCase())&&!nameFor(mc.id))nm=`${mc.name} ${mc.sub||''}`.trim();
     if(!l.some(x=>x.toLowerCase()===nm.toLowerCase()))l.push(nm);const m={...truckDefsOf(d)};Object.keys(m).forEach(k=>{if(m[k]&&m[k].assetId===mc.id){const {assetId,...rest}=m[k];m[k]=rest}});
     m[nm]={...(m[nm]||{}),assetId:mc.id};return {...d,truckCos:l,truckDefs:m}});
-  const addAll=()=>shown.filter(m=>isTruck(m)&&!nameFor(m.id)).forEach(addNew);
-  const nNew=shown.filter(m=>isTruck(m)&&!nameFor(m.id)).length;
+  const addAll=()=>shown.filter(m=>isTruck(m)&&!nameFor(m.id)&&!hidden.has(m.id)).forEach(addNew);
+  const nNew=shown.filter(m=>isTruck(m)&&!nameFor(m.id)&&!hidden.has(m.id)).length;
   return html`<section class="px-4 py-3 border-t border-line grid gap-2" id="fleet-trucks">
     <div class="flex flex-wrap items-center gap-2"><h3 class="font-display text-[15px] font-semibold flex-1">Trucks in Fleet</h3>
       ${nNew>0&&html`<button id="ft-add-all" type="button" class="btn btn-primary" style=${{height:30,fontSize:12.5}} onClick=${addAll}>${Icon.plus} Add all ${nNew} to the list</button>`}</div>
@@ -3356,9 +3362,11 @@ function FleetTrucks({data,setData}){
           ${al&&html`<div class="text-[11.5px] font-medium" style=${{color:al.tone}}>${al.text}</div>`}</div>
         <select class="field field-sm" style=${{width:'auto',maxWidth:200,height:30,fontSize:12.5}} value=${nm||''} onChange=${e=>link(m.id,e.target.value||null)} aria-label=${`Truck list name for ${m.name}`}>
           <option value="">Not linked</option>${list.map(x=>html`<option key=${x} value=${x}>${x}</option>`)}</select>
-        ${!nm&&html`<button type="button" class="btn" style=${{height:30,fontSize:12.5}} onClick=${()=>addNew(m)}>${Icon.plus} Add to list</button>`}
+        ${hidden.has(m.id)?html`<span class="text-[11.5px] text-muted">Removed</span><button type="button" class="btn" style=${{height:30,fontSize:12.5}} onClick=${()=>unhide(m)}>Show again</button>`
+          :html`${!nm&&html`<button type="button" class="btn" style=${{height:30,fontSize:12.5}} onClick=${()=>addNew(m)}>${Icon.plus} Add to list</button>`}
+          <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken ft-remove" onClick=${()=>hide(m)} aria-label=${`Remove ${m.name} from Trucks in Fleet`} title="Remove from this list (it stays in Fleet)">${Icon.x}</button>`}
       </div>`})}</div>
-    <label class="flex items-center gap-2 text-[12px] text-muted cursor-pointer"><input type="checkbox" class="w-3.5 h-3.5" checked=${all} onChange=${e=>setAll(e.target.checked)}/> Show all machines (not just ones that look like trucks)</label>
+    <label class="flex items-center gap-2 text-[12px] text-muted cursor-pointer"><input type="checkbox" class="w-3.5 h-3.5" checked=${all} onChange=${e=>setAll(e.target.checked)}/> Show all machines (not just ones that look like trucks, and any removed)</label>
   </section>`;
 }
 function SubsManager({data,setData}){
@@ -5805,7 +5813,7 @@ function App({boot,live}){
    ===================================================================== */
 const COLLECTIONS=[['resources','resource'],['jobs','job'],['blocks','block'],['quoteChanges','quote_change'],['changeLog','change'],['suggestions','suggestion'],['ideas','idea'],['plans','plan'],['planImgs','plan_img']];
 const ORDERED=new Set(['resources','jobs']);           /* row order matters for these */
-const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','machineCats','ideasVault','ideasPub','previewOnly','previewKnown','planQuick','planSteps'];
+const SETTINGS=['mixTypes','binders','mixRap','mixBinder','sealTypes','sealBinder','sealBinders','sealTwoCoat','truckCos','subCos','subServices','programLocs','locColors','truckDefs','fleetTruckHide','machineCats','ideasVault','ideasPub','previewOnly','previewKnown','planQuick','planSteps'];
 const LOCAL_HIDDEN=KEY+':hidden',LOCAL_ORDER=KEY+':order';
 const readLocal=(k,def)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):def}catch(e){return def}};
 const writeLocal=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
