@@ -5,7 +5,7 @@ const html=htm.bind(React.createElement);
    Every area has a level: 0 hidden, 1 view only, 2 can change. "act" areas are yes/no (0 or 2). */
 const AREAS=[
   {mod:'Schedule',items:[['schedule','Schedule board','See the crews’ schedule; change: make, move and edit bookings'],['schedule.settings','Settings','Crews, plant, mixes, seal lists, trucks and subbies'],['schedule.exports','Exports & daily program','Excel, PDFs and the daily program',1],['schedule.forecast','Forecast','The tonnes forecast',1]]},
-  {mod:'Jobs',items:[['jobs','Jobs','See jobs and their bookings; change: add, edit, complete and delete jobs'],['jobs.paperwork','Paperwork','QA PDFs and reports; change: upload documents'],['jobs.pictures','Pictures','See pictures; change: add and relabel their own'],['jobs.manage','Remove anyone’s paperwork and pictures','',2]]},
+  {mod:'Projects',items:[['jobs','Projects','See projects and their bookings; change: add, edit, complete and delete projects'],['jobs.paperwork','Paperwork','QA PDFs and reports; change: upload documents'],['jobs.pictures','Pictures','See pictures; change: add and relabel their own'],['jobs.manage','Remove anyone’s paperwork and pictures','',2]]},
   {mod:'Planning',items:[['planning','Job planning','See plans; change: make plans and send them to the schedule']]},
   {mod:'Staff & leave',items:[['staff.leave','Leave calendar','See leave; change: put leave straight on the calendar'],['staff.request','Request leave for anyone','Goes to an approver first',2],['staff.approve','Approve or decline leave','',2],['staff.myleave','Own leave form','A form for their own leave (instead of the calendar)',2],['staff.people','People','The staff list; change: add and edit staff members'],['staff.logins','Logins','Create logins, reset passwords, set roles',2]]},
   {mod:'Fleet & Maintenance',items:[['fleet','Fleet','The Fleet section and dashboard',1],['fleet.machines','Machines','See machines; change: add, edit and delete them'],['fleet.calendar','Machine calendar','See where machines are; change: book them'],['fleet.workorders','Work orders, services, readings & defects','See them; change: raise, update and complete'],['fleet.verify','Verify & close','Verify work orders and defects, restrict machines',2],['fleet.manage','Fleet admin','Service plans, checklists, corrections, deleting readings and finished work orders, ServiceM8',2],['fleet.reports','Reports','Fleet reports',1]]},
@@ -1654,7 +1654,7 @@ function BookingDetails({f,set,data,rtype,err,changeRes,resTypes}){
             </select></label>
           ${f.jobId==='__new'&&html`<label class="grid gap-1"><span class="label">New job name</span>
             <input id="ed-new-job" class="field" placeholder="e.g. Duntroon St resheet" value=${f._newJobName||''} autoFocus=${true} onInput=${e=>set({_newJobName:e.target.value})}/>
-            <span class="text-[11.5px] text-faint">Added to the Jobs list when you save, with the customer and address on this booking.</span></label>`}
+            <span class="text-[11.5px] text-faint">Added to the Projects list when you save, with the customer and address on this booking.</span></label>`}
 
           <div class="grid grid-cols-2 gap-3">
             <label class="grid gap-1"><span class="label">Quote number</span>
@@ -1723,7 +1723,7 @@ function BookingDetails({f,set,data,rtype,err,changeRes,resTypes}){
               <label class="flex items-center gap-2 text-[13px] font-medium cursor-pointer">
                 <input id="ed-job-done" type="checkbox" class="w-4 h-4" style=${{accentColor:'var(--ok)'}} checked=${done} onChange=${e=>set({_jobDone:e.target.checked})}/>
                 Job completed</label>
-              <span class="text-[11.5px] text-muted">${done?'Moves the job to Completed in the Jobs list when you save. Untick to keep it active.':'Tick when the whole job is finished. It moves to Completed in the Jobs list.'}</span>
+              <span class="text-[11.5px] text-muted">${done?'Moves the job to Completed in the Projects list when you save. Untick to keep it active.':'Tick when the whole job is finished. It moves to Completed in the Jobs list.'}</span>
               ${done&&!job.completed&&live.length>0&&html`<div class="flex gap-2 items-start text-[12px] rounded-md px-2.5 py-2" role="alert" style=${{background:'hsl(40 85% var(--blk-l))',color:'hsl(35 70% var(--blk-fg-l))'}}>
                 <span class="font-bold" aria-hidden="true">!</span>
                 <span>This job still has ${live.length} booking${live.length===1?'':'s'} today or later${live.some(b=>b.id==='this'||b.id===f.id)?', including this one':''}. Completing it won't remove ${live.length===1?'it':'them'} from the planner.</span></div>`}
@@ -2294,10 +2294,10 @@ const NOTIF_MS=2*DAY_MS; /* notifications stay for 48 hours */
 /* kinds of notification a person can switch on or off (kept per person in this browser) */
 const NOTIF_TYPES=[{id:'quote',label:'Quote number changes',desc:'When a booking\'s quote number is added, changed or removed.'},
   {id:'booking',label:'Bookings',desc:'Bookings added, moved, changed or deleted.'},
-  {id:'job',label:'Jobs',desc:'Jobs added, changed, completed or deleted.'},
+  {id:'job',label:'Projects',desc:'Projects added, changed, completed or deleted.'},
   {id:'resource',label:'Crews, staff, machines & plants',desc:'Added, renamed or removed.'},
   {id:'lists',label:'Mixes & seal lists',desc:'Mix, seal and binder lists edited.'},
-  {id:'jobdone',label:'Jobs to complete',desc:'An open job whose bookings have all finished: mark it complete?'},
+  {id:'jobdone',label:'Projects to complete',desc:'An open project whose bookings have all finished: mark it complete?'},
   /* maintenance (shown to people with Fleet & Maintenance) */
   {id:'mcritical',maint:true,label:'Critical defects & restrictions',desc:'A machine is restricted: do not use.'},
   {id:'mbooking',maint:true,label:'Restricted machines on bookings',desc:'A booking from today on has a machine that must not be used.'},
@@ -2315,7 +2315,7 @@ const NOTIF_DEFAULT={quote:false,booking:false,job:false,resource:false,lists:fa
 function jobDoneNotifs(data,prefs){if(!prefs.jobdone)return [];const today=iso(TODAY),out=[];
   data.jobs.forEach(j=>{if(j.completed)return;const bs=data.blocks.filter(b=>b.jobId===j.id&&(b.kind==='job'||b.kind==='onjob'));if(!bs.length||bs.some(b=>b.end>=today))return;
     const last=bs.reduce((m,b)=>b.end>m?b.end:m,'');const at=parse(last);at.setDate(at.getDate()+1);at.setHours(6,0,0,0);
-    out.push({id:`j-done-${j.id}-${last}`,at:Math.min(at.getTime(),Date.now()),text:`${jobLabel(j)} has no more bookings`,sub:`Last booking ended ${fmtShort(parse(last))}. Is the job complete?`,jobId:j.id})});
+    out.push({id:`j-done-${j.id}-${last}`,at:Math.min(at.getTime(),Date.now()),text:`${jobLabel(j)} has no more bookings`,sub:`Last booking ended ${fmtShort(parse(last))}. Is the project complete?`,jobId:j.id})});
   return out}
 function maintNotifs(data,prefs){
   const out=[],now=Date.now(),today=iso(TODAY),A=data.alerts||{};
@@ -2642,7 +2642,7 @@ function jobSummary(data,j){
     if(live.some(b=>b.inductionReq&&!b.inductionDone))issues.push('Induction paperwork not sent');
     if(live.some(b=>restrictedIn(data,b.plantIds).length))issues.push('Restricted machine booked');
     if(live.some(b=>bookingTruckAlerts(data,b,today).some(x=>x.alert.tone==='var(--bad)')))issues.push('Truck restricted or in for maintenance');
-    if(status==='finished')issues.push('All shifts done: complete the job');}
+    if(status==='finished')issues.push('All shifts done: complete the project');}
   return {bs,t,a,shifts,done,next,first,last,crews,status,issues,mixes:[...mixes].sort((x,y)=>y[1]-x[1])}}
 /* on now: green · upcoming: blue · issues: red · waiting to be completed: amber */
 const JOB_STATUS={now:['On now','hsl(145 60% 26%)','hsl(145 55% 88%)','hsl(145 55% 40%)'],upcoming:['Upcoming','hsl(212 70% 32%)','hsl(212 80% 91%)','hsl(212 75% 52%)'],
@@ -2668,10 +2668,10 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
   const job=data.jobs.find(j=>j.id===sel)||null;const S=job&&sums.get(job.id);
   const customers=[...new Set(data.jobs.map(j=>(j.customer||'').trim()).filter(Boolean))].sort();
   const dup=(name,except)=>data.jobs.some(j=>j.id!==except&&j.name.trim().toLowerCase()===name.trim().toLowerCase());
-  const create=e=>{e.preventDefault();const name=(adding.name||'').trim();if(!name){setMsg('Give the job a name.');return}if(dup(name)){setMsg(`There is already a job called ${name}.`);return}
+  const create=e=>{e.preventDefault();const name=(adding.name||'').trim();if(!name){setMsg('Give the project a name.');return}if(dup(name)){setMsg(`There is already a project called ${name}.`);return}
     const id='j'+uid();setData(d=>({...d,jobs:[...d.jobs,{id,name,customer:(adding.customer||'').trim(),address:(adding.address||'').trim(),projectNo:(adding.projectNo||'').trim(),hue:JOB_HUES[d.jobs.length%JOB_HUES.length]}]}));
-    setAdding(null);setMsg('');setView('active');pick(id);notify&&notify('Job added')};
-  const saveEdit=e=>{e.preventDefault();const name=(edit.name||'').trim();if(!name){setMsg('Give the job a name.');return}if(dup(name,job.id)){setMsg(`There is already a job called ${name}.`);return}
+    setAdding(null);setMsg('');setView('active');pick(id);notify&&notify('Project added')};
+  const saveEdit=e=>{e.preventDefault();const name=(edit.name||'').trim();if(!name){setMsg('Give the project a name.');return}if(dup(name,job.id)){setMsg(`There is already a project called ${name}.`);return}
     setData(d=>({...d,jobs:d.jobs.map(j=>j.id===job.id?{...j,name,customer:(edit.customer||'').trim(),address:(edit.address||'').trim(),projectNo:(edit.projectNo||'').trim()}:j)}));setEdit(null);setMsg('')};
   const setDone=(id,done)=>setData(d=>({...d,jobs:d.jobs.map(j=>j.id===id?(done?{...j,completed:true,completedAt:iso(TODAY)}:(({completed,completedAt,...rest})=>rest)(j)):j)}));
   const tryDone=done=>{if(!done){setDone(job.id,false);setView('active');return}const live=S.bs.filter(b=>b.end>=iso(TODAY));if(live.length)setPending(live);else{setDone(job.id,true);setView('completed')}};
@@ -2684,31 +2684,31 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
     <aside class=${'panel w-full md:w-[340px] shrink-0 flex-col min-h-0 overflow-hidden '+(job?'hidden md:flex':'flex')}>
       <div class="px-3 pt-3 pb-2 grid gap-2 border-b border-line">
         <div class="flex items-center gap-2">
-          <div class="seg flex-1" role="group" aria-label="Show jobs">
+          <div class="seg flex-1" role="group" aria-label="Show projects">
             <button type="button" class="flex-1" aria-pressed=${view==='active'} onClick=${()=>setView('active')}>Active <span class="mono text-[11px] text-faint">${data.jobs.length-nDone}</span></button>
             <button type="button" class="flex-1" aria-pressed=${view==='completed'} onClick=${()=>setView('completed')}>Completed <span class="mono text-[11px] text-faint">${nDone}</span></button></div>
           ${canEditJobs&&html`<button id="job-new" type="button" class="btn btn-primary shrink-0" onClick=${()=>{setAdding(adding?null:{name:'',customer:'',address:'',projectNo:''});setMsg('')}}>${Icon.plus} New</button>`}</div>
-        <input id="job-search" class="field" style=${fs} placeholder="Search job, customer, address, project" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search jobs"/>
+        <input id="job-search" class="field" style=${fs} placeholder="Search project, customer, address, project no." value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search projects"/>
         ${view==='active'&&html`<div class="flex flex-wrap gap-1.5" id="job-show" role="group" aria-label="Show">${[['all','All',null],['now','On now',JOB_STATUS.now],['upcoming','Upcoming',JOB_STATUS.upcoming],['issues','Issues',null],['finished','Needs completing',JOB_STATUS.finished]].map(([k,l,st])=>{
           const n=data.jobs.filter(j=>!j.completed&&(k==='all'||(k==='issues'?sums.get(j.id).issues.length>0:sums.get(j.id).status===k))).length;const dot=k==='issues'?ISSUE_C:st?st[3]:null;
           return html`<button key=${k} type="button" data-show=${k} aria-pressed=${show===k} class=${'text-[11.5px] rounded-full border px-2 py-0.5 inline-flex items-center gap-1 '+(show===k?'font-semibold':'text-muted hover:text-ink')} style=${show===k?{background:'var(--accent-soft)',borderColor:'var(--accent)',color:'var(--ink)'}:{borderColor:'var(--line)'}} onClick=${()=>setShow(k)}>${dot&&html`<span class="w-2 h-2 rounded-full" style=${{background:dot}}></span>`}${l} <span class="mono text-faint">${n}</span></button>`})}</div>`}
       </div>
       ${adding&&html`<form class="px-3 py-3 grid gap-2 border-b border-line bg-sunken" onSubmit=${create}>
-        <div class="text-[13px] font-semibold">New job</div>
-        <input id="jn-name" class="field" style=${fs} placeholder="Job name, e.g. Duntroon St resheet" value=${adding.name} autoFocus=${true} onInput=${e=>setAdding({...adding,name:e.target.value})} aria-label="Job name"/>
+        <div class="text-[13px] font-semibold">New project</div>
+        <input id="jn-name" class="field" style=${fs} placeholder="Project name, e.g. Duntroon St resheet" value=${adding.name} autoFocus=${true} onInput=${e=>setAdding({...adding,name:e.target.value})} aria-label="Project name"/>
         <${Combo} id="jn-customer" className="field" style=${fs} placeholder="Customer" label="Customer" value=${adding.customer} onChange=${v=>setAdding({...adding,customer:v})} options=${customers}/>
         <input id="jn-address" class="field" style=${fs} placeholder="Site address" value=${adding.address} onInput=${e=>setAdding({...adding,address:e.target.value})} aria-label="Site address"/>
         <input id="jn-project" class="field mono" style=${fs} placeholder="Project number" value=${adding.projectNo} onInput=${e=>setAdding({...adding,projectNo:e.target.value})} aria-label="Project number"/>
         ${msg&&html`<div class="text-[12px]" style=${{color:'var(--bad)'}}>${msg}</div>`}
-        <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" onClick=${()=>setAdding(null)}>Cancel</button><button id="jn-add" type="submit" class="btn btn-primary">Add job</button></div>
+        <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" onClick=${()=>setAdding(null)}>Cancel</button><button id="jn-add" type="submit" class="btn btn-primary">Add project</button></div>
       </form>`}
-      <ul class="flex-1 min-h-0 overflow-y-auto p-2 grid gap-1 content-start" aria-label="Jobs">
-        ${list.length===0&&html`<li class="px-3 py-6 text-center text-[13px] text-muted">${ql?`Nothing matches “${q}”.`:view==='completed'?'No completed jobs yet.':'No active jobs. Add one with New.'}</li>`}
+      <ul class="flex-1 min-h-0 overflow-y-auto p-2 grid gap-1 content-start" aria-label="Projects">
+        ${list.length===0&&html`<li class="px-3 py-6 text-center text-[13px] text-muted">${ql?`Nothing matches “${q}”.`:view==='completed'?'No completed projects yet.':'No active projects. Add one with New.'}</li>`}
         ${list.map(j=>{const s=sums.get(j.id);const on=j.id===sel;
           const bar=s.issues.length?ISSUE_C:JOB_STATUS[s.status][3];
           return html`<li key=${j.id}><button type="button" class=${'w-full text-left rounded-lg pl-3 pr-2.5 py-2 grid gap-1 job-row '+(on?'':'hover:bg-sunken')} data-status=${s.status} data-issues=${s.issues.length} style=${{boxShadow:`inset 4px 0 0 ${bar}`,...(on?{background:'var(--accent-soft)'}:{})}} onClick=${()=>pick(j.id)} aria-current=${on?'true':undefined}>
             <div class="flex items-center gap-2 min-w-0">
-              <span class="font-medium text-[13.5px] truncate flex-1">${j.customer?html`<span class="text-muted">${j.customer} · </span>`:''}${j.name}</span>${jobIssuesChip(s)}${s.bs.some(b=>b.creditIssue)&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white shrink-0 job-credit" style=${{background:'hsl(0 75% 46%)'}} title="A booking on this job has a credit issue">Credit</span>`}${jobStatusChip(s.status)}</div>
+              <span class="font-medium text-[13.5px] truncate flex-1">${j.customer?html`<span class="text-muted">${j.customer} · </span>`:''}${j.name}</span>${jobIssuesChip(s)}${s.bs.some(b=>b.creditIssue)&&html`<span class="text-[10.5px] font-semibold px-1.5 rounded text-white shrink-0 job-credit" style=${{background:'hsl(0 75% 46%)'}} title="A booking on this project has a credit issue">Credit</span>`}${jobStatusChip(s.status)}</div>
             <div class="flex items-center gap-2 text-[11.5px] text-muted min-w-0">
               <span class="truncate flex-1">${j.address||'No address'}</span>
               ${s.t>0&&html`<span class="mono tnum shrink-0">${fmtN(s.t)} t</span>`}</div>
@@ -2722,16 +2722,16 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
     </aside>
 
     <div class=${'flex-1 min-w-0 min-h-0 overflow-y-auto md:pr-1 '+(job?'':'hidden md:block')}>
-      ${!job?html`<div class="panel p-8 text-center text-[13px] text-muted">Pick a job on the left to see everything about it.</div>`:html`<div class="grid gap-3">
-        <div class="md:hidden"><button id="job-back" type="button" class="btn" onClick=${()=>pick('')}>${Icon.chevL} All jobs</button></div>
+      ${!job?html`<div class="panel p-8 text-center text-[13px] text-muted">Pick a project on the left to see everything about it.</div>`:html`<div class="grid gap-3">
+        <div class="md:hidden"><button id="job-back" type="button" class="btn" onClick=${()=>pick('')}>${Icon.chevL} All projects</button></div>
         ${pending&&html`<div class="panel p-4 grid gap-2" role="alert" style=${{boxShadow:'inset 0 0 0 1.5px hsl(40 85% 50%)'}}>
-          <div class="text-[13.5px] font-semibold">This job still has ${pending.length} booking${pending.length===1?'':'s'} today or later</div>
+          <div class="text-[13.5px] font-semibold">This project still has ${pending.length} booking${pending.length===1?'':'s'} today or later</div>
           <div class="text-[12.5px] text-muted">Completing it moves it to Completed but leaves the bookings on the schedule.</div>
           <div class="flex gap-2"><button type="button" class="btn" onClick=${()=>setPending(null)}>Keep active</button><button type="button" class="btn btn-primary" onClick=${()=>{setDone(job.id,true);setPending(null);setView('completed')}}>Complete anyway</button></div></div>`}
         <section class="panel p-4 grid gap-3">
           ${edit?html`<form class="grid gap-2" onSubmit=${saveEdit}>
               <div class="grid sm:grid-cols-2 gap-2">
-                <label class="grid gap-1"><span class="label">Job name</span><input id="je-name" class="field" style=${fs} value=${edit.name} onInput=${e=>setEdit({...edit,name:e.target.value})}/></label>
+                <label class="grid gap-1"><span class="label">Project name</span><input id="je-name" class="field" style=${fs} value=${edit.name} onInput=${e=>setEdit({...edit,name:e.target.value})}/></label>
                 <label class="grid gap-1"><span class="label">Customer</span><${Combo} id="je-customer" className="field" style=${fs} label="Customer" value=${edit.customer} onChange=${v=>setEdit({...edit,customer:v})} options=${customers}/></label>
                 <label class="grid gap-1"><span class="label">Site address</span><input id="je-address" class="field" style=${fs} value=${edit.address} onInput=${e=>setEdit({...edit,address:e.target.value})}/></label>
                 <label class="grid gap-1"><span class="label">Project number</span><input id="je-project" class="field mono" style=${fs} value=${edit.projectNo} onInput=${e=>setEdit({...edit,projectNo:e.target.value})}/></label></div>
@@ -2746,7 +2746,7 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
               <div class="flex flex-wrap items-center gap-2">${jobStatusChip(S.status)}${jobIssuesChip(S)}
                 ${canEditJobs&&html`<button id="job-edit" type="button" class="btn" onClick=${()=>{setEdit({name:job.name,customer:job.customer||'',address:job.address||'',projectNo:job.projectNo||''});setMsg('')}}>${Icon.pencil} Edit</button>
                 <button id="job-done" type="button" class="btn" onClick=${()=>tryDone(!job.completed)}>${job.completed?'Reopen job':'Mark completed'}</button>
-                ${S.bs.length===0&&(confirmDel?html`<button type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>{setData(d=>({...d,jobs:d.jobs.filter(x=>x.id!==job.id)}));pick('')}}>Delete job</button><button type="button" class="btn btn-ghost" onClick=${()=>setConfirmDel(false)}>Keep</button>`
+                ${S.bs.length===0&&(confirmDel?html`<button type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>{setData(d=>({...d,jobs:d.jobs.filter(x=>x.id!==job.id)}));pick('')}}>Delete project</button><button type="button" class="btn btn-ghost" onClick=${()=>setConfirmDel(false)}>Keep</button>`
                   :html`<button type="button" class="btn btn-ghost text-muted" onClick=${()=>setConfirmDel(true)}>Delete</button>`)}`}
               </div></div>
               ${S.issues.length>0&&html`<div class="rounded-lg px-3 py-2 text-[12.5px] grid gap-0.5 job-issue-list" style=${{background:'hsl(0 72% 47% / .1)',color:ISSUE_C}}>${S.issues.map(t=>html`<div key=${t} class="font-medium">• ${t}</div>`)}</div>`}`}
@@ -2763,7 +2763,7 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
 
         <section class="panel p-4 grid gap-2" aria-labelledby="job-bk">
           <div class="flex items-baseline gap-2"><h3 id="job-bk" class="font-display text-[15px] font-semibold">Bookings</h3><span class="text-[12px] text-muted">Click one to open it</span></div>
-          ${!S.bs.length?html`<div class="text-[12.5px] text-muted">No bookings for this job yet. Add one from the Schedule.</div>`:(()=>{
+          ${!S.bs.length?html`<div class="text-[12.5px] text-muted">No bookings for this project yet. Add one from the Schedule.</div>`:(()=>{
             /* seal bookings first, then asphalt; each with the quantities that matter for it */
             const sealOf=b=>isSealCrew(data.resources.find(r=>r.id===b.resourceId));
             const qtyOf=b=>{const sd=b.shiftData||{};let t=0,a=0;const types=new Set(),binders=new Set(),stones=new Set();
@@ -2804,8 +2804,8 @@ function JobsScreen({data,setData,notify,onEditBooking,onOpenPlan}){
 
         <div class="grid gap-3">
           <section class="panel p-4 grid gap-2 content-start" aria-labelledby="job-plans">
-            <h3 id="job-plans" class="font-display text-[15px] font-semibold">Job plans</h3>
-            ${!plans.length?html`<div class="text-[12.5px] text-muted">No plan for this job yet. Make one on the Planning page.</div>`
+            <h3 id="job-plans" class="font-display text-[15px] font-semibold">Project plans</h3>
+            ${!plans.length?html`<div class="text-[12.5px] text-muted">No plan for this project yet. Make one on the Planning page.</div>`
               :plans.map(p=>html`<div key=${p.id} class="flex items-center gap-2 rounded-lg border border-line px-3 py-2">
                   <div class="min-w-0 flex-1"><div class="text-[13px] font-medium truncate">${p.title||p.jobName||'Untitled plan'}</div>
                     <div class="text-[11.5px] text-muted">${p.status==='scheduled'?'On the schedule':p.status==='ready'?'Ready':'Draft'}${p.appliedAt?' · sent '+new Date(p.appliedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'}):''}</div></div>
@@ -2931,7 +2931,7 @@ const FLEET_TABS=[['dash','Dashboard'],['mc','Machines'],['cal','Calendar'],['wo
 const homeScreen=(role,d)=>{const h=roleOpt('home');if(h&&screenOK(h,role,d))return h;return Object.keys(SCREENS).find(k=>screenOK(k,role,d))||'schedule'};
 const SCREENS={
   schedule:{label:'Schedule',title:'Schedule',only:['tonnes','aplant','crew'],legend:['Crews','Asphalt plant'],head:'Crews / plant'},
-  jobs:{label:'Jobs',title:'Jobs',only:[],legend:[],head:''},
+  jobs:{label:'Projects',title:'Projects',only:[],legend:[],head:''},
   planning:{label:'Planning',title:'Job planning',only:[],legend:[],head:''},
   staff:{label:'Staff',title:'Staff',only:['person'],tab:'person',legend:['Staff'],head:'Staff'},
   machines:{label:'Machines',title:'Machines',only:['machine'],tab:'machine',legend:['Machines'],head:'Machines'},
@@ -5972,7 +5972,7 @@ function FirstRun({canEdit,onStart}){
     ${canEdit
       ?html`<div class="flex flex-col gap-3">
           <div class="font-semibold">Set up your roster</div>
-          <p class="text-[13px] text-muted">The roster is empty. Start it, then add your crews, staff and machines in Settings, and your jobs under Jobs.</p>
+          <p class="text-[13px] text-muted">The roster is empty. Start it, then add your crews, staff and machines in Settings, and your projects under Projects.</p>
           <button class="btn btn-primary justify-center" disabled=${busy} onClick=${async()=>{setBusy(true);await onStart(emptyRoster())}}>Start the roster</button>
         </div>`
       :html`<p class="text-[13px] text-muted">The roster hasn’t been set up yet. A planner needs to sign in first.</p>`}
