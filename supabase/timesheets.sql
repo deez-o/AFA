@@ -2,7 +2,7 @@
 -- Run once in Supabase → SQL Editor → New query → paste → Run, after schema.sql, roles.sql, prestarts.sql and qa.sql.
 -- Safe to run again.
 --
--- One timesheet per staff member per week (Monday to Sunday). Each day is kept in `days`:
+-- One timesheet per staff member per week. The work week runs Tuesday to Monday. Each day is kept in `days`:
 --   { "2026-11-02": { "kind": "work", "start": "06:00", "finish": "16:30", "break": 30, "hours": 10,
 --                     "notes": "", "pack_id": "...", "block_id": "...", "crew_id": "...", "by": "self" | "supervisor" } }
 --   kind: work | leave | sick | rdo | training | public_holiday | off
@@ -16,7 +16,7 @@ create table if not exists public.timesheets (
   staff_id      text not null,                      -- the staff member (roster id)
   user_id       uuid,                               -- their login, if they have one
   name          text,
-  week_start    date not null check (extract(isodow from week_start) = 1),
+  week_start    date not null,   -- the Tuesday the week starts
   days          jsonb not null default '{}'::jsonb check (jsonb_typeof(days) = 'object'),
   status        text not null default 'open' check (status in ('open','submitted','approved')),
   submitted_at  timestamptz,
@@ -28,6 +28,10 @@ create table if not exists public.timesheets (
   updated_at    timestamptz not null default now(),
   updated_by    uuid
 );
+-- the week starts on a Tuesday (older set-ups had Monday)
+alter table public.timesheets drop constraint if exists timesheets_week_start_check;
+delete from public.timesheets where extract(isodow from week_start) <> 2 and days = '{}'::jsonb;
+alter table public.timesheets add constraint timesheets_week_start_check check (extract(isodow from week_start) = 2) not valid;
 create unique index if not exists timesheets_one_per_week on public.timesheets (staff_id, week_start);
 create index if not exists timesheets_week on public.timesheets (week_start);
 create index if not exists timesheets_user on public.timesheets (user_id);

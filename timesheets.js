@@ -6,6 +6,7 @@
    - Leave on the calendar fills in those days (annual leave, sick, RDO, training). A week of leave makes a timesheet on its own.
    - A timesheet starts on someone's first shift of the week (their first sign-on).
    - People in the same crew on the same day are compared: different hours are highlighted to check.
+   The work week runs Tuesday to Monday.
    Database: supabase/timesheets.sql (table timesheets; one row per person per week, days in jsonb).
    ===================================================================== */
 (function(){
@@ -19,6 +20,8 @@ const tmin=t=>{const m=/^(\d{1,2}):(\d{2})/.exec(t||'');return m?+m[1]*60+ +m[2]
 const hoursOf=d=>{if(!d)return 0;if(d.kind&&d.kind!=='work')return d.kind==='off'?0:(d.hours!=null&&d.hours!==''?+d.hours:LEAVE_HOURS);
   const a=tmin(d.start),b=tmin(d.finish);if(a==null||b==null)return 0;let m=b-a;if(m<=0)m+=1440;m-=(+d.break||0);return Math.max(0,Math.round(m/60*100)/100)};
 const h2=n=>(Math.round(n*100)/100).toLocaleString('en-AU',{maximumFractionDigits:2});
+/* the work week runs Tuesday to Monday */
+const tuesdayOf=d=>{const x=new Date(d);x.setHours(12,0,0,0);x.setDate(x.getDate()-((x.getDay()+5)%7));return x};
 const weekDays=ws=>Array.from({length:7},(_,i)=>iso(addDays(parse(ws),i)));
 const dayName=k=>`${WD[parse(k).getDay()]} ${fmtShort(parse(k))}`;
 const errMsg=e=>(e&&(e.message||e.error_description))||String(e||'Something went wrong');
@@ -49,9 +52,9 @@ function signOnsOf(v,data,userId){const out={};
     const crewId=p.crew_id||(b&&(coverOf(b,p.shift_date)||b.resourceId))||'';const crew=data.resources.find(r=>r.id===crewId);const j=data.jobs.find(x=>x.id===(p.job_id||(b&&b.jobId)));
     (out[p.shift_date]=out[p.shift_date]||[]).push({pack:p,block:b,crewId,label:[j?jobLabel(j):'Job',crew&&crew.name].filter(Boolean).join(' · '),night:b&&b.shift==='night'})});
   return out}
-/* leave on the calendar for a staff member, Monday to Friday */
+/* leave on the calendar for a staff member, on weekdays (not Saturday or Sunday) */
 function leaveOf(data,staffId,ds){const out={};if(!staffId)return out;
-  ds.slice(0,5).forEach(k=>{const b=data.blocks.find(x=>x.resourceId===staffId&&LEAVE_KIND[x.kind]&&x.start<=k&&x.end>=k);if(b)out[k]={kind:LEAVE_KIND[b.kind],hours:b.kind==='training'?null:LEAVE_HOURS,from:'calendar'}});return out}
+  ds.filter(k=>{const g=parse(k).getDay();return g!==0&&g!==6}).forEach(k=>{const b=data.blocks.find(x=>x.resourceId===staffId&&LEAVE_KIND[x.kind]&&x.start<=k&&x.end>=k);if(b)out[k]={kind:LEAVE_KIND[b.kind],hours:b.kind==='training'?null:LEAVE_HOURS,from:'calendar'}});return out}
 /* a new timesheet's days: leave from the calendar, and the jobs signed on to (times to fill in) */
 function startDays(data,staffId,ds,so){const days={...leaveOf(data,staffId,ds)};
   Object.entries(so||{}).forEach(([k,l])=>{if(!days[k]){const x=l[0];days[k]={kind:'work',pack_id:x.pack.id,block_id:x.pack.block_id,crew_id:x.crewId,job:x.label,night:!!x.night}}});return days}
@@ -59,11 +62,11 @@ function startDays(data,staffId,ds,so){const days={...leaveOf(data,staffId,ds)};
 function TimesheetsScreen({data,live,notify}){
   const sb=live.sb;const mgr=can('timesheets',2)||can('timesheets',1);const mineOk=can('timesheets.mine',2)||live.role==='admin';
   const [tab,setTab]=useState(mineOk?'mine':'all');
-  const [ws,setWs]=useState(()=>iso(mondayOf(TODAY)));
+  const [ws,setWs]=useState(()=>iso(tuesdayOf(TODAY)));
   const {v,err,reload}=useWeek(sb,ws,mgr);
   const ds=weekDays(ws);
   const nav=html`<div class="flex items-center gap-1"><button type="button" class="btn px-2" onClick=${()=>setWs(iso(addDays(parse(ws),-7)))} aria-label="Previous week">${Icon.chevL}</button>
-    <button type="button" class="btn" disabled=${ws===iso(mondayOf(TODAY))} onClick=${()=>setWs(iso(mondayOf(TODAY)))}>This week</button>
+    <button type="button" class="btn" disabled=${ws===iso(tuesdayOf(TODAY))} onClick=${()=>setWs(iso(tuesdayOf(TODAY)))}>This week</button>
     <button type="button" class="btn px-2" onClick=${()=>setWs(iso(addDays(parse(ws),7)))} aria-label="Next week">${Icon.chevR}</button>
     <span class="text-[13px] font-medium ml-2">${dayName(ds[0])} – ${dayName(ds[6])} ${parse(ds[6]).getFullYear()}</span></div>`;
   if(err)return html`<div class="panel p-6 grid gap-2 max-w-[640px]"><div class="font-display text-[17px] font-semibold">Timesheets aren’t set up yet</div>
