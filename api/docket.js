@@ -75,7 +75,7 @@ module.exports = async (req, res) => {
       method: 'POST',
       headers: { 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: MODEL, max_tokens: 600, tools: [TOOL],   // (forcing the tool isn't supported on every model: it's asked for in the prompt)
+        model: MODEL, max_tokens: 4000, tools: [TOOL],   // (forcing the tool isn't supported on every model: it's asked for in the prompt)
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data: image } },
           { type: 'text', text: PROMPT({ previous, regos }) }
@@ -95,6 +95,7 @@ module.exports = async (req, res) => {
   let docket = String(x.docket || '').toUpperCase().replace(/[^0-9?]/g, '');
   const gapAt = docket.indexOf('?');
   const tonnes = Number(x.tonnes);
+  if (!docket && !(tonnes > 0) && !x.rego) return send(res, 502, { error: x.note ? 'The AI couldn’t read it: ' + String(x.note).slice(0, 160) : `The AI didn’t return the docket (${j.stop_reason || 'no answer'})`, stop: j.stop_reason || null });
   const out = {
     docket: docket.replace(/\?/g, ''), docketGapAt: gapAt >= 0 ? gapAt : null, docketGap: gapAt >= 0 || !!x.docket_gap,
     tonnes: isFinite(tonnes) && tonnes > 0 && tonnes < 100 ? String(Math.round(tonnes * 1000) / 1000) : '',

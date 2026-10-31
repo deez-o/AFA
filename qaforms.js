@@ -275,7 +275,8 @@ async function aiReadDocket(dataUrl,previous,regos){
     const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),25000);
     const r=await fetch('/api/docket',{method:'POST',signal:ctl.signal,headers:{'Content-Type':'application/json',Authorization:'Bearer '+(session&&session.access_token||'')},
       body:JSON.stringify({image:dataUrl.split(',')[1],mediaType:'image/jpeg',previous,regos})});clearTimeout(t);
-    if(!r.ok)return null;const j=await r.json();return j&&(j.docket||j.tonnes||j.rego)?j:null}catch(e){return null}}
+    const j=await r.json().catch(()=>({}));if(!r.ok)return {failed:j.error||('the AI reader answered '+r.status)};return j&&(j.docket||j.tonnes||j.rego)?j:{failed:'nothing came back'}}
+  catch(e){return {failed:e&&e.name==='AbortError'?'it took too long':'no connection'}}}
 /* the fields we need from an Alex Fraser delivery docket's text */
 /* reading a scanned docket: the docket number follows "Delivery No:", the tonnes "Net Weight", the truck "Rego".
    OCR is forgiving: the value may be on the same line or the next, with stray punctuation or units around it */
@@ -356,7 +357,8 @@ function LayingEditor({f}){
   const scan=async file=>{if(!file)return;setErr('');setBusy('Reading the docket…');const time=hhmm();
     try{const known0=[...rows.map(r=>r.rego),...((f.data&&f.data.resources)||[]).filter(r=>r.type==='machine').map(r=>r.rego)].filter(Boolean);
       /* the AI reader first (Claude, on the server); the phone's own reader when there's no reception or it isn't set up */
-      const pic=await docketJpeg(file);let got=await aiReadDocket(pic,rows.map(r=>r.docket).filter(Boolean),known0),ai=!!got;
+      const pic=await docketJpeg(file);let got=await aiReadDocket(pic,rows.map(r=>r.docket).filter(Boolean),known0),ai=!!got&&!got.failed;
+      const aiFail=got&&got.failed;if(!ai){got=null;setBusy('Reading the docket on the phone…')}
       if(!got){const [w,c]=await Promise.all([loadOcr(),prepDocket(file)]);const {data}=await w.recognize(c);got=parseDocket(data.text||'')}
       setPhoto({i:rows.length,url:pic});
       const gap=fillDocketGap(got.docket,rows.map(r=>r.docket),got.docketGapAt);
@@ -367,7 +369,8 @@ function LayingEditor({f}){
         setErr(gap.guess.digit!=null?`One digit of the docket number wasn’t printed (the printer leaves a gap). It’s been filled in as ${gap.guess.digit} from load ${k+1}: check it against the docket.`
           :'One digit of the docket number wasn’t printed (the printer leaves a gap). Type the missing digit in place of the “?”.')}
       else if(odd)setErr('The docket number didn’t read cleanly (it isn’t the usual length): check it against the docket.')
-      else if(!got.docket||!got.tonnes)setErr('Some of the docket couldn’t be read. Check it and fill in what’s missing.')
+      else if(!got.docket||!got.tonnes)setErr((aiFail?`The AI reader didn’t work (${aiFail}), so the phone read it instead. `:'')+'Some of the docket couldn’t be read. Check it and fill in what’s missing.')
+      else if(aiFail)setErr(`The AI reader didn’t work (${aiFail}), so the phone read it instead: check every number against the docket.`)
       else if(ai&&(got.unsure||[]).length)setErr(`Check against the docket: the ${got.unsure.map(k=>({docket:'docket number',tonnes:'tonnes',rego:'rego',product:'product',load:'load number'})[k]||k).join(', ')} ${got.unsure.length===1?'wasn’t':'weren’t'} clear${got.note?' ('+got.note+')':''}.`)}
     catch(e){addRow({...layRow(),time});setErr((e&&e.message)||'The docket couldn’t be read. Type the details in.')}
     finally{setBusy('')}};
