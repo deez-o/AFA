@@ -4285,7 +4285,7 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
     <${PlanCard} id="pl-notes" title="Site rules & notes">
       <div class="grid gap-3 sm:grid-cols-2">
         <label class="grid gap-1"><span class="label">Traffic control</span><textarea class="field" style=${{height:'auto',minHeight:80,padding:'8px 10px',fontSize:13}} rows="3" placeholder="e.g. Set up as per TGS each night; manage driveways; mark out clean-up area" value=${p.traffic||''} onInput=${e=>set({traffic:e.target.value})}></textarea></label>
-        <label class="grid gap-1"><span class="label">Leave the site clean</span><textarea class="field" style=${{height:'auto',minHeight:80,padding:'8px 10px',fontSize:13}} rows="3" placeholder="e.g. No rubbish left on site; gear parked neatly in the same place each night; sticky stomps down" value=${p.cleanup||''} onInput=${e=>set({cleanup:e.target.value})}></textarea></label>
+        <label class="grid gap-1"><span class="label">Profiling</span><textarea id="pl-profnotes" class="field" style=${{height:'auto',minHeight:80,padding:'8px 10px',fontSize:13}} rows="3" placeholder="e.g. Profile edges first; keep the profiler ahead of the paver; sweep after profiling" value=${p.profNotes||''} onInput=${e=>set({profNotes:e.target.value})}></textarea></label>
       </div>
       <label class="grid gap-1"><span class="label">Other notes</span><textarea class="field" style=${{height:'auto',minHeight:70,padding:'8px 10px',fontSize:13}} rows="3" value=${p.notes||''} onInput=${e=>set({notes:e.target.value})}></textarea></label>
     <//>`}
@@ -4440,8 +4440,8 @@ async function buildPlanPdf(data,p,opt={}){
   if((p.jobSubs||[]).filter(subHas).length){head('Subcontractors (whole job)');kv((p.jobSubs||[]).filter(subHas).map(s=>[s.name||'-',[s.info,fmtTime(s.time||p.crewOnSite)].filter(Boolean).join(' - ')]))}
   const sl=p.seal||{};if(num(sl.tackArea)||num(sl.sealArea)||sl.onSite){head('Seal crew');kv([['On site',fmtTime(sl.onSite)],['Tack area',num(sl.tackArea)?`${fmtN(num(sl.tackArea))} m2`:''],['Seal area',num(sl.sealArea)?`${fmtN(num(sl.sealArea))} m2`:'']])}
   if((p.hazards||[]).some(h=>h.hazard||h.control)){head('Safety / environmental - hazards and controls');(p.hazards||[]).filter(h=>h.hazard||h.control).forEach(h=>kv([[h.hazard||'-',h.control||'']]))}
-  if(p.traffic||p.cleanup||p.notes){head('Site rules & notes');if(p.traffic){font(8.5,true,[80,80,80]);room(5);doc.text('Traffic control',M,y+3.5);y+=4.6;bullets(p.traffic)}
-    if(p.cleanup){font(8.5,true,[80,80,80]);room(5);doc.text('Leave the site clean',M,y+3.5);y+=4.6;bullets(p.cleanup)}if(p.notes){font(8.5,true,[80,80,80]);room(5);doc.text('Notes',M,y+3.5);y+=4.6;bullets(p.notes)}}
+  if(p.traffic||p.profNotes||p.notes){head('Site rules & notes');if(p.traffic){font(8.5,true,[80,80,80]);room(5);doc.text('Traffic control',M,y+3.5);y+=4.6;bullets(p.traffic)}
+    if(p.profNotes){font(8.5,true,[80,80,80]);room(5);doc.text('Profiling',M,y+3.5);y+=4.6;bullets(p.profNotes)}if(p.notes){font(8.5,true,[80,80,80]);room(5);doc.text('Notes',M,y+3.5);y+=4.6;bullets(p.notes)}}
   const n=doc.getNumberOfPages();const cnt=n-firstPage+1;for(let i=firstPage;i<=n;i++){doc.setPage(i);font(7,false,[130,130,130]);doc.text(`${clean(p.title||'Job plan')}${one>=0?` - ${dates[one]?fmtShort(parse(dates[one])):''} plan`:''} - page ${i-firstPage+1} of ${cnt}`,105,292,{align:'center'})}
   return opt.doc?doc:doc.output('blob');
 }
@@ -4483,7 +4483,7 @@ function PlanViewDialog({data,plan,onClose,onOpenPlan,notify}){
         </div>
         ${machines.length>0&&html`<div class="grid gap-1.5"><div class="font-display text-[15px] font-semibold">Machines</div>${groupMachines(machines,data).map(g=>html`<div key=${g.key}>${row(g.label,g.rows.map(m=>`${m.name} ${m.sub||''}`).join(', '))}</div>`)}</div>`}
         ${(p.hazards||[]).some(h=>h.hazard)&&html`<div class="grid gap-1.5"><div class="font-display text-[15px] font-semibold">Hazards and controls</div>${p.hazards.filter(h=>h.hazard).map((h,j)=>html`<div key=${j}>${row(h.hazard,h.control)}</div>`)}</div>`}
-        ${(p.traffic||p.cleanup||p.notes)&&html`<div class="grid gap-1.5"><div class="font-display text-[15px] font-semibold">Site rules & notes</div>${row('Traffic control',p.traffic)}${row('Leave the site clean',p.cleanup)}${row('Notes',p.notes)}</div>`}
+        ${(p.traffic||p.profNotes||p.notes)&&html`<div class="grid gap-1.5"><div class="font-display text-[15px] font-semibold">Site rules & notes</div>${row('Traffic control',p.traffic)}${row('Profiling',p.profNotes)}${row('Notes',p.notes)}</div>`}
       </div>
     </div>
   </div>`;
