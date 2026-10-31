@@ -417,7 +417,7 @@ drop policy if exists "administrators remove" on public.work_orders;
 drop policy if exists "administrators and mechanics remove finished" on public.work_orders;
 drop policy if exists "remove finished work orders" on public.work_orders;
 create policy "remove finished work orders" on public.work_orders for delete to authenticated
-  using (public.maint_is_manager() and status in ('completed','closed'));
+  using (public.maint_is_manager() and status in ('completed','closed','cancelled'));
 
 drop policy if exists "maintenance staff add" on public.service_records;
 create policy "maintenance staff add" on public.service_records for insert to authenticated with check (public.maint_can_work());

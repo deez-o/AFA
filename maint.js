@@ -412,7 +412,7 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
   return html`<${Modal} title=${isNew?'New work order':`${woNo(wo)} · ${wo.title}`} sub=${isNew?'For servicing, a repair, a breakdown or any maintenance request':`${WO_TYPE[wo.wo_type]} · ${a?a.m.name:'Machine'} · created ${fmtTs(wo.created_at)}`} onClose=${onClose}
     foot=${html`${err&&html`<span id="wo-err" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${err}</span>`}
       ${!isNew&&woChip(cur)}
-      ${!isNew&&perms.delWo&&(cur==='completed'||cur==='closed')&&(delAsk?html`<span class="text-[12.5px]">Delete ${woNo(wo)} for good?</span><button id="wo-del-yes" type="button" class="btn" style=${{color:'var(--bad)'}} disabled=${busy} onClick=${delWo}>Delete</button><button type="button" class="btn" onClick=${()=>setDelAsk(false)}>Keep</button>`
+      ${!isNew&&perms.delWo&&(cur==='completed'||cur==='closed'||cur==='cancelled')&&(delAsk?html`<span class="text-[12.5px]">Delete ${woNo(wo)} for good?</span><button id="wo-del-yes" type="button" class="btn" style=${{color:'var(--bad)'}} disabled=${busy} onClick=${delWo}>Delete</button><button type="button" class="btn" onClick=${()=>setDelAsk(false)}>Keep</button>`
         :html`<button id="wo-del" type="button" class="btn btn-ghost" style=${{color:'var(--bad)'}} disabled=${busy} onClick=${()=>setDelAsk(true)} aria-label="Delete work order">${Icon.trash} Delete</button>`)}
       <span class="flex-1"></span>
       ${!locked&&acts.map(([s,l])=>html`<button key=${s+l} id=${'wo-act-'+s} type="button" class=${'btn'+(s==='completed'||s==='closed'?' btn-primary':'')} disabled=${busy} onClick=${()=>save(s)} style=${s==='cancelled'?{color:'var(--bad)'}:null}>${l}</button>`)}

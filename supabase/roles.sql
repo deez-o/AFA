@@ -155,7 +155,7 @@ begin
   if to_regclass('public.work_orders') is not null then
     execute 'drop policy if exists "administrators and mechanics remove finished" on public.work_orders';
     execute 'drop policy if exists "remove finished work orders" on public.work_orders';
-    execute 'create policy "remove finished work orders" on public.work_orders for delete to authenticated using (public.maint_is_manager() and status in (''completed'',''closed''))';
+    execute 'create policy "remove finished work orders" on public.work_orders for delete to authenticated using (public.maint_is_manager() and status in (''completed'',''closed'',''cancelled''))';
   end if;
   if to_regclass('public.job_photos') is not null then
     execute 'drop policy if exists "supervisors and up read" on public.job_photos';
