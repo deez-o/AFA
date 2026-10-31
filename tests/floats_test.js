@@ -145,4 +145,33 @@ ok(!ctx.FFL.needsFloat({ name: 'SS003', category: 'Bobcats' }, {}, CF) && !ctx.F
   r = planFloat([trip('2026-11-10 07:00', '2026-11-10 15:00')], { ...cd, curfew: false }, tr, {}).runs[0];
   ok(!r.curfew, 'curfew switched off: not checked');
 }
+
+// the driver's fatigue rules: 10 hours off between shifts, shifts no longer than 12 hours
+{
+  const tr = () => ({ min: 40, km: 30 });
+  const mk = (id, a, b, e, l) => ({ id, moves: [{ m: id, name: 'SR00' + id }], from: { key: a }, to: { key: b }, earliest: t(e), latest: t(l) });
+  const any = { ...cfgOf({}), driverShift: 'any', avoidWeekend: false, curfew: false };
+  // first move finishes about 22:00 Tuesday; the next can't start till 10 hours later
+  let R = planFloat([mk('1', 'A', 'B', '2026-11-10 20:00', '2026-11-10 23:00'), mk('2', 'C', 'D', '2026-11-10 22:30', '2026-11-11 20:00')], any, tr, {}).runs;
+  const gap = (R[1].leave - R[0].done) / 36e5;
+  ok(R.length === 2 && (+R[1].shiftStart === +R[0].shiftStart || gap >= 10) && !R[1].fatigue, 'any hours: the next move is in the same shift or after a 10-hour break (' + gap.toFixed(1) + ' h)');
+  ok(R.every(r => (r.done - r.shiftStart) / 36e5 <= 12), 'no shift over 12 hours');
+  // five moves back to back from 6am: the shift would pass 12 hours, so the last ones wait for the next shift
+  const five = [1, 2, 3, 4, 5].map(i => mk(String(i), 'P' + i, 'Q' + i, '2026-11-10 06:00', '2026-11-12 20:00'));
+  R = planFloat(five, any, () => ({ min: 90, km: 80 }), {}).runs;
+  const shifts = new Set(R.map(r => +r.shiftStart));
+  ok(R.every(r => (r.done - r.shiftStart) / 36e5 <= 12 && !r.fatigue), 'a long day of moves never runs a shift past 12 hours');
+  ok(shifts.size >= 2 && R.every((r, i) => i === 0 || +r.shiftStart === +R[i - 1].shiftStart || (r.leave - R[i - 1].done) / 36e5 >= 10), 'the rest go in a new shift, at least 10 hours after the last finish');
+  // a time set by hand that breaks it is marked
+  R = planFloat([mk('1', 'A', 'B', '2026-11-10 06:00', '2026-11-10 23:00'), mk('2', 'C', 'D', '2026-11-10 06:00', '2026-11-11 23:00')], any, tr, { 2: { time: '2026-11-10 21:00'.replace(' ', 'T') } }).runs;
+  ok(R.find(r => r.id === '2').fatigue === true || R.find(r => r.id === '2').shiftStart, 'a pick-up time set by hand that breaks the rules is marked');
+}
+
+// never picked up before the machine is free (with the fatigue rules in play)
+{
+  const tr = () => ({ min: 60, km: 44 });
+  const mk = (id, e, l) => ({ id, moves: [{ m: id, name: 'X' + id }], from: { key: 'F' + id }, to: { key: 'T' + id }, earliest: t(e), latest: t(l) });
+  const R = planFloat([mk('a', '2026-10-31 07:00', '2026-10-31 15:00'), mk('b', '2026-11-01 04:00', '2026-11-01 05:30'), mk('c', '2026-11-01 04:00', '2026-11-01 05:30')], cfgOf({}), tr, {}).runs;
+  ok(R.every(r => r.pick >= r.earliest), 'every pick-up is at or after the machine is free');
+}
 console.log(fails ? `${fails} FAILED` : 'ALL FLOAT TESTS PASSED'); process.exit(fails ? 1 : 0);

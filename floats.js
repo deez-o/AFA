@@ -158,7 +158,13 @@ function inCurfew(from,to,cfg){if(!cfg.curfew||to<=from)return false;
   for(let k=dayOf(from);k<=dayOf(to);k=iso(addDays(parse(k),1))){const d=parse(k).getDay();if(d===0||d===6)continue;
     if(CURFEW.some(([a,b])=>from<at(k,b)&&to>at(k,a)))return true}return false}
 /* the best time for a trip in its window: on time, in the driver's hours, on a weekday, then as soon as possible */
-function bestPick(t,{clock,dh,cfg,travel,L,U}){
+/* the driver's fatigue rules (not negotiable): at least 10 hours off between shifts, and a shift no longer than 12 hours
+   (from leaving for the first pick-up to the last unload). Work less than 10 hours after the last finish is the same shift. */
+const REST_MIN=600,SHIFT_MAX=720;
+function fatigueOK(leave,done,drv){if(!drv||!drv.lastDone)return (done-leave)/6e4<=SHIFT_MAX;
+  if((leave-drv.lastDone)/6e4>=REST_MIN)return (done-leave)/6e4<=SHIFT_MAX;
+  return leave>=drv.lastDone&&(done-drv.shiftStart)/6e4<=SHIFT_MAX}
+function bestPick(t,{clock,dh,cfg,travel,L,U,drv}){
   const n=t.moves.length,tr=travel(t.from,t.to);const ready=clock?addMin(clock,dh.min||0):null;
   const base=new Date(Math.max(t.earliest,ready||0));const span=Math.min(t.latest-base,4*864e5);
   const cands=[base];if(span>0){const st=new Date(base);st.setMinutes(Math.ceil(st.getMinutes()/30)*30,0,0);for(let c=st;c-base<=span;c=addMin(c,30))if(c>base)cands.push(c)}
@@ -173,7 +179,12 @@ function bestPick(t,{clock,dh,cfg,travel,L,U}){
   const dayIdx=c=>Math.round((parse(shiftDay(c))-parse(want))/864e5);
   const when=c=>t.to.key==='yard'?(c-base)/36e5:(()=>{const d=dayIdx(c);const nightBefore=cfg.driverShift!=='night'&&d===1&&c<at(dayOf(c),'06:00');const h=c.getHours();
     return (d===0||nightBefore?0:d===1?8:Math.abs(d)*30)+((cfg.driverShift==='any'&&(h<6||h>=18))?4:0)+((c-at(shiftDay(c),'12:00'))/36e5)*.02})();   /* within the day before: the morning; within the night before: the start of the night */
-  let best=null;cands.forEach(c=>{const leave=addMin(c,-(dh.min||0));const done=addMin(c,L*n+(tr.min||0)+U*n);
+  /* the next shift can start 10 hours after the last finish */
+  if(drv&&drv.lastDone){const c=addMin(drv.lastDone,REST_MIN+(dh.min||0));if(c>base)cands.push(c);
+    /* and the earliest shift start (in his hours) after that */
+    for(let k=dayOf(c);k<=dayOf(addMin(c,3*24*60));k=iso(addDays(parse(k),1)))[cfg.dayFrom,cfg.nightFrom].forEach(h=>{const x=addMin(at(k,h||'06:00'),dh.min||0);if(x>c&&x>=base)cands.push(x)})}
+  const legal=cands.filter(c=>fatigueOK(addMin(c,-(dh.min||0)),addMin(c,L*n+(tr.min||0)+U*n),drv));
+  let best=null;(legal.length?legal:[drv&&drv.lastDone?new Date(Math.max(base,addMin(drv.lastDone,REST_MIN+(dh.min||0)))):base]).forEach(c=>{const leave=addMin(c,-(dh.min||0));const done=addMin(c,L*n+(tr.min||0)+U*n);
     const lateMin=Math.max(0,(done-t.latest)/6e4);const oh=!inHours(leave,done,cfg);
     const cur=inCurfew(leave,c,cfg)||inCurfew(addMin(c,L*n),addMin(c,L*n+(tr.min||0)),cfg);   /* on the road: the empty run there, and loaded */const we=!!cfg.avoidWeekend&&(isWeekend(leave)||isWeekend(done));
     const score=(lateMin>0?1e4+lateMin:0)+(cur?3000:0)+(oh?500:0)+(we?200:0)+when(c);
@@ -183,18 +194,20 @@ function planFloat(trips,cfg,travel,plan,opt={}){
   const P=plan||{};const L=+cfg.loadMin||0,U=+cfg.unloadMin||0;
   const left=trips.filter(t=>!(P[t.id]&&P[t.id].skip));const out=[];
   const skipped=trips.filter(t=>P[t.id]&&P[t.id].skip).map(t=>({...t,skip:true}));
-  let loc={key:'yard',ll:opt.yardLL||null},clock=null;
+  let loc={key:'yard',ll:opt.yardLL||null},clock=null;const drv={lastDone:null,shiftStart:null};
   while(left.length){
     /* each trip's best time from where the float is now; the soonest of those goes next */
     const cand=left.map(t=>{const dh=travel(loc,t.from);const fixed=P[t.id]&&fromIsoLocal(P[t.id].time);
-      if(fixed)return {t,dh,pick:fixed,fixed:true};const b=bestPick(t,{clock,dh,cfg,travel,L,U});return {t,dh,pick:b.pick,fixed:false}});
+      if(fixed)return {t,dh,pick:fixed,fixed:true};const b=bestPick(t,{clock,dh,cfg,travel,L,U,drv});return {t,dh,pick:b.pick,fixed:false}});
     const pickc=cand.sort((a,b)=>a.pick-b.pick||a.t.latest-b.t.latest)[0];
     const {t,dh,pick,fixed}=pickc;left.splice(left.indexOf(t),1);
     const tr=travel(t.from,t.to);const depart=addMin(pick,L*t.moves.length);const arrive=addMin(depart,tr.min||0);const done=addMin(arrive,U*t.moves.length);
     const leave=addMin(pick,-(dh.min||0));
     const late=done>t.latest,tight=!late&&done>addMin(t.latest,-30),early=pick<t.earliest;
+    const fatigue=!fatigueOK(leave,done,drv);
+    if(!drv.lastDone||(leave-drv.lastDone)/6e4>=REST_MIN)drv.shiftStart=leave;drv.lastDone=done;
     const outHours=!inHours(leave,done,cfg),weekend=isWeekend(leave)||isWeekend(done),curfew=inCurfew(leave,pick,cfg)||inCurfew(depart,arrive,cfg);
-    out.push({...t,pick,leave,depart,arrive,done,drive:tr,deadhead:dh,fixed,late,tight,early,outHours,weekend,curfew,fromLoc:loc,
+    out.push({...t,pick,leave,depart,arrive,done,drive:tr,deadhead:dh,fixed,late,tight,early,outHours,weekend,curfew,fatigue,shiftStart:drv.shiftStart,fromLoc:loc,
       ticked:!!(P[t.id]&&P[t.id].done),tickedAt:P[t.id]&&P[t.id].doneAt,note:(P[t.id]&&P[t.id].note)||''});
     clock=done;loc=t.to}
   return {runs:out,skipped}}
@@ -294,6 +307,7 @@ function FloatsScreen({data,setData,notify}){
         <div class="mono text-[20px] sm:text-[22px] font-semibold leading-none">${hm(r.pick)}<span class="text-faint text-[14px] font-normal"> → ${hm(r.done)}</span></div>
         <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:sc,background:sb}}>${sl}</span>
         ${r.fixed&&!r.ticked&&html`<span class="text-[11px] text-muted">time set by hand</span>`}
+        ${r.fatigue&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-fatigue" style=${{color:'#fff',background:'hsl(0 72% 45%)'}} title="Breaks the driver’s 10-hour break or 12-hour shift (only a pick-up time set by hand can)">Driver’s hours rule broken</span>`}
         ${r.curfew&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-curfew" style=${{color:'#fff',background:'hsl(0 72% 45%)'}} title="On the road in the oversize peak-hour curfew (7–9am, 4–6pm weekdays)">In peak-hour curfew</span>`}
         ${r.outHours&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-oh" style=${{color:'hsl(270 45% 38%)',background:'hsl(270 60% 95%)'}} title="Outside the float driver’s hours (Settings)">Outside driver’s hours</span>`}
         ${r.weekend&&!r.ticked&&cfg.avoidWeekend&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:'hsl(30 85% 34%)',background:'hsl(38 95% 92%)'}}>Weekend</span>`}
@@ -444,6 +458,7 @@ function FloatSettings({data,setData,cfg}){
         ${cfg.driverShift==='night'&&html`<span class="flex items-center gap-2 text-[13px]"><input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightFrom} onChange=${e=>set({nightFrom:e.target.value})} aria-label="Night shift from"/> to <input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightTo} onChange=${e=>set({nightTo:e.target.value})} aria-label="Night shift to"/> (next morning)</span>`}
       </div>
       <label class="inline-flex items-center gap-2 text-[13.5px]">Gear on site <input id="fl-arrive" type="number" min="0" step="15" class="field field-sm mono" style=${{height:32,width:80}} value=${cfg.arriveBefore} onChange=${e=>set({arriveBefore:+e.target.value})}/> min before the shift starts</label>
+      <div class="text-[13px] rounded-md px-3 py-2 bg-sunken" id="fl-fatigue">Driver’s fatigue rules (always applied): at least <b>10 hours off</b> between shifts, and no shift longer than <b>12 hours</b>.</div>
       <label class="inline-flex items-center gap-2 text-[13.5px]"><input id="fl-curfew" type="checkbox" class="w-4 h-4" checked=${!!cfg.curfew} onChange=${e=>set({curfew:e.target.checked})}/> Oversize peak-hour curfew: the float isn’t on the road 7–9am and 4–6pm, Monday to Friday</label>
       <label class="inline-flex items-center gap-2 text-[13.5px]"><input id="fl-weekdays" type="checkbox" class="w-4 h-4" checked=${!!cfg.avoidWeekend} onChange=${e=>set({avoidWeekend:e.target.checked})}/> Move on weekdays when it can (weekends only when it has to)</label>
       <span class="text-[12px] text-muted">Each move goes at the best time in its window: on time first, then out of the curfew, then in the driver’s hours, then on a weekday, then the day (or night) before the shift. Back to the yard goes as soon as it can. A move that can only happen outside his hours is still planned, and marked.</span>
