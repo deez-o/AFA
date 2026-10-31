@@ -1,6 +1,6 @@
 /* =====================================================================
    FraserFlow: Lab (in progress). Every shift already worked, by job, with what was actually laid
-   (from the submitted QA pack: tonnes from the laying record, m² from the site diagram layers),
+   (from the submitted QA pack: tonnes from the laying record, m², course and number of layers from the site diagram layers),
    the QA pack PDFs, and the lab's reports (uploaded per job, or per shift).
    Database: supabase/lab.sql. Loaded with the Fleet files (after qa.js and qaforms.js).
    ===================================================================== */
@@ -18,7 +18,9 @@ const OK_TYPE=/^(application\/pdf|image\/(jpeg|png|webp)|application\/vnd\.openx
 function laidOf(p){const F=(p&&p.forms)||{};const L=F.laying||{};const D=F.diagram||{};
   const rows=(L.rows||[]).filter(r=>n0(r.tonnes)>0);
   const layers=Array.isArray(D.layers)&&D.layers.length?D.layers:[{area:D.area,mix:D.mix}];
-  return {t:rows.reduce((a,r)=>a+n0(r.tonnes),0),loads:rows.length,a:layers.reduce((a,l)=>a+n0(l.area),0),mixes:[...new Set(layers.map(l=>(l.mix||'').trim()).filter(Boolean))]}}
+  /* each layer laid (site diagram): course name, depth and mix, for the lab */
+  const courses=layers.filter(l=>[l.layer,l.depth,l.mix,l.area].some(x=>String(x==null?'':x).trim())).map((l,i)=>({name:String(l.layer||'').trim(),depth:String(l.depth||'').trim(),mix:String(l.mix||'').trim()}));
+  return {t:rows.reduce((a,r)=>a+n0(r.tonnes),0),courses,a:layers.reduce((a,l)=>a+n0(l.area),0),mixes:[...new Set(layers.map(l=>(l.mix||'').trim()).filter(Boolean))]}}
 const plannedOf=(b,k)=>{const ls=linesOf((b.shiftData||{})[k]).filter(lineHas);return {t:ls.reduce((a,l)=>a+num(l.tonnes),0),a:ls.reduce((a,l)=>a+num(l.area),0)}};
 
 function useLab(sb,from){
@@ -48,7 +50,7 @@ function LabScreen({data,live,notify}){
       [...ks].forEach(k=>{seen.add(b.id+'|'+k);
       const j=data.jobs.find(x=>x.id===b.jobId);if(!j)return;const crewId=coverOf(b,k)||b.resourceId;
       const ps=v?v.packs.filter(p=>p.block_id===b.id&&p.shift_date===k):[];const sub=ps.filter(p=>p.status==='submitted');
-      const laid=sub.map(laidOf).reduce((a,x)=>({t:a.t+x.t,a:a.a+x.a,loads:a.loads+x.loads,mixes:[...new Set([...a.mixes,...x.mixes])]}),{t:0,a:0,loads:0,mixes:[]});
+      const laid=sub.map(laidOf).reduce((a,x)=>({t:a.t+x.t,a:a.a+x.a,courses:[...a.courses,...x.courses],mixes:[...new Set([...a.mixes,...x.mixes])]}),{t:0,a:0,courses:[],mixes:[]});
       const o=by.get(j.id)||{j,shifts:[]};o.shifts.push({e:{b,k,crewId},crew:data.resources.find(r=>r.id===crewId),plan:plannedOf(b,k),packs:ps,sub,laid});by.set(j.id,o)})});
     return [...by.values()].map(o=>({...o,shifts:o.shifts.sort((x,y)=>y.e.k.localeCompare(x.e.k)||(x.crew&&y.crew?x.crew.name.localeCompare(y.crew.name):0)),
       last:o.shifts.reduce((m,s)=>s.e.k>m?s.e.k:m,''),t:o.shifts.reduce((a,s)=>a+s.laid.t,0),a:o.shifts.reduce((a,s)=>a+s.laid.a,0),nSub:o.shifts.filter(s=>s.sub.length).length}))
@@ -105,7 +107,7 @@ function LabScreen({data,live,notify}){
             <button type="button" class="btn lab-qa-all" disabled=${!allSub.length||!!busy} onClick=${()=>pdfs(allSub,o.j.id)}>${Icon.download} ${busy===o.j.id?'Making PDFs…':`Download QA (${allSub.length} pack${allSub.length===1?'':'s'})`}</button>
             ${canUp&&!setupMsg&&KINDS.map(([kk,l])=>html`<button key=${kk} type="button" class=${'btn btn-primary lab-upload lab-upload-'+kk} onClick=${()=>setUp({job:o.j,shifts:o.shifts.map(s=>s.e.k),kind:kk,n:Date.now()})}>${Icon.plus} ${({asphalt:'Upload Asphalt Report',core:'Upload Core Report',ncr:'Upload NCR'})[kk]}</button>`)}</div>
           <div class="overflow-x-auto"><table class="w-full text-[12.5px] min-w-[720px]">
-            <thead><tr class="text-left">${['Shift','Crew','Planned','Laid (QA)','Area m² (QA)','Loads','QA','','Lab'].map((h,i)=>html`<th key=${i} class=${'label font-normal py-1.5 pr-3 whitespace-nowrap'+(i>=2&&i<=5?' text-right':'')}>${h}</th>`)}</tr></thead>
+            <thead><tr class="text-left">${['Shift','Crew','Planned','Laid (QA)','Area m² (QA)','Course (QA)','Layers','QA','','Lab'].map((h,i)=>html`<th key=${i} class=${'label font-normal py-1.5 pr-3 whitespace-nowrap'+(i>=2&&i<=4?' text-right':'')}>${h}</th>`)}</tr></thead>
             <tbody>${o.shifts.map(s=>{const sr=reportsFor(o.j.id,s.e.k);const draft=s.packs.length&&!s.sub.length;
               return html`<tr key=${s.e.b.id+s.e.k} class="border-t border-line align-top lab-shift" data-date=${s.e.k}>
                 <td class="py-2 pr-3 whitespace-nowrap"><span class="font-medium">${WD[parse(s.e.k).getDay()]} ${fmtShort(parse(s.e.k))}</span>${s.e.b.shift==='night'?html` <span class="text-muted">· night</span>`:''}${overdue(o.j.id,s.e.k)&&html` <span class="text-[10.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded text-white lab-overdue" style=${{background:'hsl(0 72% 47%)'}} title="Reports weren’t uploaded within 72 hours of the day after the shift">Overdue</span>`}
@@ -114,7 +116,8 @@ function LabScreen({data,live,notify}){
                 <td class="py-2 pr-3 tnum text-right whitespace-nowrap text-muted">${s.plan.t?f1(s.plan.t)+' t':''}${s.plan.t&&s.plan.a?' · ':''}${s.plan.a?f1(s.plan.a)+' m²':''}${!s.plan.t&&!s.plan.a?'–':''}</td>
                 <td class="py-2 pr-3 tnum text-right whitespace-nowrap font-semibold lab-laid-t">${s.sub.length?f1(s.laid.t)+' t':html`<span class="text-faint font-normal">–</span>`}</td>
                 <td class="py-2 pr-3 tnum text-right whitespace-nowrap font-semibold lab-laid-a">${s.sub.length?f1(s.laid.a):html`<span class="text-faint font-normal">–</span>`}</td>
-                <td class="py-2 pr-3 tnum text-right">${s.sub.length?s.laid.loads:''}</td>
+                <td class="py-2 pr-3 lab-course">${!s.sub.length?html`<span class="text-faint">–</span>`:s.laid.courses.length?html`<div class="grid gap-0.5">${s.laid.courses.map((c,i)=>html`<div key=${i} class="whitespace-nowrap"><span class="font-medium">${c.name||html`<span class="text-muted font-normal">Not given</span>`}</span>${[c.depth,c.mix].filter(Boolean).length?html` <span class="text-muted">· ${[c.depth,c.mix].filter(Boolean).join(' · ')}</span>`:''}</div>`)}</div>`:html`<span class="text-muted">Not given</span>`}</td>
+                <td class="py-2 pr-3 whitespace-nowrap lab-layers">${!s.sub.length?'':s.laid.courses.length>1?html`<span class="text-[11.5px] font-semibold px-1.5 py-0.5 rounded" style=${{background:'hsl(212 80% 50% / .14)',color:'hsl(212 70% 38%)'}}>${s.laid.courses.length} layers</span>`:s.laid.courses.length===1?html`<span class="text-muted">Single</span>`:''}</td>
                 <td class="py-2 pr-3 whitespace-nowrap">${s.sub.length?html`<span class="text-[11.5px] font-semibold px-1.5 py-0.5 rounded" style=${{background:'hsl(145 55% 36% / .14)',color:'hsl(145 55% 28%)'}}>Submitted</span>`
                   :draft?html`<span class="text-[11.5px] font-semibold px-1.5 py-0.5 rounded" style=${{background:'hsl(38 95% 50% / .16)',color:'hsl(30 90% 32%)'}}>In progress</span>`:html`<span class="text-[11.5px] text-muted">No QA</span>`}</td>
                 <td class="py-2 text-right whitespace-nowrap">${s.sub.length>0&&html`<button type="button" class="btn lab-qa" style=${{height:28,fontSize:12}} disabled=${!!busy} onClick=${()=>pdfs(s.sub.map(p=>({e:s.e,p})),s.e.b.id+s.e.k)}>${Icon.download} ${busy===s.e.b.id+s.e.k?'…':'QA PDF'}</button>`}</td>
