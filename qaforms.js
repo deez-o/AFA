@@ -276,21 +276,25 @@ function parseDocket(t){
 window.__parseDocket=parseDocket;
 const fmt2=n=>(Math.round(n*100)/100).toLocaleString('en-AU',{maximumFractionDigits:2});
 const layRow=()=>({docket:'',rego:'',time:hhmm(),temp:'',tonnes:'',ch_start:'',ch_finish:'',comments:''});
-const rowDone=r=>!blank(r.docket)&&n0(r.tonnes)>0&&!blank(r.temp);
+const LAY_NEED=[['docket','Docket number'],['rego','Truck rego'],['time','Time in'],['temp','Temperature'],['tonnes','Tonnes'],['ch_start','Chainage start'],['ch_finish','Chainage finish'],['comments','Run location / comments']];
+const layMissing=r=>LAY_NEED.filter(([k])=>k==='tonnes'?!(n0(r.tonnes)>0):blank(r[k]));
+const rowDone=r=>!layMissing(r).length;
 function LayingEditor({f}){
   const d=f.pack.forms.laying;const set=p=>f.set('laying',x=>({...x,...p}));const rows=d.rows||[];
   const setRow=(i,p)=>f.set('laying',x=>({...x,rows:x.rows.map((r,k)=>k===i?{...r,...p}:r)}));
   const [open,setOpen]=useState(()=>{const k=rows.findIndex(r=>!rowDone(r));return k});   /* the load being filled in */
-  const [busy,setBusy]=useState('');const [err,setErr]=useState('');const fileRef=useRef(null);
+  const [busy,setBusy]=useState('');const [err,setErr]=useState('');const fileRef=useRef(null);const [tried,setTried]=useState(-1);   /* Add load pressed with something missing */
   const blocker=rows.findIndex(r=>!rowDone(r));   /* a load still missing its docket, tonnes or temperature */
-  const addRow=r=>{f.set('laying',x=>({...x,rows:[...(x.rows||[]),r]}));setOpen(rows.length)};
+  /* a new load starts at the last load's run location (until it's changed; later loads follow the new one) */
+  const addRow=r=>{f.set('laying',x=>{const l=x.rows||[];const prev=l.length?l[l.length-1].comments:'';return {...x,rows:[...l,{...r,comments:blank(r.comments)?(prev||''):r.comments}]}});setTried(-1);setOpen(rows.length)};
   const scan=async file=>{if(!file)return;setErr('');setBusy('Reading the docket…');const time=hhmm();
     try{const [w,c]=await Promise.all([loadOcr(),prepDocket(file)]);const {data}=await w.recognize(c);const got=parseDocket(data.text||'');
-      addRow({...layRow(),time,docket:got.docket||'',rego:got.rego||'',tonnes:got.tonnes||'',comments:'',product:got.product||'',docket_load:got.load||'',scanned:true});
+      addRow({...layRow(),time,docket:got.docket||'',rego:got.rego||'',tonnes:got.tonnes||'',product:got.product||'',docket_load:got.load||'',scanned:true});
       if(!got.docket||!got.tonnes)setErr('Some of the docket couldn’t be read. Check it and fill in what’s missing.')}
     catch(e){addRow({...layRow(),time});setErr((e&&e.message)||'The docket couldn’t be read. Type the details in.')}
     finally{setBusy('')}};
-  const close=i=>{const r=rows[i];if(blank(r.temp)){setErr('Enter the temperature for this load.');return}if(blank(r.docket)||!(n0(r.tonnes)>0)){setErr('Each load needs its docket number and tonnes.');return}setErr('');setOpen(-1)};
+  const close=i=>{const miss=layMissing(rows[i]);if(miss.length){setTried(i);setErr('Fill in: '+miss.map(([,l])=>l).join(', ')+'.');return}setTried(-1);setErr('');setOpen(-1)};
+  const bad=(i,k)=>tried===i&&layMissing(rows[i]).some(([x])=>x===k)?{boxShadow:'inset 0 0 0 1.5px var(--bad)',borderColor:'var(--bad)'}:null;
   let run=0;const tot=rows.reduce((a,r)=>a+n0(r.tonnes),0);
   const canAdd=f.canEdit&&blocker<0&&!busy;
   return html`<${FormCard} f=${f} id="laying" title="Asphalt laying record (paving)" sub=${`${rows.length} load${rows.length===1?'':'s'} · ${fmt2((tot))} t`} sigForms=${[]}>
@@ -300,20 +304,21 @@ function LayingEditor({f}){
         return isOpen?html`<div key=${i} class=${rowStyle+' qa-row-laying qa-lay-open'} style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
             <div class="flex items-center gap-2 text-[12.5px]"><span class="font-semibold whitespace-nowrap">Load ${i+1}</span><span class="text-muted">${r.scanned?'from the docket · ':''}progressive total ${fmt2((run))} t</span></div>
             ${(()=>{const k=rows.findIndex((x,j)=>j!==i&&!blank(r.docket)&&x.docket===r.docket);return k>=0&&html`<div id="qa-lay-dup" class="text-[12.5px] font-medium rounded-md px-2 py-1" style=${{background:'hsl(38 90% var(--blk-l))'}}>Docket ${r.docket} is already on load ${k+1}. Scanned twice?</div>`})()}
-            <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              <${Fld} label="Docket number"><${In} id="qa-lay-docket" v=${r.docket} on=${v=>setRow(i,{docket:v})}/><//><${Fld} label="Truck rego"><${In} id="qa-lay-rego" v=${r.rego} on=${v=>setRow(i,{rego:v.toUpperCase()})}/><//>
-              <${Fld} label="Time in"><${In} type="time" v=${r.time} on=${v=>setRow(i,{time:v})}/><//>
-              <${Fld} label="Temperature °C *"><input id="qa-lay-temp" type="number" inputmode="decimal" class="field" style=${{...fs,boxShadow:blank(r.temp)?'inset 0 0 0 1.5px hsl(38 90% 48%)':''}} autoFocus=${!!r.scanned} value=${r.temp} onInput=${e=>setRow(i,{temp:e.target.value})}/><//>
-              <${Fld} label="Tonnes"><${In} id="qa-lay-tonnes" v=${r.tonnes} on=${v=>setRow(i,{tonnes:v})}/><//></div>
-            <div class="grid grid-cols-2 gap-2"><${Fld} label="Chainage start"><${In} id="qa-lay-chs" v=${r.ch_start} on=${v=>setRow(i,{ch_start:v})}/><//><${Fld} label="Chainage finish"><${In} id="qa-lay-chf" v=${r.ch_finish} on=${v=>setRow(i,{ch_finish:v})}/><//></div>
-            <${Fld} label="Run location / comments"><${In} v=${r.comments} on=${v=>setRow(i,{comments:v})} ph="e.g. Run 1, overlay / patch"/><//>
+            ${(()=>{const box=(k,id,extra)=>html`<input id=${id} class="field" style=${{...fs,...(bad(i,k)||{})}} value=${r[k]==null?'':r[k]} onInput=${e=>setRow(i,{[k]:k==='rego'?e.target.value.toUpperCase():e.target.value})} ...${extra||{}}/>`;
+              return html`<div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                <${Fld} label="Docket number">${box('docket','qa-lay-docket')}<//><${Fld} label="Truck rego">${box('rego','qa-lay-rego')}<//>
+                <${Fld} label="Time in">${box('time','qa-lay-time',{type:'time'})}<//>
+                <${Fld} label="Temperature °C">${box('temp','qa-lay-temp',{type:'number',inputmode:'decimal'})}<//>
+                <${Fld} label="Tonnes">${box('tonnes','qa-lay-tonnes',{inputmode:'decimal'})}<//></div>
+              <div class="grid grid-cols-2 gap-2"><${Fld} label="Chainage start">${box('ch_start','qa-lay-chs')}<//><${Fld} label="Chainage finish">${box('ch_finish','qa-lay-chf')}<//></div>
+              <${Fld} label="Run location / comments">${box('comments','qa-lay-comments',{placeholder:'e.g. Run 1, overlay / patch'})}<//>`})()}
             <div class="flex flex-wrap gap-2"><button id="qa-lay-done" type="button" class="btn btn-primary" onClick=${()=>close(i)}>${Icon.plus} Add load</button>
               <button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>{f.set('laying',x=>({...x,rows:x.rows.filter((y,k)=>k!==i)}));setOpen(-1);setErr('')}}>Remove this load</button></div></div>`
           :html`<div key=${i} class="rounded-lg border border-line px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12.5px] qa-row-laying qa-lay-line">
             <span class="font-semibold">Load ${i+1}</span>
             <span class="mono">${r.docket||html`<span class="text-faint">no docket</span>`}</span>
             <span class="mono">${r.rego||'–'}</span><span>${r.time||''}</span>
-            <span style=${blank(r.temp)?{color:'var(--bad)',fontWeight:600}:null}>${blank(r.temp)?'no temperature':r.temp+' °C'}</span>
+            <span>${blank(r.temp)?'':r.temp+' °C'}</span>${!rowDone(r)&&html`<span style=${{color:'var(--bad)',fontWeight:600}}>missing ${layMissing(r).map(([,l])=>l.toLowerCase()).join(', ')}</span>`}
             <span class="font-semibold tnum">${r.tonnes||'–'} t</span><span class="text-muted tnum">total ${fmt2((run))} t</span>
             ${(r.ch_start||r.ch_finish)&&html`<span class="text-muted">Ch ${r.ch_start||'?'}–${r.ch_finish||'?'}</span>`}
             ${r.comments&&html`<span class="text-muted truncate max-w-[220px]">${r.comments}</span>`}
@@ -418,7 +423,7 @@ DIAGRAM.check=d=>[...(!d.sketch&&!(d.photos||[]).length?['The diagram (draw it, 
 ENV.check=(d,o)=>{const it=d.items||{};const pre=ENV_ITEMS.filter(([k])=>!(it[k]||{}).pre).length,post=ENV_ITEMS.filter(([k])=>!(it[k]||{}).post).length;
   return [...(pre?[`${pre} item${pre===1?'':'s'} not answered before surfacing`]:[]),...(post?[`${post} item${post===1?'':'s'} not answered after surfacing`]:[]),...(blank(d.before)?['Condition of the site before paving']:[]),...(blank(d.after)?['Condition of the site after the job']:[]),...(signedOn(o,'env')?[]:['Signature of whoever prepared it'])]};
 COSTS.check=d=>[...(blank(d.supervisor)?['Supervisor name']:[]),...(blank(d.start_paving)?['Start paving time']:[]),...(blank(d.finish_paving)?['Finish paving time']:[]),...(!d.none&&!(d.rows||[]).some(r=>!blank(r.contractor))?['The external contractors (or tick “No external contractors”)']:[])];
-LAYING.check=(d,o)=>[...((d.rows||[]).some(r=>!rowDone(r))?['Every load needs its docket number, tonnes and temperature']:[]),...((d.rows||[]).length&&!laySerial(o&&o.p,d)?['Temp gun serial number (on the JSA, under Quality)']:[])];   /* no loads is fine */
+LAYING.check=(d,o)=>[...((d.rows||[]).some(r=>!rowDone(r))?['Every load needs all its details (docket, rego, time, temperature, tonnes, chainages, run location)']:[]),...((d.rows||[]).length&&!laySerial(o&&o.p,d)?['Temp gun serial number (on the JSA, under Quality)']:[])];   /* no loads is fine */
 const FORMS=[HOLD,AQR,DIAGRAM,LAYING,ENV,COSTS];
 FORMS.forEach(f=>f.required=true);
 const SIGN_TITLES={aqr_afa:'Agree the quantities (AFA)',aqr_client:'Agree the quantities (client)',hold_afa:'Hold point (AFA quality rep)',hold_client:'Release the hold point (client)',env:'Sign the environmental checklist'};
