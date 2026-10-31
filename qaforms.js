@@ -350,7 +350,7 @@ function LayingEditor({f}){
   const d=f.pack.forms.laying;const set=p=>f.set('laying',x=>({...x,...p}));const rows=d.rows||[];
   const setRow=(i,p)=>f.set('laying',x=>({...x,rows:x.rows.map((r,k)=>k===i?{...r,...p}:r)}));
   const [open,setOpen]=useState(()=>{const k=rows.findIndex(r=>!rowDone(r));return k});   /* the load being filled in */
-  const [busy,setBusy]=useState('');const [err,setErr]=useState('');const fileRef=useRef(null);const [photo,setPhoto]=useState(null);   /* the docket just scanned, shown beside its load to check */const [tried,setTried]=useState(-1);   /* Add load pressed with something missing */
+  const [busy,setBusy]=useState('');const [err,setErr]=useState('');const fileRef=useRef(null);const [tried,setTried]=useState(-1);   /* Add load pressed with something missing */
   const blocker=rows.findIndex(r=>!rowDone(r));   /* a load still missing its docket, tonnes or temperature */
   /* a new load starts at the last load's run location (until it's changed; later loads follow the new one) */
   const addRow=r=>{f.set('laying',x=>{const l=x.rows||[];const prev=l.length?l[l.length-1].comments:'';return {...x,rows:[...l,{...r,comments:blank(r.comments)?(prev||''):r.comments}]}});setTried(-1);setOpen(rows.length)};
@@ -360,7 +360,7 @@ function LayingEditor({f}){
       const pic=await docketJpeg(file);let got=await aiReadDocket(pic,rows.map(r=>r.docket).filter(Boolean),known0),ai=!!got&&!got.failed;
       const aiFail=got&&got.failed;if(!ai){got=null;setBusy('Reading the docket on the phone…')}
       if(!got){const [w,c]=await Promise.all([loadOcr(),prepDocket(file)]);const {data}=await w.recognize(c);got=parseDocket(data.text||'')}
-      setPhoto({i:rows.length,url:pic});
+
       const gap=fillDocketGap(got.docket,rows.map(r=>r.docket),got.docketGapAt);
       const odd=!gap.guess&&!!got.docket&&gap.odd;
       const known=[...rows.map(r=>r.rego),...((f.data&&f.data.resources)||[]).map(r=>r.rego)];
@@ -384,7 +384,6 @@ function LayingEditor({f}){
       ${rows.map((r,i)=>{run+=n0(r.tonnes);const isOpen=i===open&&f.canEdit;
         return isOpen?html`<div key=${i} class=${rowStyle+' qa-row-laying qa-lay-open'} style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
             <div class="flex items-center gap-2 text-[12.5px]"><span class="font-semibold whitespace-nowrap">Load ${i+1}</span><span class="text-muted">${r.scanned==='ai'?'read from the docket by AI · ':r.scanned?'from the docket · ':''}progressive total ${fmt2((run))} t</span></div>
-            ${photo&&photo.i===i&&html`<details class="qa-lay-photo" open=${true}><summary class="text-[12px] text-muted cursor-pointer">The docket photo: check the numbers against it</summary><img src=${photo.url} alt="Docket photo" class="mt-1 w-full max-h-[340px] object-contain rounded-md border border-line bg-white"/></details>`}
             ${(()=>{const k=rows.findIndex((x,j)=>j!==i&&!blank(r.docket)&&x.docket===r.docket);return k>=0&&html`<div id="qa-lay-dup" class="text-[12.5px] font-medium rounded-md px-2 py-1" style=${{background:'hsl(38 90% var(--blk-l))'}}>Docket ${r.docket} is already on load ${k+1}. Scanned twice?</div>`})()}
             ${(()=>{const box=(k,id,extra)=>html`<input id=${id} class="field" style=${{...fs,...(k==='docket'&&r.docket_check&&!bad(i,k)?{boxShadow:'inset 0 0 0 1.5px hsl(38 90% 48%)',borderColor:'hsl(38 90% 48%)'}:{}),...(bad(i,k)||{})}} value=${r[k]==null?'':r[k]}
                 onInput=${e=>setRow(i,{[k]:k==='rego'?e.target.value.toUpperCase():e.target.value,...(k==='docket'?{docket_check:false}:{})})} ...${extra||{}}/>`;
