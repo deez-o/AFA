@@ -3333,7 +3333,7 @@ function TrucksManager({data,setData}){
 const TRUCKISH=/truck|tipper|prime ?mover|semi|float|trailer|tanker|spray|water ?cart|bogie|ute/i;
 function FleetTrucks({data,setData}){
   const [all,setAll]=useState(false);
-  const machines=data.resources.filter(r=>r.type==='machine').sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+  const machines=data.resources.filter(r=>r.type==='machine').sort((a,b)=>String(a.rego||a.name).localeCompare(String(b.rego||b.name),undefined,{numeric:true}));
   const isTruck=m=>TRUCKISH.test([machCatOf(m),m.name,m.sub].join(' '));
   const list=truckCosOf(data);const defs=truckDefsOf(data);
   const nameFor=id=>Object.keys(defs).find(k=>defs[k]&&defs[k].assetId===id&&list.some(x=>x.toLowerCase()===k.toLowerCase()))||null;
@@ -3346,7 +3346,7 @@ function FleetTrucks({data,setData}){
   const unhide=m=>setData(d=>({...d,fleetTruckHide:(Array.isArray(d.fleetTruckHide)?d.fleetTruckHide:[]).filter(x=>x!==m.id)}));
   const link=(id,name)=>setData(d=>{const m={...truckDefsOf(d)};Object.keys(m).forEach(k=>{if(m[k]&&m[k].assetId===id){const {assetId,...rest}=m[k];if(rest.driver||rest.w)m[k]=rest;else delete m[k]}});
     if(name)m[name]={...(m[name]||{}),assetId:id};return {...d,truckDefs:m}});
-  const addNew=mc=>setData(d=>{const l=[...truckCosOf(d)];let nm=mc.name.trim();if(l.some(x=>x.toLowerCase()===nm.toLowerCase())&&!nameFor(mc.id))nm=`${mc.name} ${mc.sub||''}`.trim();
+  const addNew=mc=>setData(d=>{const l=[...truckCosOf(d)];let nm=String(mc.rego||mc.name).trim();if(l.some(x=>x.toLowerCase()===nm.toLowerCase())&&!nameFor(mc.id))nm=`${nm} ${mc.sub||''}`.trim();
     if(!l.some(x=>x.toLowerCase()===nm.toLowerCase()))l.push(nm);const m={...truckDefsOf(d)};Object.keys(m).forEach(k=>{if(m[k]&&m[k].assetId===mc.id){const {assetId,...rest}=m[k];m[k]=rest}});
     m[nm]={...(m[nm]||{}),assetId:mc.id};return {...d,truckCos:l,truckDefs:m}});
   const addAll=()=>shown.filter(m=>isTruck(m)&&!nameFor(m.id)&&!hidden.has(m.id)).forEach(addNew);
@@ -3358,13 +3358,13 @@ function FleetTrucks({data,setData}){
     ${!shown.length&&html`<div class="text-[12.5px] text-muted">No trucks found in Fleet. ${machines.length?'Tick “Show all machines” to pick from every machine.':'Add them in Fleet › Machines first.'}</div>`}
     <div class="grid gap-1">${shown.map(m=>{const nm=nameFor(m.id);const al=typeof machAlert==='function'?machAlert(data,m.id):null;
       return html`<div key=${m.id} class="flex flex-wrap items-center gap-2 py-1 border-b border-line fleet-truck" data-id=${m.id}>
-        <div class="min-w-0 flex-1"><div class="text-[13px] font-medium truncate">${m.name} <span class="text-muted font-normal">${m.sub||''}</span>${m.rego?html` <span class="mono text-[12px] text-muted">${m.rego}</span>`:''}</div>
+        <div class="min-w-0 flex-1"><div class="text-[13px] font-medium truncate">${m.rego?html`<span class="mono">${m.rego}</span>`:html`${m.name} <span class="text-[11.5px] text-muted font-normal">(no rego)</span>`} <span class="text-muted font-normal">${m.sub||''}</span></div>
           ${al&&html`<div class="text-[11.5px] font-medium" style=${{color:al.tone}}>${al.text}</div>`}</div>
-        <select class="field field-sm" style=${{width:'auto',maxWidth:200,height:30,fontSize:12.5}} value=${nm||''} onChange=${e=>link(m.id,e.target.value||null)} aria-label=${`Truck list name for ${m.name}`}>
+        <select class="field field-sm" style=${{width:'auto',maxWidth:200,height:30,fontSize:12.5}} value=${nm||''} onChange=${e=>link(m.id,e.target.value||null)} aria-label=${`Truck list name for ${m.rego||m.name}`}>
           <option value="">Not linked</option>${list.map(x=>html`<option key=${x} value=${x}>${x}</option>`)}</select>
         ${hidden.has(m.id)?html`<span class="text-[11.5px] text-muted">Removed</span><button type="button" class="btn" style=${{height:30,fontSize:12.5}} onClick=${()=>unhide(m)}>Show again</button>`
           :html`${!nm&&html`<button type="button" class="btn" style=${{height:30,fontSize:12.5}} onClick=${()=>addNew(m)}>${Icon.plus} Add to list</button>`}
-          <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken ft-remove" onClick=${()=>hide(m)} aria-label=${`Remove ${m.name} from Trucks in Fleet`} title="Remove from this list (it stays in Fleet)">${Icon.x}</button>`}
+          <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-sunken ft-remove" onClick=${()=>hide(m)} aria-label=${`Remove ${m.rego||m.name} from Trucks in Fleet`} title="Remove from this list (it stays in Fleet)">${Icon.x}</button>`}
       </div>`})}</div>
     <label class="flex items-center gap-2 text-[12px] text-muted cursor-pointer"><input type="checkbox" class="w-3.5 h-3.5" checked=${all} onChange=${e=>setAll(e.target.checked)}/> Show all machines (not just ones that look like trucks, and any removed)</label>
   </section>`;
