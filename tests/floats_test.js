@@ -9,7 +9,7 @@ ctx.window = ctx; ctx.addEventListener = () => {}; ctx.removeEventListener = () 
 const src = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
 try { vm.runInContext(src, ctx) } catch (e) { if (process.env.DBG) console.log(e) }   // the start-up at the end needs a browser; the helpers above it are defined
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../floats.js'), 'utf8'), ctx);
-const { buildMoves, toTrips, planFloat, makeTravel, cfgOf } = ctx.FFL;
+const { buildMoves, toTrips, planFloat, makeTravel, cfgOf, loadFits } = ctx.FFL;
 let fails = 0; const ok = (c, l) => { console.log((c ? 'PASS' : 'FAIL') + ': ' + l); if (!c) fails++; };
 const t = s => { const [d, h] = s.split(' '); const [y, m, dd] = d.split('-').map(Number); const [H, M] = h.split(':').map(Number); return new Date(y, m - 1, dd, H, M) };
 const hm = d => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -72,7 +72,7 @@ let P = planFloat(toTrips(M, cfg), cfg, travel, {}).runs;
 ok(P.length === 2 && P[0].pick < P[1].pick, 'one float: the two machines go one after the other');
 ok(P[0].pick.getHours() === 4 && hm(P[0].done) === '05:40', 'first: picked up 04:00 when the night shift ends; 30 min load + 40 min drive + 30 min unload: done 05:40');
 ok(P[1].late, 'second: the float can’t be back in time for 06:00, so it’s marked late');
-const cfg2 = { ...cfg, perLoad: 2 };
+const cfg2 = { ...cfg, perLoad: 2, combos: [], alone: [] };
 P = planFloat(toTrips(M, cfg2), cfg2, travel, {}).runs;
 ok(P.length === 1 && P[0].moves.length === 2 && hm(P[0].done) === '06:40' && P[0].late, 'two machines per load: one trip (loading and unloading both: done 06:40, still late for 06:00)');
 // a pick-up time set by hand is kept
@@ -81,4 +81,20 @@ P = planFloat(toTrips(M, cfg), cfg, travel, { [id]: { time: '2026-11-10T03:00' }
 ok(P.find(r => r.id === id).fixed && hm(P.find(r => r.id === id).pick) === '03:00', 'a pick-up time set by hand is kept');
 P = planFloat(toTrips(M, cfg), cfg, travel, { [id]: { skip: true } });
 ok(P.runs.length === 1 && P.skipped.length === 1, '“Not needed”: the move is left out');
+
+// AFA's float loads (the starting settings)
+const CF = cfgOf({});
+const mv = (name, cat = '', rego = '') => ({ m: 'id-' + name, name, cat, rego });
+const fits = (...ms) => loadFits(ms.map(x => typeof x === 'string' ? mv(x) : x), CF);
+ok(!fits('PV010', 'SR004'), 'PV010 goes by itself');
+ok(fits('PV009', 'SR004', 'SR005') && fits('PV012 Vogele', 'SR010', 'SR014'), 'paver + two small rollers');
+ok(!fits('PV009', 'SR004', 'SR005', 'SR010'), 'not three rollers with a paver');
+ok(fits('PV008', 'SR012') && !fits('PV008', 'SR012', 'SR004'), 'SR012 with a paver, but no other roller');
+ok(fits('PV009', 'SR015') && !fits('PV009', 'SR015', 'SR013'), 'SR015 the same');
+ok(fits('SR004', 'SR013') && fits('SR012', 'SR015'), 'two small rollers together; SR012 + SR015 together');
+ok(fits('PV009', 'MT007') && fits('PV012', mv('Multi roller', 'Multi Rollers', '1AP7VD')) && !fits('PV009', 'MT007', 'MT008'), 'a paver + one multi (1AP7VD found by its rego), not two');
+ok(fits('PV008', 'MT006', 'SR011') && !fits('PV008', 'MT006', 'SR011', 'SR004'), 'paver + MT006 + one small roller');
+ok(!fits('PV009', 'PV012'), 'two pavers don’t share');
+ok(!fits('PV009', 'SR099'), 'a roller not on the list doesn’t go with a paver');
+ok(!ctx.FFL.needsFloat({ name: 'SS003', category: 'Bobcats' }, {}, CF) && !ctx.FFL.needsFloat({ name: 'WC1', category: 'Water Carts' }, {}, CF), 'bobcats and water carts aren’t floated');
 console.log(fails ? `${fails} FAILED` : 'ALL FLOAT TESTS PASSED'); process.exit(fails ? 1 : 0);

@@ -11,9 +11,15 @@
 (function(){
 
 /* ---------- settings ---------- */
-const NO_FLOAT=/truck|tipper|water ?cart|ute\b|float|trailer|bogie|prime ?mover|semi\b|tanker|spray|car\b|vehicle/i;   /* drive themselves */
+const NO_FLOAT=/truck|bobcat|skid ?steer|tipper|water ?cart|ute\b|float|trailer|bogie|prime ?mover|semi\b|tanker|spray|car\b|vehicle/i;   /* drive themselves */
 const CFG0={yardName:'Yard',yardAddr:'187-193 Potassium St, Narangba QLD',gapDays:3,dayStart:'06:00',nightStart:'18:00',shiftHrs:10,
-  loadMin:30,unloadMin:30,slow:1.25,floatStart:'05:00',perLoad:1,driver:'',floatName:'Float',skipCats:null};
+  loadMin:30,unloadMin:30,slow:1.25,floatStart:'05:00',perLoad:1,driver:'',floatName:'Float',skipCats:null,
+  /* what fits on the float together (AFA's float, Oct 2026): machine numbers (the start of the name, or the rego) */
+  alone:['PV010'],
+  groups:[{name:'Pavers that share',items:['PV008','PV009','PV012']},{name:'Small rollers',items:['SR004','SR005','SR010','SR011','SR013','SR014']},
+    {name:'Multis',items:['1AP7VD','MT007','MT008','MT009']}],
+  combos:[{items:['g:Pavers that share','g:Small rollers','g:Small rollers']},{items:['g:Pavers that share','n:SR012']},{items:['g:Pavers that share','n:SR015']},
+    {items:['g:Small rollers','g:Small rollers']},{items:['n:SR012','n:SR015']},{items:['g:Pavers that share','g:Multis']},{items:['g:Pavers that share','n:MT006','g:Small rollers']}]};
 const cfgOf=d=>({...CFG0,...((d&&d.floatCfg)||{})});
 const floatCats=(d,cfg)=>{const cats=machineCatsOf(d);return cfg.skipCats?cats.filter(c=>!cfg.skipCats.includes(c)):cats.filter(c=>!NO_FLOAT.test(c))};
 const needsFloat=(m,d,cfg)=>{const c=(m.category||'').trim();if(!c)return !NO_FLOAT.test(m.name+' '+(m.sub||''));
@@ -103,9 +109,26 @@ const endWhy=a=>a.kind==='service'?`Service finishes ${whenTxt(a.end)}`:`${a.shi
 const startWhy=a=>a.kind==='service'?`In for service ${whenTxt(a.start)}`:`${a.shift==='night'?'Night':'Day'} shift starts ${whenTxt(a.start)}`;
 
 /* ---------- 3. loads: machines going the same way at the same time share the float (up to "machines per load") ---------- */
+/* which machines may share the float: some always go alone (e.g. the big paver); otherwise the combinations you know
+   fit ("a paver + a multi roller", "SR012 + SR013"), each part a machine or a whole category. With no combinations
+   set, up to "machines per load". A smaller load that's part of a combination fits too. */
+const mno=x=>String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+const isNo=(no,name,rego)=>{const n=mno(no);if(!n)return false;const first=mno(String(name||'').trim().split(/[\s·\-–(]/)[0]);return first===n||mno(name)===n||mno(rego)===n};
+const itemFits=(it,mv,cfg)=>it.startsWith('m:')?it.slice(2)===mv.m:it.startsWith('n:')?isNo(it.slice(2),mv.name,mv.rego)
+  :it.startsWith('c:')?it.slice(2).toLowerCase()===(mv.cat||'').trim().toLowerCase()
+  :it.startsWith('g:')?((cfg.groups||[]).find(g=>g.name===it.slice(2))||{items:[]}).items.some(no=>isNo(no,mv.name,mv.rego)):false;
+const goesAlone=(mv,cfg)=>(cfg.alone||[]).some(no=>isNo(no,mv.name,mv.rego)||no===mv.m);
+function loadFits(list,cfg){
+  if(list.length<2)return true;
+  if(list.some(mv=>goesAlone(mv,cfg)))return false;
+  const combos=(cfg.combos||[]).filter(c=>(c.items||[]).filter(Boolean).length>1);
+  if(!combos.length)return list.length<=Math.max(1,+cfg.perLoad||1);
+  /* each machine needs its own part of the combination */
+  const match=(i,used,items)=>i===list.length||items.some((it,j)=>!used[j]&&itemFits(it,list[i],cfg)&&match(i+1,{...used,[j]:1},items));
+  return combos.some(c=>{const items=c.items.filter(Boolean);return items.length>=list.length&&match(0,{},items)})}
 function toTrips(moves,cfg){
-  const per=Math.max(1,+cfg.perLoad||1);const trips=[];
-  moves.forEach(mv=>{const t=per>1&&trips.find(t=>t.moves.length<per&&t.from.key===mv.from.key&&t.to.key===mv.to.key&&mv.earliest<t.latest&&t.earliest<mv.latest);
+  const trips=[];
+  moves.forEach(mv=>{const t=trips.find(t=>t.from.key===mv.from.key&&t.to.key===mv.to.key&&mv.earliest<t.latest&&t.earliest<mv.latest&&loadFits([...t.moves,mv],cfg));
     if(t){t.moves.push(mv);t.earliest=new Date(Math.max(t.earliest,mv.earliest));t.latest=new Date(Math.min(t.latest,mv.latest));t.id=t.moves.map(x=>x.id).sort().join('+');return}
     trips.push({id:mv.id,moves:[mv],from:mv.from,to:mv.to,earliest:mv.earliest,latest:mv.latest,kind:mv.kind})});
   return trips}
@@ -345,15 +368,53 @@ function FloatSettings({data,setData,cfg}){
       ${num('loadMin','Loading a machine','min',5)}
       ${num('unloadMin','Unloading','min',5)}
       ${num('slow','Float drive time × car time','×',.05)}
-      ${num('perLoad','Machines per float load','',1)}
       <label class="grid gap-1"><span class="label">Day shift starts (if the booking has no time)</span><input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.dayStart} onChange=${e=>set({dayStart:e.target.value})}/></label>
       <label class="grid gap-1"><span class="label">Night shift starts (if the booking has no time)</span><input type="time" class="field field-sm mono" style=${{height:32,maxWidth:130}} value=${cfg.nightStart} onChange=${e=>set({nightStart:e.target.value})}/></label>
     </div>
+    <${FloatLoads} data=${data} cfg=${cfg} set=${set}/>
     <div class="grid gap-2"><span class="label">Machine categories that go on the float</span>
       <div class="flex flex-wrap gap-2">${cats.map(c=>{const yes=on.includes(c);return html`<label key=${c} class=${'inline-flex items-center gap-1.5 text-[13px] px-2 py-1 rounded-md border '+(yes?'border-line-strong bg-surface':'border-line text-muted')}>
         <input type="checkbox" class="w-4 h-4" checked=${yes} onChange=${()=>set({skipCats:cats.filter(x=>x===c?yes:!on.includes(x))})}/>${c}</label>`})}</div>
       <span class="text-[12px] text-muted">Trucks, water carts and utes drive themselves, so they’re left off to start with.</span></div>
   </section>`}
+
+/* which machines can share the float: machines that go alone, named groups ("Small rollers"), and the loads that fit */
+function FloatLoads({data,cfg,set}){
+  const ms=data.resources.filter(r=>r.type==='machine'&&needsFloat(r,data,cfg)).sort((a,b)=>(a.category||'').localeCompare(b.category||'')||a.name.localeCompare(b.name,undefined,{numeric:true}));
+  const noOf=m=>String(m.name||'').trim().split(/[\s·\-–(]/)[0]||m.name;
+  const cats=[...new Set(ms.map(m=>(m.category||'').trim()).filter(Boolean))];
+  const alone=cfg.alone||[],groups=cfg.groups||[],combos=cfg.combos||[];
+  const found=no=>ms.some(m=>isNo(no,m.name,m.rego));
+  const Chip=(no,onX)=>html`<span key=${no} class="inline-flex items-center gap-1 text-[12.5px] font-semibold px-2 py-0.5 rounded-md border" style=${found(no)?{background:'var(--sunken)',borderColor:'var(--line)'}:{borderColor:'hsl(38 80% 60%)',color:'hsl(30 85% 34%)'}} title=${found(no)?'':'No machine with this number yet'}>${no}
+      <button type="button" class="text-muted hover:text-ink" aria-label=${'Remove '+no} onClick=${onX}>${Icon.x}</button></span>`;
+  const AddNo=(have,onAdd,id,label)=>html`<select id=${id} class="field field-sm" style=${{height:28,maxWidth:200}} value="" onChange=${e=>{const v=e.target.value;if(v)onAdd(v)}} aria-label=${label}>
+      <option value="">+ Add…</option>${ms.filter(m=>!have.some(no=>isNo(no,m.name,m.rego))).map(m=>html`<option key=${m.id} value=${noOf(m)}>${m.name}${m.category?' · '+m.category:''}</option>`)}</select>`;
+  const lab=it=>it.startsWith('g:')?it.slice(2):it.startsWith('c:')?'Any '+it.slice(2):it.startsWith('n:')?it.slice(2):it.startsWith('m:')?((ms.find(m=>m.id===it.slice(2))||{}).name||'?'):'';
+  const setCombo=(i,items)=>set({combos:combos.map((c,k)=>k===i?{...c,items}:c)});
+  const opts=html`<option value="">Pick…</option>
+    <optgroup label="Any one of a group">${groups.map(g=>html`<option key=${g.name} value=${'g:'+g.name}>${g.name}</option>`)}</optgroup>
+    <optgroup label="Any machine in a category">${cats.map(c=>html`<option key=${c} value=${'c:'+c}>Any ${c}</option>`)}</optgroup>
+    <optgroup label="A particular machine">${ms.map(m=>html`<option key=${m.id} value=${'n:'+noOf(m)}>${m.name}${m.category?' · '+m.category:''}</option>`)}</optgroup>`;
+  return html`<div class="grid gap-4 rounded-lg border border-line p-3" id="fl-loads">
+    <div><div class="font-display text-[15px] font-semibold">Float loads</div><div class="text-[12.5px] text-muted">What can share the float. Machines going the same way at the same time go on one load when they fit.</div></div>
+    <div class="grid gap-1.5"><span class="label">Always goes by itself</span>
+      <div class="flex flex-wrap gap-1.5 items-center">${alone.map(no=>Chip(no,()=>set({alone:alone.filter(x=>x!==no)})))}${AddNo(alone,v=>set({alone:[...alone,v]}),'fl-alone-add','Add a machine that goes by itself')}</div></div>
+    <div class="grid gap-2"><span class="label">Groups</span>
+      ${groups.map((g,i)=>html`<div key=${i} class="grid gap-1 fl-group">
+        <div class="flex items-center gap-2"><input class="field field-sm font-semibold" style=${{height:28,maxWidth:220}} value=${g.name} onChange=${e=>{const nv=e.target.value.trim();if(!nv||groups.some((x,k)=>k!==i&&x.name===nv))return;
+            set({groups:groups.map((x,k)=>k===i?{...x,name:nv}:x),combos:combos.map(c=>({...c,items:(c.items||[]).map(it=>it==='g:'+g.name?'g:'+nv:it)}))})}} aria-label="Group name"/>
+          <button type="button" class="btn btn-ghost" style=${{height:28,color:'var(--bad)'}} aria-label=${'Remove the group '+g.name} onClick=${()=>set({groups:groups.filter((_,k)=>k!==i),combos:combos.map(c=>({...c,items:(c.items||[]).map(it=>it==='g:'+g.name?'':it)}))})}>${Icon.trash}</button></div>
+        <div class="flex flex-wrap gap-1.5 items-center">${(g.items||[]).map(no=>Chip(no,()=>set({groups:groups.map((x,k)=>k===i?{...x,items:x.items.filter(y=>y!==no)}:x)})))}${AddNo(g.items||[],v=>set({groups:groups.map((x,k)=>k===i?{...x,items:[...(x.items||[]),v]}:x)}),'fl-group-add-'+i,'Add a machine to '+g.name)}</div></div>`)}
+      <button type="button" class="btn justify-self-start" style=${{height:28}} onClick=${()=>{let n='New group',k=2;while(groups.some(g=>g.name===n))n='New group '+(k++);set({groups:[...groups,{name:n,items:[]}]})}}>${Icon.plus} Add a group</button></div>
+    <div class="grid gap-1.5"><span class="label">Loads that fit</span>
+      ${combos.length===0&&html`<span class="text-[12.5px] text-muted">None: every machine goes on its own load.</span>`}
+      ${combos.map((c,i)=>html`<div key=${i} class="flex flex-wrap items-center gap-1.5 fl-combo">
+        ${(c.items||[]).map((it,j)=>html`${j>0&&html`<span class="text-muted">+</span>`}<select key=${j} class="field field-sm" style=${{height:28,maxWidth:200}} value=${it} onChange=${e=>setCombo(i,e.target.value?c.items.map((x,k)=>k===j?e.target.value:x):c.items.filter((_,k)=>k!==j))} aria-label=${'Part '+(j+1)+': '+lab(it)}>${opts}</select>`)}
+        <button type="button" class="btn" style=${{height:28}} aria-label="Add another machine to this load" onClick=${()=>setCombo(i,[...(c.items||[]),''])}>${Icon.plus}</button>
+        <button type="button" class="btn btn-ghost" style=${{height:28,color:'var(--bad)'}} aria-label="Remove this load" onClick=${()=>set({combos:combos.filter((_,k)=>k!==i)})}>${Icon.trash}</button></div>`)}
+      <button type="button" id="fl-combo-add" class="btn justify-self-start" style=${{height:28}} onClick=${()=>set({combos:[...combos,{items:['','']}]})}>${Icon.plus} Add a load</button>
+      <span class="text-[12px] text-muted">Part of a load fits too: “paver + 2 small rollers” also allows a paver with one small roller. Numbers in amber don’t match a machine yet.</span></div>
+  </div>`}
 
 /* ---------- the run sheet ---------- */
 function runSheetText(cfg,runs,k){
@@ -394,5 +455,5 @@ async function runSheetPdf(data,cfg,runs,k){
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}
 
 window.FloatsScreen=FloatsScreen;
-window.FFL={buildMoves,toTrips,planFloat,makeTravel,cfgOf,runSheetText,normAddr,needsFloat};
+window.FFL={buildMoves,toTrips,loadFits,planFloat,makeTravel,cfgOf,runSheetText,normAddr,needsFloat};
 })();
