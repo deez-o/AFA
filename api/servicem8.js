@@ -33,6 +33,7 @@ const OAUTH = 'https://go.servicem8.com/oauth';
 const SCOPES = 'read_jobs create_jobs manage_jobs read_schedule read_job_materials read_job_queues read_customers manage_customers publish_job_notes';
 const HOOK_FIELDS = ['status', 'queue_uuid', 'work_done_description', 'active', 'job_is_scheduled_until_stamp', 'total_invoice_amount'];
 const HOOK_FIELDS_MIN = ['status', 'queue_uuid', 'work_done_description', 'active'];
+const ACTIVITY_FIELDS = ['start_date', 'end_date', 'active', 'activity_was_scheduled', 'activity_was_recorded'];   // bookings and time on a job
 const WORK_ROLES = ['admin', 'superuser', 'supervisor', 'mechanic'];
 const MGR_ROLES = ['admin', 'superuser'];
 const FINISHED = ['completed', 'closed', 'cancelled'];
@@ -380,7 +381,7 @@ async function handler(req, res, env = process.env, http = fetch) {
       keyExtra: String(hookKey).slice(given.length).slice(0, 200), query: Object.fromEntries(Object.entries(Q).filter(([k]) => k !== 'hook' && k !== 'key')),
       body: JSON.stringify(b).slice(0, 600) };
     const answer = async (status, text) => {
-      if (status !== 200 || !b.object) await D.post('maintenance_audit', { tbl: 'servicem8_hook', action: 'call', new: { ...seen, answered: status, reply: String(text).slice(0, 100) } }).catch(() => null);
+      if (status !== 200 || !b.object || /^(ok|not ours|ignored|switched off)$/.test(text)) await D.post('maintenance_audit', { tbl: 'servicem8_hook', action: 'call', new: { ...seen, answered: status, reply: String(text).slice(0, 100) } }).catch(() => null);
       return sendText(res, status, text);
     };
     if (!seen.keyOk) return answer(403, 'Unknown');
@@ -388,18 +389,25 @@ async function handler(req, res, env = process.env, http = fetch) {
     const challenge = b.challenge || b.Challenge || b['hub.challenge'] || Q.challenge || Q['hub.challenge'] || (String(hookKey).match(/challenge=([^&]+)/) || [])[1];
     if (challenge && !b.object) return answer(200, decodeURIComponent(String(challenge)));
     if (req.method !== 'POST' || !b.object) return answer(200, 'ok');
-    if (b.object !== 'job') return sendText(res, 200, 'ignored');
+    const obj = String(b.object || '').toLowerCase().replace(/[^a-z]/g, '');
+    if (obj !== 'job' && obj !== 'jobactivity') return answer(200, 'ignored');
     const ids = (Array.isArray(b.entry) ? b.entry : []).map(e => e && e.uuid).filter(safeId);
-    if (!ids.length) return sendText(res, 200, 'ok');
-    const links = await D.get(`servicem8_jobs?state=eq.sent&job_uuid=in.(${ids.map(q).join(',')})&select=*`);
-    if (!links || !links.length) return sendText(res, 200, 'not ours');   // another client's job: never looked at
+    if (!ids.length) return answer(200, 'ok');
     const cfg = await settings(D);
-    if (!cfg.enabled) return sendText(res, 200, 'switched off');
-    const A = await credentials(env, D, http);
-    if (!A.ok) return sendText(res, 503, 'not connected');
-    const S = client(A, http);
+    if (!cfg.enabled) return answer(200, 'switched off');
+    let jobIds = ids, S = null;
+    const connect = async () => { const A = await credentials(env, D, http); if (!A.ok) return null; return (S = client(A, http)); };
+    if (obj === 'jobactivity') {
+      // a booking or time changed: which job is it on? (only that one field is used; other clients' bookings are dropped)
+      if (!(await connect())) return answer(503, 'not connected');
+      jobIds = (await Promise.all(ids.map(id => S.get(`/jobactivity/${id}.json`).then(a => a && a.job_uuid, () => null)))).filter(safeId);
+      if (!jobIds.length) return answer(200, 'not ours');
+    }
+    const links = await D.get(`servicem8_jobs?state=eq.sent&job_uuid=in.(${jobIds.map(q).join(',')})&select=*`);
+    if (!links || !links.length) return answer(200, 'not ours');   // another client's job: never looked at
+    if (!S && !(await connect())) return answer(503, 'not connected');
     for (const l of links) await pullOne(D, S, cfg, l);   // a failure → 500, and ServiceM8 tries again later
-    return sendText(res, 200, 'ok');
+    return answer(200, 'updated ' + links.length);
   }
 
   // 2. back from connecting the add-on in ServiceM8
@@ -446,7 +454,9 @@ async function handler(req, res, env = process.env, http = fetch) {
 
   if (b.action === 'status') {
     const sec = mgr ? await D.one('servicem8_secrets?id=eq.1&select=webhook_key') : null;
-    return send(res, 200, { mode: A.mode, connected: A.ok, error: A.error || null, enabled: !!cfg.enabled,
+    const last = mgr ? await D.one('maintenance_audit?tbl=eq.servicem8_hook&select=at,new&order=at.desc&limit=1').catch(() => null) : null;
+    const lastHook = last ? { at: last.at, what: `${(last.new && last.new.reply) || ''}${last.new && last.new.answered !== 200 ? ' (refused ' + last.new.answered + ')' : ''}` } : null;
+    return send(res, 200, { mode: A.mode, connected: A.ok, error: A.error || null, enabled: !!cfg.enabled, lastHook,
       canConnect: !!(env.SERVICEM8_APP_ID && env.SERVICEM8_APP_SECRET), hooksOn: !!cfg.hooks_on_at, hasHookKey: !!(sec && sec.webhook_key) });
   }
   if (b.action === 'connect') {
@@ -477,9 +487,9 @@ async function handler(req, res, env = process.env, http = fetch) {
     const sec = await D.one('servicem8_secrets?id=eq.1&select=webhook_key');
     const key = crypto.randomBytes(24).toString('hex');   // a fresh one each time it is set up
     await D.patch('servicem8_secrets?id=eq.1', { webhook_key: key, updated_at: new Date().toISOString() });
-    const hook = async fields => {
+    const hook = async (fields, object = 'job') => {
       const r = await http(SM8_HOOKS, { method: 'POST', headers: { ...A.headers, 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-        body: new URLSearchParams({ object: 'job', fields: fields.join(','), callback_url: origin(req, env) + '/api/servicem8-hook/' + key, unique_id: 'fraserflow' }).toString() });
+        body: new URLSearchParams({ object, fields: fields.join(','), callback_url: origin(req, env) + '/api/servicem8-hook/' + key, unique_id: 'fraserflow' }).toString() });
       if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`ServiceM8 ${r.status}: ${t.slice(0, 200)}`); }
     };
     let hooks = 'full';
@@ -492,8 +502,10 @@ async function handler(req, res, env = process.env, http = fetch) {
       throw new Error(errText(e) + ' | ' + (what.length ? 'What ServiceM8 sent: ' + what.join(' || ')
         : `ServiceM8's check never reached FraserFlow at ${origin(req, env)}/api/servicem8-hook/… (is the site behind Vercel Deployment Protection?)`));
     }
+    let bookings = true;
+    try { await hook(ACTIVITY_FIELDS, 'jobactivity'); } catch (e) { bookings = false; }   // without it, bookings arrive with the regular refresh
     await D.patch('servicem8_settings?id=eq.1', { hooks_on_at: new Date().toISOString() });
-    return send(res, 200, { company_uuid: company, hooks });
+    return send(res, 200, { company_uuid: company, hooks, bookings });
   }
   if (b.action === 'sync') {
     if (!safeId(b.wo)) return send(res, 400, { error: 'Bad request' });
@@ -503,7 +515,7 @@ async function handler(req, res, env = process.env, http = fetch) {
   }
   if (b.action === 'flush') {
     if (!cfg.enabled) return send(res, 200, { off: true });
-    return send(res, 200, await flush(D, S, cfg));
+    return send(res, 200, await flush(D, S, cfg, { staleMinutes: 2 }));
   }
   return send(res, 400, { error: 'Unknown action' });
 }
