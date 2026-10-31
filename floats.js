@@ -445,8 +445,7 @@ function FloatLoads({data,cfg,set:set0}){
       <div class="flex flex-wrap gap-2 items-center rounded-lg p-1 -m-1 min-h-[52px] fl-drop" data-drop="alone" ...${drop('alone')} style=${dropStyle('alone')}>${alone.map(no=>Chip(no,()=>set({alone:alone.filter(x=>x!==no)}),'alone'))}${AddNo(alone,v=>set({alone:[...alone,v]}),'fl-alone-add','Add a machine that goes by itself')}</div></div>
     <div class="grid gap-2"><span class="label">Groups</span>
       ${groups.map((g,i)=>html`<div key=${i} class="grid gap-2 fl-group fl-drop rounded-lg bg-sunken p-3" data-drop=${'g:'+i} ...${drop('g:'+i)} style=${dropStyle('g:'+i)}>
-        <div class="flex items-center gap-2"><input class="field font-semibold text-[15px]" style=${{height:38,maxWidth:280}} value=${g.name} onChange=${e=>{const nv=e.target.value.trim();if(!nv||groups.some((x,k)=>k!==i&&x.name===nv))return;
-            set({groups:groups.map((x,k)=>k===i?{...x,name:nv}:x),combos:combos.map(c=>({...c,items:(c.items||[]).map(it=>it==='g:'+g.name?'g:'+nv:it)}))})}} aria-label="Group name"/>
+        <div class="flex items-center gap-2"><span class="font-display text-[16px] font-semibold px-1">${g.name}</span>
           </div>
         <div class="flex flex-wrap gap-2 items-center">${(g.items||[]).map(no=>Chip(no,()=>set({groups:groups.map((x,k)=>k===i?{...x,items:x.items.filter(y=>y!==no)}:x)}),'g:'+i))}
           ${!(g.items||[]).length&&html`<span class="text-[12.5px] text-muted px-1">Drag machines here</span>`}${AddNo(g.items||[],v=>set({groups:groups.map((x,k)=>k===i?{...x,items:[...(x.items||[]),v]}:x)}),'fl-group-add-'+i,'Add a machine to '+g.name)}</div></div>`)}
@@ -454,7 +453,7 @@ function FloatLoads({data,cfg,set:set0}){
         <span class="label">Not in a group yet</span>
         <div class="flex flex-wrap gap-2">${ms.filter(m=>!groups.some(g=>(g.items||[]).some(no=>isNo(no,m.name,m.rego)))&&!alone.some(no=>isNo(no,m.name,m.rego))).map(m=>Chip(noOf(m),null,'pool'))}</div>
         <span class="text-[12px] text-muted">Drag a machine into a group, or back here to take it out.</span></div>
-      <button type="button" class="btn justify-self-start" style=${{height:28}} onClick=${()=>{let n='New group',k=2;while(groups.some(g=>g.name===n))n='New group '+(k++);set({groups:[...groups,{name:n,items:[]}]})}}>${Icon.plus} Add a group</button></div>
+</div>
     <div class="grid gap-1.5"><span class="label">Loads that fit</span>
       ${combos.length===0&&html`<span class="text-[12.5px] text-muted">None: every machine goes on its own load.</span>`}
       ${combos.map((c,i)=>html`<div key=${i} class="flex flex-wrap items-center gap-1.5 fl-combo">
