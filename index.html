@@ -114,10 +114,9 @@ body.is-dragging,body.is-dragging *{cursor:grabbing!important;user-select:none}
 .reo-line{position:absolute;left:0;right:0;height:3px;background:var(--accent);z-index:25;pointer-events:none;border-radius:2px}
 .blk:hover{transform:translateY(-1px);box-shadow:0 3px 10px rgba(0,0,0,.12);z-index:3}
 .blk .t{overflow:hidden;text-overflow:ellipsis}
-/* phones: the job name wraps onto up to three lines; the bar's icons sit in a small row above it */
+/* phones: the job name wraps onto up to three lines; alert icons are hidden */
 .blk .blk-m{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;word-break:break-word;font-size:10.5px;line-height:1.15;min-width:0}
-.blk .blk-icons{display:flex;align-items:center;gap:2px;min-height:0;transform:scale(.8);transform-origin:left center}
-.blk .blk-icons:empty{display:none}
+.blk .blk-icons{display:none}   /* phones: no alert icons on the bars, just the job name */
 .blk.blk-done{filter:grayscale(1);opacity:.5}
 .blk-pending{opacity:.72;outline:2px dashed currentColor;outline-offset:-2px;cursor:pointer!important}
 .blk-edge{position:absolute;top:0;bottom:0;width:9px;z-index:3;cursor:ew-resize;touch-action:none}
