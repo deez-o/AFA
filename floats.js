@@ -17,9 +17,8 @@ const CFG0={yardName:'Yard',yardAddr:'187-193 Potassium St, Narangba QLD',gapDay
   /* what fits on the float together (AFA's float, Oct 2026): machine numbers (the start of the name, or the rego) */
   alone:['PV010'],
   groups:[{name:'Pavers that share',items:['PV008','PV009','PV012']},{name:'Small rollers',items:['SR004','SR005','SR010','SR011','SR013','SR014']},
-    {name:'Multis',items:['1AP7VD','MT007','MT008','MT009']}],
-  combos:[{items:['g:Pavers that share','g:Small rollers','g:Small rollers']},{items:['g:Pavers that share','n:SR012']},{items:['g:Pavers that share','n:SR015']},
-    {items:['g:Small rollers','g:Small rollers']},{items:['n:SR012','n:SR015']},{items:['g:Pavers that share','g:Multis']},{items:['g:Pavers that share','n:MT006','g:Small rollers']}]};
+    {name:'Small multis',items:['MT006']},{name:'Big multis',items:['1AP7VD','MT007','MT008','MT009']}],
+  combos:[]};   /* the loads: made in Floats › Settings */
 const cfgOf=d=>({...CFG0,...((d&&d.floatCfg)||{})});
 const floatCats=(d,cfg)=>{const cats=machineCatsOf(d);return cfg.skipCats?cats.filter(c=>!cfg.skipCats.includes(c)):cats.filter(c=>!NO_FLOAT.test(c))};
 const needsFloat=(m,d,cfg)=>{const c=(m.category||'').trim();if(!c)return !NO_FLOAT.test(m.name+' '+(m.sub||''));
@@ -355,7 +354,7 @@ function FloatSettings({data,setData,cfg}){
   const set=p=>setData(d=>({...d,floatCfg:{...(d.floatCfg||{}),...p}}));
   const cats=machineCatsOf(data);const on=floatCats(data,cfg);
   const num=(k,label,unit,step=1)=>html`<label class="grid gap-1"><span class="label">${label}</span><span class="flex items-center gap-2"><input id=${'fl-'+k} type="number" min="0" step=${step} class="field field-sm mono" style=${{height:32,maxWidth:110}} value=${cfg[k]} onChange=${e=>set({[k]:+e.target.value})}/><span class="text-[12.5px] text-muted">${unit}</span></span></label>`;
-  return html`<section class="panel p-4 grid gap-4 max-w-[860px]" id="fl-settings">
+  return html`<section class="panel p-4 sm:p-5 grid gap-5" id="fl-settings">
     <div class="grid sm:grid-cols-2 gap-3">
       <label class="grid gap-1"><span class="label">Float</span><input class="field field-sm" style=${{height:32}} value=${cfg.floatName} onChange=${e=>set({floatName:e.target.value})} placeholder="e.g. Float · 123ABC"/></label>
       <label class="grid gap-1"><span class="label">Driver</span><input class="field field-sm" style=${{height:32}} value=${cfg.driver} onChange=${e=>set({driver:e.target.value})} placeholder="Name and phone"/></label>
@@ -375,7 +374,7 @@ function FloatSettings({data,setData,cfg}){
     <div class="grid gap-2"><span class="label">Machine categories that go on the float</span>
       <div class="flex flex-wrap gap-2">${cats.map(c=>{const yes=on.includes(c);return html`<label key=${c} class=${'inline-flex items-center gap-1.5 text-[13px] px-2 py-1 rounded-md border '+(yes?'border-line-strong bg-surface':'border-line text-muted')}>
         <input type="checkbox" class="w-4 h-4" checked=${yes} onChange=${()=>set({skipCats:cats.filter(x=>x===c?yes:!on.includes(x))})}/>${c}</label>`})}</div>
-      <span class="text-[12px] text-muted">Trucks, water carts and utes drive themselves, so they’re left off to start with.</span></div>
+      <span class="text-[12px] text-muted">Bobcats go with the crew truck, and trucks, water carts and utes drive themselves, so they’re left off to start with.</span></div>
   </section>`}
 
 /* which machines can share the float: machines that go alone, named groups ("Small rollers"), and the loads that fit */
@@ -385,33 +384,39 @@ function FloatLoads({data,cfg,set}){
   const cats=[...new Set(ms.map(m=>(m.category||'').trim()).filter(Boolean))];
   const alone=cfg.alone||[],groups=cfg.groups||[],combos=cfg.combos||[];
   const found=no=>ms.some(m=>isNo(no,m.name,m.rego));
-  const Chip=(no,onX)=>html`<span key=${no} class="inline-flex items-center gap-1 text-[12.5px] font-semibold px-2 py-0.5 rounded-md border" style=${found(no)?{background:'var(--sunken)',borderColor:'var(--line)'}:{borderColor:'hsl(38 80% 60%)',color:'hsl(30 85% 34%)'}} title=${found(no)?'':'No machine with this number yet'}>${no}
-      <button type="button" class="text-muted hover:text-ink" aria-label=${'Remove '+no} onClick=${onX}>${Icon.x}</button></span>`;
-  const AddNo=(have,onAdd,id,label)=>html`<select id=${id} class="field field-sm" style=${{height:28,maxWidth:200}} value="" onChange=${e=>{const v=e.target.value;if(v)onAdd(v)}} aria-label=${label}>
-      <option value="">+ Add…</option>${ms.filter(m=>!have.some(no=>isNo(no,m.name,m.rego))).map(m=>html`<option key=${m.id} value=${noOf(m)}>${m.name}${m.category?' · '+m.category:''}</option>`)}</select>`;
+  /* a machine tag: its number, and what it is (description, category, rego) */
+  const Chip=(no,onX)=>{const m=ms.find(x=>isNo(no,x.name,x.rego))||data.resources.find(x=>x.type==='machine'&&isNo(no,x.name,x.rego));
+    const desc=m?[m.sub,m.category,m.rego&&!isNo(no,'',m.rego)?m.rego:''].filter(Boolean).join(' · '):'No machine with this number yet';
+    return html`<span key=${no} class="fl-chip inline-flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-lg border min-w-[180px] max-w-[320px]" style=${m?{background:'var(--surface)',borderColor:'var(--line-strong)'}:{borderColor:'hsl(38 80% 60%)',background:'hsl(45 100% 96%)'}} title=${desc}>
+      <span class="grid min-w-0 flex-1 leading-tight"><span class="text-[14px] font-semibold" style=${m?null:{color:'hsl(30 85% 34%)'}}>${m&&!isNo(no,'',m.rego)?m.name:no}${m&&isNo(no,'',m.rego)?html` <span class="mono text-[12px] text-muted font-normal">${no}</span>`:''}</span>
+        <span class="text-[12px] truncate" style=${{color:m?'var(--muted)':'hsl(30 85% 34%)'}}>${desc}</span></span>
+      <button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded-md text-muted hover:text-ink hover:bg-sunken shrink-0" aria-label=${'Remove '+no} onClick=${onX}>${Icon.x}</button></span>`};
+  const AddNo=(have,onAdd,id,label)=>html`<select id=${id} class="field" style=${{height:44,maxWidth:280}} value="" onChange=${e=>{const v=e.target.value;if(v)onAdd(v)}} aria-label=${label}>
+      <option value="">+ Add a machine…</option>${ms.filter(m=>!have.some(no=>isNo(no,m.name,m.rego))).map(m=>html`<option key=${m.id} value=${noOf(m)}>${mLabel(m)}</option>`)}</select>`;
+  const mLabel=m=>[m.name,m.sub,m.category].filter(Boolean).join(' · ');
   const lab=it=>it.startsWith('g:')?it.slice(2):it.startsWith('c:')?'Any '+it.slice(2):it.startsWith('n:')?it.slice(2):it.startsWith('m:')?((ms.find(m=>m.id===it.slice(2))||{}).name||'?'):'';
   const setCombo=(i,items)=>set({combos:combos.map((c,k)=>k===i?{...c,items}:c)});
   const opts=html`<option value="">Pick…</option>
     <optgroup label="Any one of a group">${groups.map(g=>html`<option key=${g.name} value=${'g:'+g.name}>${g.name}</option>`)}</optgroup>
     <optgroup label="Any machine in a category">${cats.map(c=>html`<option key=${c} value=${'c:'+c}>Any ${c}</option>`)}</optgroup>
-    <optgroup label="A particular machine">${ms.map(m=>html`<option key=${m.id} value=${'n:'+noOf(m)}>${m.name}${m.category?' · '+m.category:''}</option>`)}</optgroup>`;
+    <optgroup label="A particular machine">${ms.map(m=>html`<option key=${m.id} value=${'n:'+noOf(m)}>${mLabel(m)}</option>`)}</optgroup>`;
   return html`<div class="grid gap-4 rounded-lg border border-line p-3" id="fl-loads">
     <div><div class="font-display text-[15px] font-semibold">Float loads</div><div class="text-[12.5px] text-muted">What can share the float. Machines going the same way at the same time go on one load when they fit.</div></div>
     <div class="grid gap-1.5"><span class="label">Always goes by itself</span>
-      <div class="flex flex-wrap gap-1.5 items-center">${alone.map(no=>Chip(no,()=>set({alone:alone.filter(x=>x!==no)})))}${AddNo(alone,v=>set({alone:[...alone,v]}),'fl-alone-add','Add a machine that goes by itself')}</div></div>
+      <div class="flex flex-wrap gap-2 items-center">${alone.map(no=>Chip(no,()=>set({alone:alone.filter(x=>x!==no)})))}${AddNo(alone,v=>set({alone:[...alone,v]}),'fl-alone-add','Add a machine that goes by itself')}</div></div>
     <div class="grid gap-2"><span class="label">Groups</span>
-      ${groups.map((g,i)=>html`<div key=${i} class="grid gap-1 fl-group">
-        <div class="flex items-center gap-2"><input class="field field-sm font-semibold" style=${{height:28,maxWidth:220}} value=${g.name} onChange=${e=>{const nv=e.target.value.trim();if(!nv||groups.some((x,k)=>k!==i&&x.name===nv))return;
+      ${groups.map((g,i)=>html`<div key=${i} class="grid gap-2 fl-group rounded-lg bg-sunken p-3">
+        <div class="flex items-center gap-2"><input class="field font-semibold text-[15px]" style=${{height:38,maxWidth:280}} value=${g.name} onChange=${e=>{const nv=e.target.value.trim();if(!nv||groups.some((x,k)=>k!==i&&x.name===nv))return;
             set({groups:groups.map((x,k)=>k===i?{...x,name:nv}:x),combos:combos.map(c=>({...c,items:(c.items||[]).map(it=>it==='g:'+g.name?'g:'+nv:it)}))})}} aria-label="Group name"/>
           <button type="button" class="btn btn-ghost" style=${{height:28,color:'var(--bad)'}} aria-label=${'Remove the group '+g.name} onClick=${()=>set({groups:groups.filter((_,k)=>k!==i),combos:combos.map(c=>({...c,items:(c.items||[]).map(it=>it==='g:'+g.name?'':it)}))})}>${Icon.trash}</button></div>
-        <div class="flex flex-wrap gap-1.5 items-center">${(g.items||[]).map(no=>Chip(no,()=>set({groups:groups.map((x,k)=>k===i?{...x,items:x.items.filter(y=>y!==no)}:x)})))}${AddNo(g.items||[],v=>set({groups:groups.map((x,k)=>k===i?{...x,items:[...(x.items||[]),v]}:x)}),'fl-group-add-'+i,'Add a machine to '+g.name)}</div></div>`)}
+        <div class="flex flex-wrap gap-2 items-center">${(g.items||[]).map(no=>Chip(no,()=>set({groups:groups.map((x,k)=>k===i?{...x,items:x.items.filter(y=>y!==no)}:x)})))}${AddNo(g.items||[],v=>set({groups:groups.map((x,k)=>k===i?{...x,items:[...(x.items||[]),v]}:x)}),'fl-group-add-'+i,'Add a machine to '+g.name)}</div></div>`)}
       <button type="button" class="btn justify-self-start" style=${{height:28}} onClick=${()=>{let n='New group',k=2;while(groups.some(g=>g.name===n))n='New group '+(k++);set({groups:[...groups,{name:n,items:[]}]})}}>${Icon.plus} Add a group</button></div>
     <div class="grid gap-1.5"><span class="label">Loads that fit</span>
       ${combos.length===0&&html`<span class="text-[12.5px] text-muted">None: every machine goes on its own load.</span>`}
       ${combos.map((c,i)=>html`<div key=${i} class="flex flex-wrap items-center gap-1.5 fl-combo">
-        ${(c.items||[]).map((it,j)=>html`${j>0&&html`<span class="text-muted">+</span>`}<select key=${j} class="field field-sm" style=${{height:28,maxWidth:200}} value=${it} onChange=${e=>setCombo(i,e.target.value?c.items.map((x,k)=>k===j?e.target.value:x):c.items.filter((_,k)=>k!==j))} aria-label=${'Part '+(j+1)+': '+lab(it)}>${opts}</select>`)}
-        <button type="button" class="btn" style=${{height:28}} aria-label="Add another machine to this load" onClick=${()=>setCombo(i,[...(c.items||[]),''])}>${Icon.plus}</button>
-        <button type="button" class="btn btn-ghost" style=${{height:28,color:'var(--bad)'}} aria-label="Remove this load" onClick=${()=>set({combos:combos.filter((_,k)=>k!==i)})}>${Icon.trash}</button></div>`)}
+        ${(c.items||[]).map((it,j)=>html`${j>0&&html`<span class="text-muted">+</span>`}<select key=${j} class="field" style=${{height:40,maxWidth:300}} value=${it} onChange=${e=>setCombo(i,e.target.value?c.items.map((x,k)=>k===j?e.target.value:x):c.items.filter((_,k)=>k!==j))} aria-label=${'Part '+(j+1)+': '+lab(it)}>${opts}</select>`)}
+        <button type="button" class="btn" style=${{height:40}} aria-label="Add another machine to this load" onClick=${()=>setCombo(i,[...(c.items||[]),''])}>${Icon.plus}</button>
+        <button type="button" class="btn btn-ghost" style=${{height:40,color:'var(--bad)'}} aria-label="Remove this load" onClick=${()=>set({combos:combos.filter((_,k)=>k!==i)})}>${Icon.trash}</button></div>`)}
       <button type="button" id="fl-combo-add" class="btn justify-self-start" style=${{height:28}} onClick=${()=>set({combos:[...combos,{items:['','']}]})}>${Icon.plus} Add a load</button>
       <span class="text-[12px] text-muted">Part of a load fits too: “paver + 2 small rollers” also allows a paver with one small roller. Numbers in amber don’t match a machine yet.</span></div>
   </div>`}

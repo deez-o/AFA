@@ -82,8 +82,11 @@ ok(P.find(r => r.id === id).fixed && hm(P.find(r => r.id === id).pick) === '03:0
 P = planFloat(toTrips(M, cfg), cfg, travel, { [id]: { skip: true } });
 ok(P.runs.length === 1 && P.skipped.length === 1, '“Not needed”: the move is left out');
 
-// AFA's float loads (the starting settings)
-const CF = cfgOf({});
+// loads made from the groups (as AFA described them)
+const CF = { ...cfgOf({}), combos: [{ items: ['g:Pavers that share', 'g:Small rollers', 'g:Small rollers'] }, { items: ['g:Pavers that share', 'n:SR012'] }, { items: ['g:Pavers that share', 'n:SR015'] },
+  { items: ['g:Small rollers', 'g:Small rollers'] }, { items: ['n:SR012', 'n:SR015'] }, { items: ['g:Pavers that share', 'g:Big multis'] }, { items: ['g:Pavers that share', 'g:Small multis', 'g:Small rollers'] }] };
+ok(cfgOf({}).combos.length === 0 && cfgOf({}).groups.map(g => g.name).join() === 'Pavers that share,Small rollers,Small multis,Big multis', 'to start: the four groups, and no loads (you make them)');
+ok(!loadFits([{ m: 'a', name: 'PV009' }, { m: 'b', name: 'SR004' }], cfgOf({})), 'with no loads made, nothing shares');
 const mv = (name, cat = '', rego = '') => ({ m: 'id-' + name, name, cat, rego });
 const fits = (...ms) => loadFits(ms.map(x => typeof x === 'string' ? mv(x) : x), CF);
 ok(!fits('PV010', 'SR004'), 'PV010 goes by itself');
