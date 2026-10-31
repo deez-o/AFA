@@ -817,13 +817,12 @@ function MachinesTab({ctx,open}){
       ${canAdd&&html`<button id="mc-add" type="button" class="btn btn-primary" onClick=${()=>setDlg({isNew:true})}>${Icon.plus} Add machine</button>`}
     </div>
     <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="mc-table">
-      <thead><tr class="text-left">${['','Machine','Rego','Crew','Make / model','Year','Meters','Avg / year',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
-      ${groups.map(g=>html`<tbody key=${g.key}><tr class="border-t border-line bg-sunken"><td colspan="9" class="py-1.5 px-3 label">${g.label} <span class="text-faint font-normal">${g.rows.length}</span></td></tr>
+      <thead><tr class="text-left">${['','Machine','Rego','Make / model','Year','Meters','Avg / year',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+      ${groups.map(g=>html`<tbody key=${g.key}><tr class="border-t border-line bg-sunken"><td colspan="8" class="py-1.5 px-3 label">${g.label} <span class="text-faint font-normal">${g.rows.length}</span></td></tr>
         ${g.rows.map(r=>{const a=M.byId.get(r.id);const p=a.p||{};return html`<tr key=${r.id} class="border-t border-line hover:bg-sunken" data-machine=${r.name}>
           <td class="py-2 pl-3 pr-1 w-0">${stDot(a.status)}</td>
           <td class="py-2 px-3"><button type="button" class="text-left mc-open" onClick=${()=>open({k:'asset',id:r.id})}><span class="block font-medium hover:underline">${r.name}${a.retired?html` <span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted">Retired</span>`:''}</span><span class="block text-[11.5px] text-muted truncate max-w-[280px]">${r.sub||''}</span></button></td>
           <td class="py-2 px-3 mono whitespace-nowrap">${r.rego||html`<span class="text-faint">–</span>`}</td>
-          <td class="py-2 px-3 whitespace-nowrap">${a.crew?a.crew.name:html`<span class="text-faint">–</span>`}</td>
           <td class="py-2 px-3 whitespace-nowrap">${[p.make,p.model].filter(Boolean).join(' ')||html`<span class="text-faint">–</span>`}</td>
           <td class="py-2 px-3 tnum">${p.year||html`<span class="text-faint">–</span>`}</td>
           <td class="py-2 px-3 tnum whitespace-nowrap">${meterTxt(a)}</td>
@@ -831,7 +830,7 @@ function MachinesTab({ctx,open}){
           <td class="py-2 pr-3 text-right whitespace-nowrap w-0">
             ${(canEdit||perms.work)&&html`<button type="button" class="mc-edit w-8 h-8 inline-flex items-center justify-center rounded-md text-muted hover:text-ink" title=${'Edit '+r.name} aria-label=${'Edit '+r.name} onClick=${()=>setDlg({a})}>${Icon.pencil}</button>`}
             ${canDel&&html`<button type="button" class="mc-del w-8 h-8 inline-flex items-center justify-center rounded-md hover:opacity-70" style=${{color:'var(--bad)'}} title=${'Delete '+r.name} aria-label=${'Delete '+r.name} onClick=${()=>setDlg({a,del:true})}>${Icon.trash}</button>`}</td></tr>`})}</tbody>`)}
-      ${!shown.length&&html`<tbody><tr><td colspan="9" class="px-3 py-6 text-center text-muted">${M.assets.length?'No machines match.':'No machines yet.'+(canAdd?' Add your first machine.':'')}</td></tr></tbody>`}
+      ${!shown.length&&html`<tbody><tr><td colspan="8" class="px-3 py-6 text-center text-muted">${M.assets.length?'No machines match.':'No machines yet.'+(canAdd?' Add your first machine.':'')}</td></tr></tbody>`}
     </table></div>
     ${dlg&&html`<${MachineDialog} key=${dlg.isNew?'new':dlg.a.m.id+(dlg.del?':del':'')} ctx=${ctx} a=${dlg.a} isNew=${!!dlg.isNew} startDel=${!!dlg.del} onClose=${()=>setDlg(null)}/>`}
   </section>`;
