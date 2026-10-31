@@ -220,6 +220,7 @@ function SketchDialog({initial,aspect:a0,onSave,onClose,layers}){
             ${(txt.value||'').trim()&&![...DG_QUICK,...mine].includes(txt.value.trim())&&html`<button type="button" id="dg-quick-save" class="text-[12px] text-left" style=${{color:'var(--accent)'}} onClick=${()=>saveQuick(txt.value)}>+ Save “${txt.value.trim()}” as a quick label</button>`}`}</div>`}
       </div>
     </div>
+    <div class="px-3 py-1.5 text-[12px] font-medium border-t border-line" id="dg-reminder" style=${{background:'hsl(38 95% 50% / .14)',color:'hsl(30 90% 30%)'}}>Label each layer and each run, and show where they are.</div>
     <div class="flex items-center gap-2 px-3 py-2 border-t border-line" style=${{background:'var(--surface)',paddingBottom:'max(8px, env(safe-area-inset-bottom, 0px))'}}>
       <span class=${'text-[12px] flex-1 min-w-0 '+(ai.msg?'':'text-muted')} id="dg-ai-msg" style=${ai.msg&&/^Couldn/.test(ai.msg)?{color:'var(--bad)'}:null}>${ai.busy?'Tidying the drawing… (about 20–40 seconds)':ai.msg||`${shapes.length} mark${shapes.length===1?'':'s'}`}</span>
       <button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="qa-sketch-save" type="button" class="btn btn-primary" disabled=${!shapes.length} onClick=${save}>Save drawing</button>
@@ -249,6 +250,7 @@ const DIAGRAM={id:'diagram',label:'Field site diagram',short:'Site diagram',
             <${Fld} label="Mix type"><${In} v=${L.mix} on=${v=>setL({mix:v})}/><//><${Fld} label="Area m²"><input type="number" inputmode="decimal" class="field qa-dg-area" style=${fs} value=${L.area} onInput=${e=>setL({area:e.target.value})}/><//></fieldset></div>`})}
         ${f.canEdit&&html`<div><button id="qa-dg-add-layer" type="button" class="btn" onClick=${()=>set({layers:[...layersOf(d),dgLayer()]})}>${Icon.plus} Add a layer</button></div>`}</div>
       <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid grid-cols-2 gap-3"><${Fld} label="Map prepared by"><${In} id="qa-dg-by" v=${d.prepared_by} on=${v=>set({prepared_by:v})}/><//></fieldset>
+      <div id="qa-dg-reminder" class="rounded-lg px-3 py-2 text-[12.5px] font-medium" style=${{background:'hsl(38 95% 50% / .14)',color:'hsl(30 90% 30%)',boxShadow:'inset 0 0 0 1px hsl(38 90% 50% / .4)'}}>Clearly label and show where each layer is and where each run is on the drawing (e.g. “Run 1”, “Wearing course”).</div>
       ${d.sketch?html`<img id="qa-dg-sketch" src=${d.sketch} alt="Site diagram" class="w-full rounded-lg border border-line bg-white"/>`:html`<div class="text-[12.5px] text-muted">No drawing yet.</div>`}
       ${(d.photos||[]).length>0&&html`<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">${d.photos.map((ph,i)=>html`<div key=${i} class="relative"><img src=${ph} alt=${'Site photo '+(i+1)} class="w-full h-28 object-cover rounded-lg border border-line qa-dg-photo"/>
         ${f.canEdit&&html`<button type="button" class="absolute top-1 right-1 btn px-1.5" style=${{height:26}} aria-label="Remove photo" onClick=${()=>set({photos:d.photos.filter((x,k)=>k!==i)})}>${Icon.x}</button>`}</div>`)}</div>`}
