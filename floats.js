@@ -212,7 +212,24 @@ function planFloat(trips,cfg,travel,plan,opt={}){
     out.push({...t,pick,leave,depart,arrive,done,drive:tr,deadhead:dh,fixed,late,tight,early,outHours,weekend,curfew,fatigue,shiftStart:drv.shiftStart,fromLoc:loc,
       ticked:!!(P[t.id]&&P[t.id].done),tickedAt:P[t.id]&&P[t.id].doneAt,note:(P[t.id]&&P[t.id].note)||''});
     clock=done;loc=t.to}
+  closeGaps(out,cfg);
   return {runs:out,skipped}}
+/* the float shouldn't sit about mid-shift (e.g. waiting out a curfew between two moves): within a shift, a move with a
+   wait after it starts later instead, so the moves run back to back - as long as it stays on time, out of the curfew,
+   in the driver's hours and on the same day. Moves with a time set by hand, or ticked off, stay put. */
+function closeGaps(runs,cfg){
+  for(let i=runs.length-2;i>=0;i--){const r=runs[i],nx=runs[i+1];
+    if(r.fixed||r.ticked||+r.shiftStart!==+nx.shiftStart&&(nx.leave-r.done)/6e4>=REST_MIN)continue;
+    const idle=Math.floor((nx.leave-r.done)/6e4/5)*5;if(idle<15)continue;
+    for(let d=idle;d>=15;d-=5){const sh=x=>addMin(x,d);const leave=sh(r.leave),pick=sh(r.pick),depart=sh(r.depart),arrive=sh(r.arrive),done=sh(r.done);
+      if(!r.late&&done>r.latest)continue;
+      if(!r.curfew&&(inCurfew(leave,pick,cfg)||inCurfew(depart,arrive,cfg)))continue;
+      if(!r.outHours&&!inHours(leave,done,cfg))continue;
+      if(dayOf(leave)!==dayOf(r.leave))continue;
+      Object.assign(r,{leave,pick,depart,arrive,done,tight:!r.late&&done>addMin(r.latest,-30),waitAfter:Math.round((nx.leave-done)/6e4)});break}}
+  /* the shift now starts with its (possibly later) first move */
+  let start=null;runs.forEach((r,i)=>{const p=runs[i-1];if(!p||(r.leave-p.done)/6e4>=REST_MIN)start=r.leave;r.shiftStart=start});
+}
 
 /* ---------- road distance and time (OpenStreetMap: Nominatim for addresses, OSRM for roads) ---------- */
 const LS='ff:floatRoutes';let ROUTES={};try{ROUTES=JSON.parse(localStorage.getItem(LS)||'{}')||{}}catch(e){}

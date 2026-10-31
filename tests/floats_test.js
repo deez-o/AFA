@@ -184,4 +184,17 @@ ok(!ctx.FFL.needsFloat({ name: 'SS003', category: 'Bobcats' }, {}, CF) && !ctx.F
     ok(r.pick.getDate() === 2 && r.leave >= t('2026-11-02 09:00') && r.done <= t('2026-11-02 16:00') && !r.curfew, `${mode === 'any' ? 'any hours' : 'day driver'}: Monday after 9am (${hm(r.leave)}), there before 5pm, not at midnight`);
   }
 }
+
+// no sitting about mid-shift: two moves either side of the curfew start later and run back to back instead
+{
+  const tr = () => ({ min: 40, km: 30 });
+  const mk = (id, a, b, e, l) => ({ id, moves: [{ m: id, name: 'R' + id }], from: { key: a }, to: { key: b }, earliest: t(e), latest: t(l) });
+  // both free from 5am Tuesday, both needed by 3pm: the old plan did one at 5am, then waited for 9am
+  const R = planFloat([mk('1', 'A', 'B', '2026-11-10 05:00', '2026-11-10 15:00'), mk('2', 'C', 'D', '2026-11-10 05:00', '2026-11-10 15:00')], cfgOf({}), tr, {}).runs;
+  const wait = (R[1].leave - R[0].done) / 6e4;
+  ok(R.length === 2 && wait < 15 && R.every(r => !r.curfew && !r.late), 'two moves around the 7–9am curfew: back to back after it (wait ' + Math.round(wait) + ' min), on time');
+  // when it has to: needed by 8:30am and by 2pm, the first can't wait
+  const R2 = planFloat([mk('1', 'A', 'B', '2026-11-10 05:00', '2026-11-10 08:30'), mk('2', 'C', 'D', '2026-11-10 05:00', '2026-11-10 14:00')], cfgOf({}), tr, {}).runs;
+  ok(!R2[0].late && R2[0].done <= t('2026-11-10 08:30'), 'a move needed early still goes early (and the float waits only because it has to)');
+}
 console.log(fails ? `${fails} FAILED` : 'ALL FLOAT TESTS PASSED'); process.exit(fails ? 1 : 0);
