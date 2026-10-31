@@ -4197,7 +4197,7 @@ function MachineImport({data,setData,onClose,notify,sb}){
   useEffect(()=>{const h=e=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
   const pick=async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;setBusy(true);setErr('');
     try{const r=await readFleetFile(file);if(!r.length)throw new Error('No machines found in that file.');
-      setRows(r);const o={};r.forEach((x,i)=>{if(x.retired)o[i]=true});setOff(o)}
+      setRows(r);const o={};r.forEach((x,i)=>{if(x.retired||machineMatch(data.resources,x)<0)o[i]=true});setOff(o)}   /* only machines already in the planner are ticked: new ones must be ticked by hand */
     catch(x){setErr(x.message||'Couldn’t read that file.')}finally{setBusy(false);e.target.value=''}};
   const chosen=(rows||[]).filter((_,i)=>!off[i]);
   const groups=[];(rows||[]).forEach((x,i)=>{let g=groups.find(y=>y.cat===x.category);if(!g){g={cat:x.category,items:[]};groups.push(g)}g.items.push({x,i})});
@@ -4236,7 +4236,7 @@ function MachineImport({data,setData,onClose,notify,sb}){
                     <span class="mono text-[12.5px] font-semibold w-[76px] shrink-0">${x.name}</span>
                     <span class="text-[12.5px] min-w-0 flex-1 truncate">${x.desc}</span>
                     <span class="mono text-[11.5px] text-muted shrink-0">${x.rego}</span>
-                    <span class=${'text-[10.5px] font-semibold px-1.5 py-0.5 rounded shrink-0 '+(ex?'bg-sunken text-muted':'')} style=${ex?null:{background:'var(--accent-soft)',color:'var(--accent)'}}>${x.retired?'Not in use':ex?'Update':'New'}</span>
+                    <span class=${'text-[10.5px] font-semibold px-1.5 py-0.5 rounded shrink-0 '+(ex?'bg-sunken text-muted':'')} style=${ex?null:{background:'var(--accent-soft)',color:'var(--accent)'}}>${x.retired?'Not in use':ex?'Update':'Not in Fleet'}</span>
                   </label>`})}
               </div>`})}
           </div>
