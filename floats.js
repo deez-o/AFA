@@ -189,7 +189,7 @@ function bestPick(t,{clock,dh,cfg,travel,L,U,drv}){
   let best=null;(legal.length?legal:[drv&&drv.lastDone?new Date(Math.max(base,addMin(drv.lastDone,REST_MIN+(dh.min||0)))):base]).forEach(c=>{const leave=addMin(c,-(dh.min||0));const done=addMin(c,L*n+(tr.min||0)+U*n);
     const lateMin=Math.max(0,(done-t.latest)/6e4);const oh=!inHours(leave,done,cfg);
     const cur=inCurfew(leave,c,cfg)||inCurfew(addMin(c,L*n),addMin(c,L*n+(tr.min||0)),cfg);   /* on the road: the empty run there, and loaded */const we=!!cfg.avoidWeekend&&(isWeekend(leave)||isWeekend(done));
-    const score=(lateMin>0?1e4+lateMin:0)+(cur?3000:0)+(oh?500:0)+(we?200:0)+when(c);
+    const score=(lateMin>0?1e4+lateMin*20:0)+(cur?3000:0)+(oh?500:0)+(we?200:0)+when(c);
     if(!best||score<best.score)best={pick:c,score,oh,we}});
   return best}
 function planFloat(trips,cfg,travel,plan,opt={}){
@@ -253,7 +253,10 @@ function closeGaps(runs,cfg,travel){
   });
   /* back in time order, each shift starting with its first move */
   runs.splice(0,runs.length,...shifts.flat());
-  let start=null;runs.forEach((r,i)=>{const p=runs[i-1];if(!p||(r.leave-p.done)/6e4>=REST_MIN)start=r.leave;r.shiftStart=start});
+  let start=null;runs.forEach((r,i)=>{const p=runs[i-1];if(!p||(r.leave-p.done)/6e4>=REST_MIN)start=r.leave;r.shiftStart=start;
+    /* the labels follow the final times */
+    r.late=r.done>r.latest;r.tight=!r.late&&r.done>addMin(r.latest,-30);r.curfew=inCurfew(r.leave,r.pick,cfg)||inCurfew(r.depart,r.arrive,cfg);
+    r.outHours=!inHours(r.leave,r.done,cfg);r.weekend=isWeekend(r.leave)||isWeekend(r.done)});
 }
 
 /* ---------- road distance and time (OpenStreetMap: Nominatim for addresses, OSRM for roads) ---------- */
@@ -317,6 +320,10 @@ function useFloatPlan(data,setData,canEdit){
 /* ---------- the screen ---------- */
 const STAT={done:['Done','hsl(145 55% 30%)','hsl(145 50% 92%)'],now:['On the go','hsl(212 75% 34%)','hsl(212 80% 92%)'],next:['Next','hsl(212 75% 34%)','hsl(212 80% 95%)'],
   late:['Late','hsl(0 72% 40%)','hsl(0 80% 95%)'],tight:['Tight','hsl(30 85% 34%)','hsl(38 95% 90%)'],overdue:['Not ticked off','hsl(30 85% 34%)','hsl(38 95% 90%)'],plan:['Planned','var(--muted)','var(--sunken)']};
+const onRoad=r=>(r.deadhead&&r.deadhead.min>0)?r.leave:r.depart;
+/* the steps of a trip, so a time like "loading 8:20" isn't read as the float moving */
+const stepsOf=r=>[...(r.deadhead&&r.deadhead.min>0?[['Drive empty',r.leave,r.pick,`from ${r.fromLoc&&r.fromLoc.key==='yard'?'the yard':'the last drop'}`]]:[]),
+  ['Load',r.pick,r.depart,r.from.job],['Drive loaded',r.depart,r.arrive,''],['Unload',r.arrive,r.done,r.to.job]];
 const statusOf=(r,now,nextId)=>r.ticked?'done':r.late?'late':(r.leave<=now&&now<r.done)?'now':r.done<now?'overdue':r.id===nextId?'next':r.tight?'tight':'plan';
 
 function FloatsScreen({data,setData,notify}){
@@ -348,7 +355,8 @@ function FloatsScreen({data,setData,notify}){
   const Card=r=>{const st=statusOf(r,now,nextId);const [sl,sc,sb]=STAT[st];const ed=edit===r.id;
     return html`<li key=${r.id} class="panel p-3 sm:p-4 grid gap-2 fl-run" data-st=${st} style=${st==='now'?{boxShadow:'inset 3px 0 0 hsl(212 75% 45%)'}:st==='late'?{boxShadow:'inset 3px 0 0 hsl(0 72% 45%)'}:null}>
       <div class="flex items-start gap-3 flex-wrap">
-        <div class="mono text-[20px] sm:text-[22px] font-semibold leading-none">${hm(r.pick)}<span class="text-faint text-[14px] font-normal"> → ${hm(r.done)}</span></div>
+        <div class="grid leading-tight"><span class="text-[11px] font-semibold uppercase tracking-wide text-muted">On the road</span>
+          <span class="mono text-[20px] sm:text-[22px] font-semibold leading-none">${hm(onRoad(r))}<span class="text-faint text-[14px] font-normal"> → done ${hm(r.done)}</span></span></div>
         <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:sc,background:sb}}>${sl}</span>
         ${r.fixed&&!r.ticked&&html`<span class="text-[11px] text-muted">time set by hand</span>`}
         ${r.fatigue&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-fatigue" style=${{color:'#fff',background:'hsl(0 72% 45%)'}} title="Breaks the driver’s 10-hour break or 12-hour shift (only a pick-up time set by hand can)">Driver’s hours rule broken</span>`}
@@ -371,10 +379,11 @@ function FloatsScreen({data,setData,notify}){
       </div>
       <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-muted">
         <span>${r.drive.km!=null?`${Math.round(r.drive.km)} km · `:''}${durTxt(r.drive.min)} drive${r.drive.unknown?' (place not found yet)':r.drive.est?' (estimate)':''}</span>
-        ${r.deadhead.min>0&&html`<span>Float leaves ${r.fromLoc.key==='yard'?'the yard':'the last drop'} ${hm(r.leave)} (${durTxt(r.deadhead.min)} empty)</span>`}
         <span>Load ${cfg.loadMin*r.moves.length} min · unload ${cfg.unloadMin*r.moves.length} min</span>
         ${r.ticked&&html`<span style=${{color:'hsl(145 55% 30%)'}}>Ticked off${r.tickedAt?' '+r.tickedAt:''}</span>`}
       </div>
+      <ol class="flex flex-wrap gap-1.5 text-[12px] fl-steps">${stepsOf(r).map(([l,a,b,w],i)=>html`<li key=${i} class="px-2 py-1 rounded-md border border-line" style=${/^Drive/.test(l)?{background:'var(--sunken)',fontWeight:600}:null}>
+        ${l} <span class="mono">${hm(a)}–${hm(b)}</span>${w?html` <span class="text-muted">${w}</span>`:''}</li>`)}</ol>
       ${r.note&&html`<div class="text-[12.5px] rounded-md px-2 py-1 bg-sunken">${r.note}</div>`}
       ${canEdit&&html`<div class="flex flex-wrap items-center gap-2">
         <button type="button" class=${'btn '+(r.ticked?'':'btn-primary')} style=${{height:32}} onClick=${()=>setPlan(r.id,r.ticked?{done:null,doneAt:null}:{done:true,doneAt:hm(new Date()),...(r.fixed?{}:{time:isoLocal(r.pick)})})}>${r.ticked?'Undo done':'Mark done'}</button>
@@ -432,7 +441,7 @@ function FloatsScreen({data,setData,notify}){
           ${late>0&&html`<span class="text-[11.5px] font-semibold px-2 py-0.5 rounded-full" style=${{color:STAT.late[1],background:STAT.late[2]}}>${late} late</span>`}
           <span class="ml-auto text-[12.5px] text-muted inline-flex items-center gap-1">Open day ${Icon.chevR}</span></button>
         ${rs.length>0&&html`<ol class="divide-y divide-line">${rs.map(r=>{const st=statusOf(r,now,nextId);const [sl,sc,sb]=STAT[st];return html`<li key=${r.id} class="grid grid-cols-[120px_minmax(260px,1.1fr)_minmax(0,2fr)] gap-6 px-5 py-4 fl-weekrow">
-          <div class="grid content-start gap-1"><span class="mono text-[20px] font-semibold leading-none">${hm(r.pick)}</span><span class="text-[12.5px] text-muted">to ${hm(r.done)}</span>
+          <div class="grid content-start gap-1"><span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted">On the road</span><span class="mono text-[20px] font-semibold leading-none">${hm(onRoad(r))}</span><span class="text-[12.5px] text-muted">load ${hm(r.pick)} · done ${hm(r.done)}</span>
             <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full justify-self-start" style=${{color:sc,background:sb}}>${sl}</span></div>
           <div class="grid content-start gap-1.5">${r.moves.map(m=>html`<div key=${m.id} class="rounded-lg border border-line px-3 py-2 leading-tight">
               <div class="text-[14px] font-semibold">${m.name}${m.rego?html` <span class="mono text-[12px] text-muted font-normal">${m.rego}</span>`:''}</div>
@@ -578,11 +587,11 @@ function FloatLoads({data,cfg,set:set0}){
 /* ---------- the run sheet ---------- */
 function runSheetText(cfg,runs,k){
   const d=parse(k);const L=[`${cfg.floatName||'Float'} run sheet – ${WD[d.getDay()]} ${fmtShort(d)} ${d.getFullYear()}`];if(cfg.driver)L.push(`Driver: ${cfg.driver}`);L.push('');
-  runs.forEach((r,i)=>{L.push(`${i+1}. ${hm(r.pick)} pick up ${r.moves.map(m=>m.name+(m.rego?' ('+m.rego+')':'')).join(' + ')}`);
+  runs.forEach((r,i)=>{L.push(`${i+1}. On the road ${hm(onRoad(r))}: ${r.moves.map(m=>m.name+(m.rego?' ('+m.rego+')':'')).join(' + ')}`);
     L.push(`   From: ${r.from.job}${r.from.crew?' – '+r.from.crew:''}${r.from.addr?', '+r.from.addr:''}`);
     L.push(`   To:   ${r.to.job}${r.to.crew?' – '+r.to.crew:''}${r.to.addr?', '+r.to.addr:''}`);
     L.push(`   Free from ${whenTxt(r.earliest,k)} · ${r.to.yard?'back at the yard by':'needed by'} ${whenTxt(r.latest,k)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km, ':''}${durTxt(r.drive.min)} drive`);
-    if(r.deadhead.min>0)L.push(`   Leave ${hm(r.leave)} (${durTxt(r.deadhead.min)} empty from ${r.fromLoc.key==='yard'?cfg.yardName||'the yard':'the last drop'})`);
+    L.push('   '+stepsOf(r).map(([l,a,b])=>`${l} ${hm(a)}-${hm(b)}`).join(' | '));
     if(r.curfew)L.push('   ! On the road in the peak-hour curfew (7-9am / 4-6pm weekdays): check the timing');
     if(r.note)L.push(`   Note: ${r.note}`);
     const u=mapsDir(r.from,r.to);if(u)L.push(`   Map: ${u}`);L.push('')});
@@ -600,8 +609,8 @@ async function runSheetPdf(data,cfg,runs,k){
     const from=doc.splitTextToSize(clean(`${r.from.job}${r.from.crew?' - '+r.from.crew:''}\n${r.from.addr||''}`),88),to=doc.splitTextToSize(clean(`${r.to.job}${r.to.crew?' - '+r.to.crew:''}\n${r.to.addr||''}`),88);
     const h=16+Math.max(from.length,to.length)*4.2+(r.note?5:0);room(h);
     doc.setDrawColor(200);doc.setLineWidth(.3);doc.roundedRect(M,y,W-2*M,h,1.5,1.5);
-    font(13,true);doc.text(`${i+1}.  ${hm(r.pick)}`,M+3,y+6);font(10.5,true);doc.text(clean(r.moves.map(m=>m.name+(m.rego?' ('+m.rego+')':'')).join(' + ')),M+30,y+6);
-    font(8.5,false);doc.setTextColor(90);doc.text(clean(`Leave ${hm(r.leave)} · load ${hm(r.pick)}-${hm(r.depart)} · arrive ${hm(r.arrive)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km, ':''}${durTxt(r.drive.min)}`),W-M-3,y+6,{align:'right'});doc.setTextColor(0);
+    font(13,true);doc.text(`${i+1}.  ${hm(onRoad(r))}`,M+3,y+6);font(10.5,true);doc.text(clean(r.moves.map(m=>m.name+(m.rego?' ('+m.rego+')':'')).join(' + ')),M+30,y+6);
+    font(8.5,false);doc.setTextColor(90);doc.text(clean(`${r.deadhead.min>0?'Leave '+hm(r.leave)+' · ':''}load ${hm(r.pick)}-${hm(r.depart)} · drive ${hm(r.depart)}-${hm(r.arrive)} · unloaded ${hm(r.done)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km':''}`),W-M-3,y+6,{align:'right'});doc.setTextColor(0);
     font(8,true);doc.text('PICK UP',M+3,y+11.5);doc.text('DROP OFF',M+98,y+11.5);font(9.5,false);doc.text(from,M+3,y+15.5);doc.text(to,M+98,y+15.5);
     const yy=y+15.5+Math.max(from.length,to.length)*4.2;font(8.5,false);doc.setTextColor(40,110,60);doc.text(clean(`Free from ${whenTxt(r.earliest,k)}`),M+3,yy);doc.setTextColor(30,70,140);doc.text(clean(`${r.to.yard?'Back at the yard by':'Needed by'} ${whenTxt(r.latest,k)}`),M+98,yy);
     if(r.curfew&&!r.late){font(8.5,true);doc.setTextColor(180,20,30);doc.text('IN PEAK-HOUR CURFEW',M+135,yy);font(8.5,false)}
