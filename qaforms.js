@@ -225,6 +225,13 @@ function SketchDialog({initial,aspect:a0,onSave,onClose,layers}){
       <button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="qa-sketch-save" type="button" class="btn btn-primary" disabled=${!shapes.length} onClick=${save}>Save drawing</button>
     </div></div>`;
 }
+/* layer type: a drop-down (phones don't show typed-in suggestion lists), with "Other" to type something else */
+const LAYER_TYPES=['Wearing course','Intermediate course','Base layer','Correction / regulation'];
+function LayerType({v,on}){
+  const known=LAYER_TYPES.includes(v);const [other,setOther]=useState(!!v&&!known);
+  return html`<div class="grid gap-1.5"><select class="field qa-dg-course" style=${fs} value=${other?'__other':v} onChange=${e=>{const x=e.target.value;if(x==='__other'){setOther(true);on(known?'':v)}else{setOther(false);on(x)}}}>
+      <option value="">Choose…</option>${LAYER_TYPES.map(t=>html`<option key=${t} value=${t}>${t}</option>`)}<option value="__other">Other (type it)</option></select>
+    ${other&&html`<input class="field qa-dg-course-other" style=${fs} placeholder="Type the layer type" value=${v} onInput=${e=>on(e.target.value)} autoFocus=${true}/>`}</div>`}
 const dgLayer=()=>({layer:'',depth:'',mix:'',area:''});
 /* the layers on the job (older packs kept one layer in layer/depth/mix) */
 const layersOf=d=>Array.isArray(d.layers)&&d.layers.length?d.layers:[{layer:d.layer||'',depth:d.depth||'',mix:d.mix||'',area:d.area||''}];
@@ -234,12 +241,11 @@ const DIAGRAM={id:'diagram',label:'Field site diagram',short:'Site diagram',
   Editor:({f})=>{const d=f.pack.forms.diagram;const set=p=>f.set('diagram',x=>({...x,...p}));const [draw,setDraw]=useState(false);const [busy,setBusy]=useState(false);
     const addPhotos=async files=>{setBusy(true);try{const out=[];for(const fl of [...files].slice(0,4-(d.photos||[]).length))out.push(await shrinkPhoto(fl));set({photos:[...(d.photos||[]),...out]})}catch(e){}finally{setBusy(false)}};
     return html`<${FormCard} f=${f} id="diagram" title="Field site diagram" sub="All patchwork must be clearly measured and marked on the map with chainages" sigForms=${[]}>
-      <datalist id="qa-courses">${['Wearing course','Intermediate course','Base layer','Correction / regulation'].map(c=>html`<option key=${c} value=${c}></option>`)}</datalist>
       <div class="grid gap-2" id="qa-dg-layers">${layersOf(d).map((L,i,all)=>{const setL=p=>set({layers:layersOf(d).map((x,k)=>k===i?{...x,...p}:x)});
         return html`<div key=${i} class=${rowStyle+' qa-dg-layer'}><div class="flex items-center gap-2"><span class="text-[12.5px] font-semibold flex-1">Layer ${i+1}</span>
             ${f.canEdit&&all.length>1&&html`<button type="button" class="text-[12px] text-muted hover:text-ink" onClick=${()=>set({layers:layersOf(d).filter((x,k)=>k!==i)})}>Remove</button>`}</div>
           <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid grid-cols-2 lg:grid-cols-4 gap-2">
-            <${Fld} label="Layer type"><input list="qa-courses" class="field qa-dg-course" style=${fs} placeholder="Pick or type" value=${L.layer||''} onInput=${e=>setL({layer:e.target.value})}/><//><${Fld} label="Nominal depth"><${In} v=${L.depth} on=${v=>setL({depth:v})} ph="e.g. 50 mm"/><//>
+            <${Fld} label="Layer type"><${LayerType} v=${L.layer||''} on=${v=>setL({layer:v})}/><//><${Fld} label="Nominal depth"><${In} v=${L.depth} on=${v=>setL({depth:v})} ph="e.g. 50 mm"/><//>
             <${Fld} label="Mix type"><${In} v=${L.mix} on=${v=>setL({mix:v})}/><//><${Fld} label="Area m²"><input type="number" inputmode="decimal" class="field qa-dg-area" style=${fs} value=${L.area} onInput=${e=>setL({area:e.target.value})}/><//></fieldset></div>`})}
         ${f.canEdit&&html`<div><button id="qa-dg-add-layer" type="button" class="btn" onClick=${()=>set({layers:[...layersOf(d),dgLayer()]})}>${Icon.plus} Add a layer</button></div>`}</div>
       <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid grid-cols-2 gap-3"><${Fld} label="Map prepared by"><${In} id="qa-dg-by" v=${d.prepared_by} on=${v=>set({prepared_by:v})}/><//></fieldset>

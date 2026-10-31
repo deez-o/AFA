@@ -80,6 +80,7 @@ Redraw it neatly and call the "diagram" tool:
 - Keep the same layout, positions and meaning. Don't invent roads, areas or measurements that aren't drawn.
 - Wobbly freehand lines become straight lines; rough rectangles become boxes; rough circles become circles; arrows stay arrows. Keep pen strokes only for genuinely curved edges (e.g. a cul-de-sac), smoothed with few points.
 - Keep every label and measurement the crew wrote (fix obvious spelling only), placed neatly next to what it describes, not overlapping lines. Text size 0.026 (or 0.036 for a title). Text p is its left end, vertically centred.
+- Text widths (fractions of the page WIDTH): each character is about 0.015 wide at size 0.026 and 0.021 at size 0.036; a line of text is about 1.3 × size tall in page-width units (so ${aspect >= 1 ? 'about 0.045 of the page height on this landscape page' : 'about 0.026 of the page height on this portrait page'}). Make any box around text (e.g. the key) wide and tall enough to hold its text with a small margin, and keep text inside the page.
 - Keep the crew's colours where they mean something; otherwise black (#111111). Line width 3 (or 7 for main outlines).
 ${layers.length ? `- Add a small key (legend) in a clear corner listing the layers paved:
 ${layers.map((l, i) => `  ${i + 1}. ${[l.layer || `Layer ${i + 1}`, l.depth, l.mix, l.area ? l.area + ' m²' : ''].filter(Boolean).join(' · ')}`).join('\n')}
