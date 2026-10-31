@@ -2512,12 +2512,12 @@ function SuggestDialog({setData,onClose,notify}){
   useEffect(()=>{const h=e=>{if(e.key==='Escape'){e.stopPropagation();onClose()}};window.addEventListener('keydown',h,true);return()=>window.removeEventListener('keydown',h,true)},[]);
   const send=e=>{e.preventDefault();const t=text.trim();if(!t)return;const now=Date.now();
     setData(d=>({...d,suggestions:[...(d.suggestions||[]),{id:'s'+uid(),at:now,text:t,by:window.__rosterMe||''}]}));notify&&notify('Thanks! Your suggestion was sent');onClose()};
-  return html`<div class="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+  return html`<div class="fixed inset-0 z-[1100] flex items-start sm:items-center justify-center p-4 pt-[max(16px,env(safe-area-inset-top))] sm:pt-4 overflow-y-auto backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
     <form class="panel pop w-full max-w-[480px] p-5 grid gap-3" role="dialog" aria-modal="true" aria-labelledby="sg-t" onSubmit=${send}>
       <div class="flex items-start gap-3"><div class="min-w-0 flex-1"><div id="sg-t" class="font-display text-[18px] font-semibold">Suggest an idea</div>
         <div class="text-[12.5px] text-muted">Something FraserFlow should do, or do better? Only administrators can read suggestions.</div></div>
         <button type="button" class="btn btn-ghost" onClick=${onClose} aria-label="Close">${Icon.x}</button></div>
-      <textarea id="sg-text" class="field" style=${{height:'auto',minHeight:120,padding:'8px 10px',resize:'vertical',fontSize:13.5}} rows="5" autoFocus=${true}
+      <textarea id="sg-text" class="field" style=${{height:'auto',minHeight:120,padding:'8px 10px',resize:'vertical'}} rows="5" autoFocus=${true}
         placeholder="e.g. Text each crew tomorrow’s start time at 3pm" value=${text} onInput=${e=>setText(e.target.value)}></textarea>
       <div class="flex justify-end gap-2"><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="sg-send" type="submit" class="btn btn-primary" disabled=${!text.trim()}>Send suggestion</button></div>
     </form></div>`;
@@ -5765,12 +5765,14 @@ function App({boot,live}){
           <button class="btn" onClick=${goToday} disabled=${atToday}>Today</button>
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>`}
-        ${/* the lightbulb: everyone can suggest an idea, supervisors and operators too */html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
         ${can('notify',1)&&!sup&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${screenOK('fleet',live.role,data)} onMaint=${openFleetAsset} onCompleteJob=${live.canEdit?(id=>{setData(d=>({...d,jobs:d.jobs.map(j=>j.id===id?{...j,completed:true,completedAt:iso(TODAY)}:j)}));const j=data.jobs.find(x=>x.id===id);setToast(`${j?jobLabel(j):'Job'} marked complete`)}):null} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
         ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary" disabled=${!(live.canEdit&&can('staff.leave',2))&&!leaveReqOnly} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Add leave</button>`}
         ${boardScreen&&screen!=='staff'&&!sup&&can(fleetCal?'fleet.calendar':'schedule',2)&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'||screen==='fleet'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
         ${screen==='schedule'&&!sup&&can('schedule.forecast',1)&&html`<button class="btn" onClick=${()=>setForecast(true)} title="Paving forecast for the next two months">${Icon.chart} Forecast</button>`}
-        <${SettingsMenu} simple=${!can('notify',1)} maint=${screenOK('fleet',live.role,data)} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
+        <div class="flex items-center gap-2 shrink-0 ml-auto">
+          ${/* the lightbulb: everyone can suggest an idea, supervisors and operators too */html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
+          <${SettingsMenu} simple=${!can('notify',1)} maint=${screenOK('fleet',live.role,data)} theme=${theme} toggleTheme=${toggleTheme} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}} account=${{email:live.user.email,role:live.role,onChangePw:()=>setChangePw(true),onSignOut:()=>live.sb.auth.signOut()}} onLog=${isAdmin?()=>setLogOpen(true):null} preview=${live.role==='admin'?{list:previewOf(data),set:l=>setData(d=>({...d,previewOnly:l,previewKnown:previewKeys()}))}:null}/>
+        </div>
       </header>
 
       ${live.offline&&html`<${OfflineBar} at=${live.offline.at}/>`}
