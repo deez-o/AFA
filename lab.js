@@ -68,7 +68,7 @@ function LabScreen({data,live,notify}){
   /* reports are due within 72 hours of the day after the shift: overdue from midnight 4 days after */
   const overdue=(jobId,k)=>!doneOf(jobId,k)&&!(has(jobId,k,'asphalt')&&has(jobId,k,'core'))&&Date.now()>=addDays(parse(k),4).getTime();
   const has=(jobId,k,kind)=>((v&&v.reports)||[]).some(r=>r.job_id===jobId&&r.shift_date===k&&r.kind===kind);
-  const markDone=async(jobId,k)=>{setMsg('');setBusy('d'+jobId+k);try{const {error}=await sb.from('lab_done').insert({job_id:jobId,shift_date:k});if(error)throw error;notify&&notify('Shift done: moved to Complete');reload()}
+  const markDone=async(jobId,k)=>{setMsg('');setBusy('d'+jobId+k);try{const {error}=await sb.from('lab_done').insert({job_id:jobId,shift_date:k});if(error)throw error;notify&&notify('Reports complete: moved to Complete');reload()}
     catch(e){setMsg(/lab_done|relation|schema cache/.test(errMsg(e))?'Marking shifts done needs a database update: an administrator needs to run supabase/lab.sql again.':errMsg(e))}finally{setBusy('')}};
   const reopen=async(jobId,k)=>{setMsg('');const {error}=await sb.from('lab_done').delete().eq('job_id',jobId).eq('shift_date',k);if(error){setMsg(errMsg(error));return}notify&&notify('Shift back in Outstanding');reload()};
   const setupMsg=v&&v.rErr&&/lab_reports|relation|schema cache/.test(v.rErr);
@@ -121,7 +121,7 @@ function LabScreen({data,live,notify}){
                 <td class="py-2 pl-3 text-right whitespace-nowrap lab-done-cell">${(()=>{const dn=doneOf(o.j.id,s.e.k);
                   if(dn)return html`<div class="text-[12px] font-semibold" style=${{color:'hsl(145 55% 30%)'}}>Done</div><div class="text-[11px] text-muted">${[dn.done_name,dn.done_at&&new Date(dn.done_at).toLocaleDateString('en-AU',{day:'numeric',month:'short'})].filter(Boolean).join(' · ')}</div>${canUp&&html`<button type="button" class="text-[11.5px] text-muted hover:text-ink underline lab-reopen" onClick=${()=>reopen(o.j.id,s.e.k)}>Reopen</button>`}`;
                   const ready=has(o.j.id,s.e.k,'asphalt')&&has(o.j.id,s.e.k,'core');
-                  return canUp?html`<button type="button" class=${'btn lab-done'+(ready?' btn-primary':'')} style=${{height:28,fontSize:12}} disabled=${!ready||!!busy} title=${ready?'Asphalt report and core report are in':'Needs an asphalt report and a core report first'} onClick=${()=>markDone(o.j.id,s.e.k)}>${busy==='d'+o.j.id+s.e.k?'…':'Shift done'}</button>`
+                  return canUp?html`<button type="button" class=${'btn lab-done'+(ready?' btn-primary':'')} style=${{height:28,fontSize:12}} disabled=${!ready||!!busy} title=${ready?'Asphalt report and core report are in':'Needs an asphalt report and a core report first'} onClick=${()=>markDone(o.j.id,s.e.k)}>${busy==='d'+o.j.id+s.e.k?'…':'Reports complete'}</button>`
                     :html`<span class="text-[11.5px] ${ready?'text-muted':''}" style=${ready?null:{color:'var(--bad)'}}>${ready?'Reports in':'Reports missing'}</span>`})()}</td></tr>`})}</tbody></table></div>
           ${(()=>{const jl=reportsFor(o.j.id,null);return jl.length>0&&html`<div class="grid gap-1"><div class="label">Lab reports for the whole job</div>${jl.map(r=>html`<${Rep} key=${r.id} r=${r}/>`)}</div>`})()}
         </div>`}</section>`})}
