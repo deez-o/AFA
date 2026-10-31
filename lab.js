@@ -1,5 +1,5 @@
 /* =====================================================================
-   FraserFlow: Lab (in progress). Every shift already worked, by job, with what was actually laid
+   FraserFlow: Lab. Every paving shift already worked (paving crews only: seal and small works don't go to the lab), by job, with what was actually laid
    (from the submitted QA pack: tonnes from the laying record, m², course and number of layers from the site diagram layers),
    the QA pack PDFs, and the lab's reports (uploaded per job, or per shift).
    Database: supabase/lab.sql. Loaded with the Fleet files (after qa.js and qaforms.js).
@@ -49,6 +49,7 @@ function LabScreen({data,live,notify}){
       if(v)v.packs.forEach(p=>{if(p.block_id===b.id&&p.status==='submitted'&&p.shift_date>=from)ks.add(p.shift_date)});
       [...ks].forEach(k=>{seen.add(b.id+'|'+k);
       const j=data.jobs.find(x=>x.id===b.jobId);if(!j)return;const crewId=coverOf(b,k)||b.resourceId;
+      const cr=data.resources.find(r=>r.id===crewId);if(!cr||!isPavingCrew(cr))return;   /* only paving (asphalt) shifts go to the lab: not seal or small works */
       const ps=v?v.packs.filter(p=>p.block_id===b.id&&p.shift_date===k):[];const sub=ps.filter(p=>p.status==='submitted');
       const laid=sub.map(laidOf).reduce((a,x)=>({t:a.t+x.t,a:a.a+x.a,courses:[...a.courses,...x.courses],mixes:[...new Set([...a.mixes,...x.mixes])]}),{t:0,a:0,courses:[],mixes:[]});
       const o=by.get(j.id)||{j,shifts:[]};o.shifts.push({e:{b,k,crewId},crew:data.resources.find(r=>r.id===crewId),plan:plannedOf(b,k),packs:ps,sub,laid});by.set(j.id,o)})});
