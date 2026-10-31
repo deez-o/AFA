@@ -5540,8 +5540,9 @@ function App({boot,live}){
   useEffect(()=>{
     if(data.sectionOrder)writeLocal(LOCAL_ORDER,data.sectionOrder);
     if(remoteRef.current===data){savedRef.current=data;return}
-    if(!live.canEdit)return;
-    const ch=diffRows(savedRef.current,data);savedRef.current=data;
+    if(!live.canEdit&&live.offline)return;
+    let ch=diffRows(savedRef.current,data);savedRef.current=data;
+    if(!live.canEdit)ch={upserts:ch.upserts.filter(x=>x.kind==='suggestion'),deletes:[]};   /* view-only people: just their suggestions go in */
     if(!ch.upserts.length&&!ch.deletes.length)return;
     pushQ.current=pushQ.current.then(()=>pushRows(live.sb,ch)).catch(e=>{setToast('Couldn’t save your last change ('+(e.message||e)+'). Loading the latest roster.');reloadAll()});
   },[data]);
@@ -5764,7 +5765,7 @@ function App({boot,live}){
           <button class="btn" onClick=${goToday} disabled=${atToday}>Today</button>
           <button class="btn px-2" onClick=${()=>move(1)} aria-label=${view===60?'Next month':'Next'}>${Icon.chevR}</button>
         </div>`}
-        ${can('notify',1)&&!sup&&html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
+        ${/* the lightbulb: everyone can suggest an idea, supervisors and operators too */html`<button id="btn-suggest" class="btn px-2" onClick=${()=>setSuggest(true)} title="Suggest an idea for FraserFlow" aria-label="Suggest an idea">${NAV_ICON.ideas}</button>`}
         ${can('notify',1)&&!sup&&html`<${Notifications} data=${data} onOpen=${b=>setEditing(b)} maint=${screenOK('fleet',live.role,data)} onMaint=${openFleetAsset} onCompleteJob=${live.canEdit?(id=>{setData(d=>({...d,jobs:d.jobs.map(j=>j.id===id?{...j,completed:true,completedAt:iso(TODAY)}:j)}));const j=data.jobs.find(x=>x.id===id);setToast(`${j?jobLabel(j):'Job'} marked complete`)}):null} prefs=${notifPrefs} setPrefs=${p=>{setNotifPrefs(p);try{localStorage.setItem(NOTIF_KEY,JSON.stringify(p))}catch(e){}}}/>`}
         ${boardScreen&&screen==='staff'&&html`<button id="btn-add-leave" class="btn btn-primary" disabled=${!(live.canEdit&&can('staff.leave',2))&&!leaveReqOnly} onClick=${()=>setLeaveDlg({})}>${Icon.plus} Add leave</button>`}
         ${boardScreen&&screen!=='staff'&&!sup&&can(fleetCal?'fleet.calendar':'schedule',2)&&html`<button class="btn btn-primary" disabled=${!first} onClick=${()=>onCreate({resourceId:(vis(screen==='staff'?'person':screen==='machines'||screen==='fleet'?'machine':'crew')[0]||first).id,start:iso(onThisRange?TODAY:days[0]),end:iso(onThisRange?TODAY:days[0])})}>${Icon.plus} Booking</button>`}
