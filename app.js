@@ -1266,24 +1266,23 @@ function PlantPicker({f,set,data}){
       ${!one&&per&&html`<span class="text-[11.5px] text-muted">Machines differ between shifts: ticks here are on every shift.</span>`}</div>`}
     ${machines.length===0
       ?html`<div class="text-[12.5px] text-muted md:col-span-2">No machines yet. Add them in Fleet › Machines.</div>`
-      :html`${machines.length>8&&html`<input id="pl-search" class="field field-sm md:col-start-1" style=${{height:30,fontSize:13}} placeholder="Search machine #, description, rego or category" value=${pq} onInput=${e=>setPq(e.target.value)} aria-label="Search machines"/>`}
-      <ul class="border border-line rounded-lg max-h-[min(460px,55vh)] overflow-y-auto divide-y md:col-start-1" style=${{borderColor:'var(--line)'}}>
-        ${plantSections.length===0&&html`<li class="px-3 py-3 text-[12.5px] text-muted">No machines match.</li>`}
-        ${plantSections.flatMap(sec=>[html`<li key=${'h-'+sec.key} class="px-2.5 py-1 bg-sunken label sticky top-0 z-[1]" style=${{borderColor:'var(--line)'}}>${sec.label} <span class="mono text-faint">${sec.rows.length}</span></li>`,
-          ...sec.rows.map(m=>{const st=status(m);const isOwn=m.crewId===f.resourceId;
-          return html`<li key=${m.id} style=${{borderColor:'var(--line)'}}>
-            <label class="flex items-center gap-2.5 px-2.5 py-1.5 cursor-pointer hover:bg-sunken">
-              <input id=${'pl-'+m.id} type="checkbox" class="w-4 h-4 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${picked.has(m.id)} ref=${el=>{if(el)el.indeterminate=!one&&!picked.has(m.id)&&onSome(m.id)}} disabled=${!!(st&&st.block&&!picked.has(m.id))} title=${st&&st.block?'Restricted: can’t be added':''} onChange=${()=>toggle(m.id)}/>
+      :html`${machines.length>8&&html`<input id="pl-search" class="field field-sm md:col-start-1 max-w-[420px]" style=${{height:32,fontSize:13}} placeholder="Search machine #, description, rego or category" value=${pq} onInput=${e=>setPq(e.target.value)} aria-label="Search machines"/>`}
+      <div class="grid gap-3 md:col-start-1 pm-list">
+        ${plantSections.length===0&&html`<div class="text-[12.5px] text-muted">No machines match.</div>`}
+        ${plantSections.map(sec=>html`<div key=${'h-'+sec.key} class="grid gap-1.5">
+          <div class="flex items-center gap-2"><span class="label" style=${{color:'var(--ink)'}}>${sec.label}</span><span class="mono text-[11px] text-faint">${sec.rows.length}</span><span class="flex-1 h-px bg-line"></span></div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5">${sec.rows.map(m=>{const st=status(m);const on=picked.has(m.id);const blocked=!!(st&&st.block&&!on);
+            return html`<label key=${m.id} class=${'flex items-center gap-2.5 px-2.5 py-2 rounded-lg border min-w-0 '+(blocked?'opacity-60 cursor-not-allowed':'cursor-pointer hover:bg-sunken')}
+              style=${on?{borderColor:'var(--accent)',background:'var(--accent-soft)'}:{borderColor:'var(--line)'}} title=${blocked?'Restricted: can’t be added':''}>
+              <input id=${'pl-'+m.id} type="checkbox" class="w-4 h-4 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${on} ref=${el=>{if(el)el.indeterminate=!one&&!on&&onSome(m.id)}} disabled=${blocked} onChange=${()=>toggle(m.id)}/>
               <${Badge} r=${m} size=${24}/>
               <div class="min-w-0 flex-1">
                 <div class="text-[13px] truncate"><span class="font-medium mono">${m.name}</span> <span class="text-muted">${m.sub}</span></div>
-                ${st&&html`<div class="text-[11.5px] truncate" style=${{color:st.tone}}>${st.text}</div>`}
-              </div>
-              ${m.rego&&html`<span class="mono text-[10.5px] text-faint shrink-0">${m.rego}</span>`}
-            </label></li>`;})])}
-      </ul>`}
+                ${(st||m.rego)&&html`<div class="text-[11.5px] truncate" style=${st?{color:st.tone}:null}>${st?st.text:html`<span class="mono text-faint">${m.rego}</span>`}</div>`}
+              </div></label>`})}</div></div>`)}
+      </div>`}
     ${machines.length>0&&(()=>{const sel=machines.filter(m=>picked.has(m.id)||(!one&&onSome(m.id)));const warn=sel.filter(m=>status(m)).length;
-      return html`<div class="rounded-lg border border-line bg-sunken p-2.5 grid gap-2 content-start md:col-start-2 md:row-start-2 md:row-span-3" aria-label="Machines selected for this job">
+      return html`<div class="rounded-lg border border-line bg-sunken p-2.5 grid gap-2 content-start md:col-start-2 md:row-start-2 md:row-span-3 md:sticky md:top-0" aria-label="Machines selected for this job">
         <div class="flex items-center gap-2">
           <span class="label" style=${{color:'var(--ink)'}}>${one?`Selected for ${WD[parse(one).getDay()]} ${fmtShort(parse(one))}`:'Selected for this job'}</span><span class="mono text-[11px] text-faint">${sel.length}</span>
           ${warn>0&&html`<span class="text-[11.5px] font-medium" style=${{color:'var(--warn)'}}>${warn} need${warn===1?'s':''} checking</span>`}
