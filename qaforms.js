@@ -294,9 +294,7 @@ function LayingEditor({f}){
   let run=0;const tot=rows.reduce((a,r)=>a+n0(r.tonnes),0);
   const canAdd=f.canEdit&&blocker<0&&!busy;
   return html`<${FormCard} f=${f} id="laying" title="Asphalt laying record (paving)" sub=${`${rows.length} load${rows.length===1?'':'s'} · ${fmt2((tot))} t`} sigForms=${[]}>
-    <fieldset disabled=${!f.canEdit} class="m-0 p-0 border-0 min-w-0 grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <${Fld} label="Date placed"><${In} type="date" v=${d.date_placed} on=${v=>set({date_placed:v})}/><//>
-      <${Fld} label="Calibrated temp gun serial number"><${In} id="qa-lay-serial" v=${d.serial} on=${v=>set({serial:v})}/><//></fieldset>
+    ${/* the date placed is the shift's date, and the temp gun serial comes from the JSA (Quality): neither is asked again here */''}
     <div class="grid gap-2" id="qa-lay-rows">
       ${rows.map((r,i)=>{run+=n0(r.tonnes);const isOpen=i===open&&f.canEdit;
         return isOpen?html`<div key=${i} class=${rowStyle+' qa-row-laying qa-lay-open'} style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
@@ -329,14 +327,16 @@ function LayingEditor({f}){
       ${blocker>=0&&open<0&&html`<span class="text-[12px]" style=${{color:'hsl(30 90% 38%)'}}>Finish load ${blocker+1} (${blank(rows[blocker].temp)?'temperature':'docket and tonnes'}) before adding another.</span>`}</div>`}
     <div class="text-[13.5px] font-semibold" id="qa-lay-total">Total: ${fmt2((tot))} t</div><//>`;
 }
+/* the calibrated temp gun's serial: entered once, on the JSA (an older laying record may have its own) */
+const laySerial=(p,d)=>String((((p||{}).jsa||{}).quality||{}).serial||'').trim()||String((d||{}).serial||'').trim();
 const LAYING={id:'laying',label:'Asphalt laying record',short:'Laying record',
   make:(data,e,p,ctx)=>({date_placed:e.k,rows:[],device:'',serial:((p.jsa||{}).quality||{}).serial||'',prepared_by:ctx.myName||''}),
   Editor:LayingEditor,
   pdf:o=>{const d=o.p.forms.laying;const doc=o.doc;o.newPage('p');o.page('ASPHALT LAYING RECORD (PAVING)');let y=24;
-    y=kvGrid(o,y,[['Customer',o.lot.client],['Job location',o.lot.location],['Job number',o.lot.job_no],['Date placed',dateTxt(d.date_placed)]],2);let run=0;
+    y=kvGrid(o,y,[['Customer',o.lot.client],['Job location',o.lot.location],['Job number',o.lot.job_no],['Date placed',dateTxt(d.date_placed||o.p.shift_date)]],2);let run=0;
     y=table(o,y+2,[['Docket number',1.2],['Truck rego',1],['Time in',.7],['Temperature',.9],['Tonnes',.8],['Progressive total',1],['Chainage start',.9],['Chainage finish',.9],['Run location / comments',2.6]],
       (d.rows||[]).map(r=>{run+=n0(r.tonnes);return [r.docket,r.rego,r.time,r.temp,r.tonnes,fmt2((run)),r.ch_start,r.ch_finish,r.comments]}),'p');
-    y=kvGrid(o,y+3,[['Calibrated temp gun serial number',d.serial],['Total tonnes',fmt2((run))]],2)}};
+    y=kvGrid(o,y+3,[['Calibrated temp gun serial number',laySerial(o.p,d)],['Total tonnes',fmt2((run))]],2)}};
 
 /* ---------- operations site environmental checklist ---------- */
 const ENV_ITEMS=[['residents','Residents notified'],['kerb','Kerb and channel clean'],['gully','Gully pits clean'],['profiling','Profiling required'],['swept','Pave section swept and clean'],['linemarking','Temporary line marking / stick ’n’ stomps'],['prime','Prime / bitumen on kerb, crossovers'],
@@ -418,7 +418,7 @@ DIAGRAM.check=d=>[...(!d.sketch&&!(d.photos||[]).length?['The diagram (draw it, 
 ENV.check=(d,o)=>{const it=d.items||{};const pre=ENV_ITEMS.filter(([k])=>!(it[k]||{}).pre).length,post=ENV_ITEMS.filter(([k])=>!(it[k]||{}).post).length;
   return [...(pre?[`${pre} item${pre===1?'':'s'} not answered before surfacing`]:[]),...(post?[`${post} item${post===1?'':'s'} not answered after surfacing`]:[]),...(blank(d.before)?['Condition of the site before paving']:[]),...(blank(d.after)?['Condition of the site after the job']:[]),...(signedOn(o,'env')?[]:['Signature of whoever prepared it'])]};
 COSTS.check=d=>[...(blank(d.supervisor)?['Supervisor name']:[]),...(blank(d.start_paving)?['Start paving time']:[]),...(blank(d.finish_paving)?['Finish paving time']:[]),...(!d.none&&!(d.rows||[]).some(r=>!blank(r.contractor))?['The external contractors (or tick “No external contractors”)']:[])];
-LAYING.check=d=>[...((d.rows||[]).some(r=>!rowDone(r))?['Every load needs its docket number, tonnes and temperature']:[]),...((d.rows||[]).length&&blank(d.serial)?['Calibrated temp gun serial number']:[])];   /* no loads is fine */
+LAYING.check=(d,o)=>[...((d.rows||[]).some(r=>!rowDone(r))?['Every load needs its docket number, tonnes and temperature']:[]),...((d.rows||[]).length&&!laySerial(o&&o.p,d)?['Temp gun serial number (on the JSA, under Quality)']:[])];   /* no loads is fine */
 const FORMS=[HOLD,AQR,DIAGRAM,LAYING,ENV,COSTS];
 FORMS.forEach(f=>f.required=true);
 const SIGN_TITLES={aqr_afa:'Agree the quantities (AFA)',aqr_client:'Agree the quantities (client)',hold_afa:'Hold point (AFA quality rep)',hold_client:'Release the hold point (client)',env:'Sign the environmental checklist'};
