@@ -124,9 +124,13 @@ select pg_temp.as_user('00000000-0000-0000-0000-0000000000a4');
 set local role authenticated;
 update public.work_orders set status = 'completed', completion_notes = 'Adjusted park brake, replaced hose' where id = '00000000-0000-0000-0000-00000000c101';
 select pg_temp.ok((pg_temp.d('brakes')).status = 'repaired' and (pg_temp.d('brakes')).resolution like 'Adjusted park brake%', 'completing the work order marks its defects repaired');
-select pg_temp.refused($$update public.defects set status = 'closed' where id = (pg_temp.d('brakes')).id$$, 'a mechanic verifying their own repair');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a6');
+set local role authenticated;
+with u as (update public.defects set status = 'closed' where id = (pg_temp.d('brakes')).id returning 1)
+select pg_temp.ok((select count(*) from u) = 0, 'an operator can''t verify a repair');
 with u as (update public.restrictions set active = false where defect_id = (pg_temp.d('brakes')).id returning 1)
-select pg_temp.ok((select count(*) from u) = 0, 'a mechanic can''t release a restriction');
+select pg_temp.ok((select count(*) from u) = 0, 'an operator can''t release a restriction');
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a3');
 set local role authenticated;
@@ -151,9 +155,13 @@ select pg_temp.ok((pg_temp.d('brakes')).number > (select n from before_no) and (
   and (select count(*) from public.restrictions where asset_id = 't-mach-1' and active) = 1, 'the same fault after a closed repair is a new defect, with a new restriction');
 
 -- 6. Dismissing, and cancelled work orders -------------------------------------------------
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a6');
+set local role authenticated;
+with u as (update public.defects set status = 'dismissed', resolution = 'Not a fault' where asset_id = 't-mach-2' returning 1)
+select pg_temp.ok((select count(*) from u) = 0, 'an operator can''t dismiss a defect');
+reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a4');
 set local role authenticated;
-select pg_temp.refused($$update public.defects set status = 'dismissed', resolution = 'Not a fault' where asset_id = 't-mach-2'$$, 'a mechanic dismissing a defect');
 insert into public.work_orders (id, asset_id, wo_type, title) values ('00000000-0000-0000-0000-00000000c103','t-mach-2','defect','Guard');
 update public.defects set work_order_id = '00000000-0000-0000-0000-00000000c103' where asset_id = 't-mach-2';
 update public.work_orders set status = 'cancelled' where id = '00000000-0000-0000-0000-00000000c103';

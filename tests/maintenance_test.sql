@@ -59,16 +59,25 @@ select pg_temp.ok((select count(*) from u) = 0, 'planner cannot change a mainten
 select pg_temp.ok((select count(*) from public.asset_profiles where asset_id = 't-mach-1') = 1, 'planner can see maintenance profiles');
 reset role;
 
--- 2. Meter readings: never go backwards; corrections by an administrator only; never edited or deleted
+-- 2. Meter readings: never go backwards; corrections by an administrator or mechanic only; never edited
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a4');
 set local role authenticated;
 insert into public.meter_readings (asset_id, kind, value, read_at) values ('t-mach-1','hours',1200, now() - interval '2 days');
 select pg_temp.refused($$insert into public.meter_readings (asset_id, kind, value) values ('t-mach-1','hours',1150)$$, 'reading lower than the last one');
-select pg_temp.refused($$insert into public.meter_readings (asset_id, kind, value, source) values ('t-mach-1','hours',1150,'correction')$$, 'mechanic recording a correction');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a3');
+set local role authenticated;
+select pg_temp.refused($$insert into public.meter_readings (asset_id, kind, value, source) values ('t-mach-1','hours',1150,'correction')$$, 'supervisor recording a correction');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a4');
+set local role authenticated;
 select pg_temp.refused($$insert into public.meter_readings (asset_id, kind, value, read_at) values ('t-mach-1','hours',1300, now() + interval '5 days')$$, 'reading dated in the future');
 insert into public.meter_readings (asset_id, kind, value) values ('t-mach-1','hours',1210);
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a3');
+set local role authenticated;
 with d as (delete from public.meter_readings where asset_id = 't-mach-1' returning 1)
-select pg_temp.ok((select count(*) from d) = 0, 'readings cannot be deleted');
+select pg_temp.ok((select count(*) from d) = 0, 'a supervisor cannot delete readings');
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
 set local role authenticated;
@@ -80,10 +89,10 @@ set local role authenticated;
 select pg_temp.refused($$insert into public.meter_readings (asset_id, kind, value) values ('t-mach-1','hours',1300)$$, 'viewer adding a reading');
 reset role;
 
--- 3. Service plans: administrators only
-select pg_temp.as_user('00000000-0000-0000-0000-0000000000a4');
+-- 3. Service plans: administrators and mechanics only
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a3');
 set local role authenticated;
-select pg_temp.refused($$insert into public.service_plans (category, name, every_hours) values ('Steel Rollers','250 hr',250)$$, 'mechanic creating a service plan');
+select pg_temp.refused($$insert into public.service_plans (category, name, every_hours) values ('Steel Rollers','250 hr',250)$$, 'supervisor creating a service plan');
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
 set local role authenticated;
@@ -119,16 +128,18 @@ set local role authenticated;
 select pg_temp.refused($$update public.work_orders set status = 'closed' where id = '00000000-0000-0000-0000-00000000c001'$$, 'closing a work order that is not completed');
 update public.work_orders set status = 'completed', completion_notes = 'Done' where id = '00000000-0000-0000-0000-00000000c001';
 select pg_temp.ok((select completed_by = '00000000-0000-0000-0000-0000000000a4' from public.work_orders where id = '00000000-0000-0000-0000-00000000c001'), 'completion records who completed it');
-select pg_temp.refused($$update public.work_orders set status = 'closed' where id = '00000000-0000-0000-0000-00000000c001'$$, 'mechanic verifying and closing');
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a3');
 set local role authenticated;
 update public.work_orders set status = 'closed' where id = '00000000-0000-0000-0000-00000000c001';
 select pg_temp.ok((select verified_by = '00000000-0000-0000-0000-0000000000a3' and verified_at is not null from public.work_orders where id = '00000000-0000-0000-0000-00000000c001'), 'supervisor verifies and closes');
 reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a3');
+set local role authenticated;
+select pg_temp.refused($$update public.work_orders set title = 'changed' where id = '00000000-0000-0000-0000-00000000c001'$$, 'supervisor changing a closed work order');
+reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a4');
 set local role authenticated;
-select pg_temp.refused($$update public.work_orders set title = 'changed' where id = '00000000-0000-0000-0000-00000000c001'$$, 'mechanic changing a closed work order');
 insert into public.work_orders (id, asset_id, wo_type, plan_id, title) values ('00000000-0000-0000-0000-00000000c002','t-mach-1','service','00000000-0000-0000-0000-00000000b001','Next 250 hr');
 select pg_temp.ok(true, 'a new work order for the plan is allowed once the last one is closed');
 insert into public.work_orders (id, asset_id, wo_type, title, start_date) values ('00000000-0000-0000-0000-00000000c003','t-mach-1','breakdown','Hydraulic leak', current_date);
@@ -140,10 +151,10 @@ set local role authenticated;
 select pg_temp.refused($$insert into public.work_orders (asset_id, wo_type, title) values ('t-mach-1','request','x')$$, 'planner creating a work order');
 reset role;
 
--- 6. Audit trail: written automatically, readable by administrators only
-select pg_temp.as_user('00000000-0000-0000-0000-0000000000a4');
+-- 6. Audit trail: written automatically, readable by administrators and mechanics only
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a3');
 set local role authenticated;
-select pg_temp.ok((select count(*) from public.maintenance_audit) = 0, 'mechanic cannot read the audit trail');
+select pg_temp.ok((select count(*) from public.maintenance_audit) = 0, 'a supervisor cannot read the audit trail');
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
 set local role authenticated;
@@ -170,6 +181,29 @@ select pg_temp.ok((select data->>'end' from public.items where kind = 'block' an
   'completed early: its downtime on the schedule ends the day it was finished');
 select pg_temp.ok(not exists (select 1 from public.items where kind = 'block' and id = 'wo-00000000-0000-0000-0000-00000000c0e2'),
   'completed before its scheduled days: its downtime comes off the schedule');
+
+-- deleting finished work orders: administrators and mechanics only, and only completed or closed ones
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000d4','t-mech-del@test.local'),('00000000-0000-0000-0000-0000000000d5','t-sup-del@test.local') on conflict (id) do nothing;
+insert into public.profiles (id, email, role) values ('00000000-0000-0000-0000-0000000000d4','t-mech-del@test.local','mechanic'),('00000000-0000-0000-0000-0000000000d5','t-sup-del@test.local','supervisor')
+on conflict (id) do update set role = excluded.role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000d4');
+set local role authenticated;
+insert into public.work_orders (id, asset_id, wo_type, title) values ('00000000-0000-0000-0000-00000000c0e3','t-mach-1','request','Still open');
+with d as (delete from public.work_orders where id = '00000000-0000-0000-0000-00000000c0e3' returning 1)
+select pg_temp.ok((select count(*) from d) = 0, 'an open work order can’t be deleted');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000d5');
+set local role authenticated;
+with d as (delete from public.work_orders where id = '00000000-0000-0000-0000-00000000c0e1' returning 1)
+select pg_temp.ok((select count(*) from d) = 0, 'a supervisor can’t delete a completed work order');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000d4');
+set local role authenticated;
+select pg_temp.ok(public.maint_is_manager() and public.maint_can_verify(), 'a mechanic has full access to Fleet (manager and verify rights)');
+with d as (delete from public.work_orders where id = '00000000-0000-0000-0000-00000000c0e1' returning 1)
+select pg_temp.ok((select count(*) from d) = 1, 'a mechanic deletes a completed work order');
+reset role;
+select pg_temp.ok(not exists (select 1 from public.items where kind = 'block' and id = 'wo-00000000-0000-0000-0000-00000000c0e1'), 'its downtime comes off the schedule');
 
 select 'ALL MAINTENANCE TESTS PASSED' as result;
 rollback;

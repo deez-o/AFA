@@ -390,6 +390,11 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
       sm8Flush(ctx);reload();onClose()}
     catch(e){setErr(errMsg(e))}finally{setBusy(false)}};
   const cur=isNew?null:wo.status;
+  /* administrators and mechanics can delete a finished work order (its service record, readings, defects and files stay) */
+  const [delAsk,setDelAsk]=useState(false);
+  const delWo=async()=>{setErr('');setBusy(true);try{const {data:gone,error}=await sb.from('work_orders').delete().eq('id',wo.id).select('id');if(error)throw error;
+      if(!gone||!gone.length)throw new Error('It wasn’t deleted: only completed or closed work orders, by an administrator or mechanic.');
+      notify(`${woNo(wo)} deleted`);reload();onClose()}catch(e){setErr(errMsg(e));setDelAsk(false)}finally{setBusy(false)}};
   const acts=isNew?[]:[
     ...(['open','scheduled','awaiting_parts'].includes(cur)?[['in_progress',cur==='awaiting_parts'?'Resume work':'Start work']]:[]),
     ...(['open','scheduled','in_progress'].includes(cur)?[['awaiting_parts','Awaiting parts']]:[]),
@@ -402,7 +407,10 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
   const assets=M.assets.filter(x=>!x.retired).sort((x,y)=>x.m.name.localeCompare(y.m.name));
   return html`<${Modal} title=${isNew?'New work order':`${woNo(wo)} · ${wo.title}`} sub=${isNew?'For servicing, a repair, a breakdown or any maintenance request':`${WO_TYPE[wo.wo_type]} · ${a?a.m.name:'Machine'} · created ${fmtTs(wo.created_at)}`} onClose=${onClose}
     foot=${html`${err&&html`<span id="wo-err" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${err}</span>`}
-      ${!isNew&&woChip(cur)}<span class="flex-1"></span>
+      ${!isNew&&woChip(cur)}
+      ${!isNew&&perms.delWo&&(cur==='completed'||cur==='closed')&&(delAsk?html`<span class="text-[12.5px]">Delete ${woNo(wo)} for good?</span><button id="wo-del-yes" type="button" class="btn" style=${{color:'var(--bad)'}} disabled=${busy} onClick=${delWo}>Delete</button><button type="button" class="btn" onClick=${()=>setDelAsk(false)}>Keep</button>`
+        :html`<button id="wo-del" type="button" class="btn btn-ghost" style=${{color:'var(--bad)'}} disabled=${busy} onClick=${()=>setDelAsk(true)} aria-label="Delete work order">${Icon.trash} Delete</button>`)}
+      <span class="flex-1"></span>
       ${!locked&&acts.map(([s,l])=>html`<button key=${s+l} id=${'wo-act-'+s} type="button" class=${'btn'+(s==='completed'||s==='closed'?' btn-primary':'')} disabled=${busy} onClick=${()=>save(s)} style=${s==='cancelled'?{color:'var(--bad)'}:null}>${l}</button>`)}
       ${!locked&&html`<button id="wo-save" type="button" class=${'btn'+(isNew?' btn-primary':'')} disabled=${busy} onClick=${()=>save()}>${isNew?'Create work order':'Save'}</button>`}
       ${locked&&html`<button type="button" class="btn" onClick=${onClose}>Close</button>`}`}>
@@ -764,7 +772,7 @@ function MachinesTab({ctx,open}){
   const hit=a=>(ret||!a.retired)&&(!cat||machCatOf(a.m).toLowerCase()===cat.toLowerCase())&&(!ql||[a.m.name,a.m.sub,a.m.rego,machCatOf(a.m),a.crew&&a.crew.name,a.p&&a.p.make,a.p&&a.p.model,a.p&&a.p.serial].join(' ').toLowerCase().includes(ql));
   const shown=data.resources.filter(r=>r.type==='machine').filter(r=>{const a=M.byId.get(r.id);return a&&hit(a)});
   const groups=groupMachines(shown,data);
-  const canAdd=canEdit;const canDel=perms.mgr;
+  const canAdd=canEdit;const canDel=perms.admin;
   return html`<section class="panel flex flex-col min-h-0" id="fl-machines">
     <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
       <input id="mc-search" class="field" style=${{...fs,width:240}} placeholder="Search machine, rego, make, serial" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search machines"/>
@@ -820,7 +828,7 @@ function MachineDialog({ctx,a,isNew,startDel,onClose}){
       else if(['name','sub','category','rego','crewId'].some(k=>(m[k]||'')!==(ros[k]||'')))setData(d=>({...d,resources:d.resources.map(r=>r.id===id?{...r,...ros}:r)}))}
     if(canP&&profChanged()){setBusy(true);const e=await saveProf(id);setBusy(false);if(e){setErr(e);if(!isNew)return}else reload()}
     notify(isNew?`${name} added`:'Machine saved');onClose()};
-  const remove=async()=>{if(!perms.mgr)return;
+  const remove=async()=>{if(!perms.admin)return;
     setData(d=>({...d,resources:d.resources.filter(r=>r.id!==m.id),blocks:d.blocks.filter(b=>b.resourceId!==m.id).map(b=>b.plantIds&&b.plantIds.includes(m.id)?{...b,...withShiftMach(b,(k,ids)=>ids.filter(x=>x!==m.id))}:b)}));
     if(a&&a.p)try{await sb.from('asset_profiles').delete().eq('asset_id',m.id)}catch(e){}
     try{await sb.from('asset_photos').delete().eq('asset_id',m.id)}catch(e){}
@@ -830,7 +838,7 @@ function MachineDialog({ctx,a,isNew,startDel,onClose}){
     foot=${del?html`<div class="flex-1 min-w-0 grid gap-0.5" id="mc-del-confirm"><span class="text-[12.5px] font-medium" style=${{color:'var(--bad)'}}>Delete ${m.name}${bookings?` and its ${bookings} booking${bookings===1?'':'s'} on the schedule`:''}? This can’t be undone.</span>
         <span class="text-[12px] text-muted">To keep its maintenance history in view, tick Retired instead.</span></div>
       <button type="button" class="btn" onClick=${()=>startDel?onClose():setDel(false)}>Cancel</button><button id="mc-del-go" type="button" class="btn" style=${{background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} onClick=${remove}>Yes, delete</button>`
-      :html`${!isNew&&perms.mgr&&html`<button id="mc-remove" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>${Icon.trash} Delete</button>`}${err&&html`<span id="mc-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span>
+      :html`${!isNew&&perms.admin&&html`<button id="mc-remove" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>${Icon.trash} Delete</button>`}${err&&html`<span id="mc-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span>
         <button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="mc-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Saving…':isNew?'Add machine':'Save'}</button>`}>
     <div class="grid gap-4">
       <div class="grid sm:grid-cols-2 gap-3">
@@ -881,7 +889,8 @@ function Plans({ctx,open}){
 /* ---------- the screen ---------- */
 function FleetScreen({data,live,notify,setData,tab:tab0,onCounts,assetReq,onImportMachines}){
   const sb=live.sb;const role=live.role;
-  const perms={work:['admin','superuser','supervisor','mechanic'].includes(role),verify:['admin','superuser','supervisor'].includes(role),mgr:role==='admin'||role==='superuser'};
+  /* mechanics: full access to Fleet; deleting machines (the roster's list) stays with administrators and superusers */
+  const perms={work:['admin','superuser','supervisor','mechanic'].includes(role),verify:['admin','superuser','supervisor','mechanic'].includes(role),mgr:['admin','superuser','mechanic'].includes(role),admin:role==='admin'||role==='superuser',delWo:role==='admin'||role==='mechanic'};
   const {db,err,reload}=useMaint(sb);
   /* while Fleet is open: every 5 minutes, send what's waiting and refresh outstanding work orders from ServiceM8 */
   const sm8Ref=useRef(null);sm8Ref.current=db&&perms.work?{db,sb}:null;

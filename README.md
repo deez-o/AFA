@@ -114,7 +114,7 @@ Fleet's sections sit in a bar below the header: **Dashboard · Machines · Calen
 | `superuser` | Everything | Everything an admin can do, except features the admin hasn't released yet |
 | `planner` | Edit | View |
 | `supervisor` | View (a simpler, crews-only schedule), the **leave calendar** (puts leave in for approval), **Prestarts** and **Site QA** (fills in QA packs). No other screens | None on screen (Fleet isn't in their menu) |
-| `mechanic` | View | Record services, readings and work order progress |
+| `mechanic` | View | Everything in Fleet: work orders (new, verify & close), ServiceM8, service plans, checklists, readings and corrections, restrictions. Not deleting machines or managing logins |
 | `prestart` | Prestarts and Site QA (signing) only, once released; until then, View | Prestarts |
 | `viewer` | View | None |
 

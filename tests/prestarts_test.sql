@@ -78,10 +78,10 @@ update public.profiles set role = 'prestart' where id = '00000000-0000-0000-0000
 select pg_temp.ok((select role from public.profiles where id = '00000000-0000-0000-0000-0000000000a8') = 'prestart', 'superuser can set other roles');
 reset role;
 
--- 2. Checklists: administrators only; saved versions never change ----------------------
-select pg_temp.as_user('00000000-0000-0000-0000-0000000000a4');
+-- 2. Checklists: administrators and mechanics only; saved versions never change ----------------------
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a2');
 set local role authenticated;
-select pg_temp.refused($$insert into public.prestart_templates (name, category, items) values ('x','Test Rollers','[{"key":"a","text":"A"}]')$$, 'mechanic creating a checklist');
+select pg_temp.refused($$insert into public.prestart_templates (name, category, items) values ('x','Test Rollers','[{"key":"a","text":"A"}]')$$, 'planner creating a checklist');
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
 set local role authenticated;
@@ -132,8 +132,11 @@ insert into storage.objects (bucket_id, name) values ('maintenance','assets/t-ma
 insert into public.maintenance_files (asset_id, kind, name, path) values ('t-mach-1','manual','Operator manual.pdf','assets/t-mach-1/manual.pdf');
 select pg_temp.ok((select count(*) from public.maintenance_files where asset_id = 't-mach-1') = 1, 'mechanic adds a manual to a machine');
 select pg_temp.refused($$insert into public.maintenance_files (asset_id, name, path) values ('t-mach-1','x','assets/t-mach-2/x.pdf')$$, 'a document filed under a different machine');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a2');
+set local role authenticated;
 with d as (delete from public.maintenance_files where asset_id = 't-mach-1' returning 1)
-select pg_temp.ok((select count(*) from d) = 0, 'mechanic cannot remove a manual');
+select pg_temp.ok((select count(*) from d) = 0, 'a planner cannot remove a manual');
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
 set local role authenticated;

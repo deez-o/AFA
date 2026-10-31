@@ -50,10 +50,13 @@ select pg_temp.as_user('00000000-0000-0000-0000-0000000000a4');
 set local role authenticated;
 insert into public.work_orders (id, asset_id, wo_type, title) values ('00000000-0000-0000-0000-00000000d001','t-mach-1','request','Before switching on');
 select pg_temp.ok((pg_temp.link('00000000-0000-0000-0000-00000000d001')).work_order_id is null, 'while the link is off, new work orders aren’t queued for ServiceM8');
--- a mechanic can't switch it on
+reset role;
+-- a planner can't switch it on (administrators and mechanics can)
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a2');
+set local role authenticated;
 update public.servicem8_settings set enabled = true where id = 1;
 reset role;
-select pg_temp.ok((select not enabled from public.servicem8_settings), 'a mechanic can’t change the ServiceM8 settings');
+select pg_temp.ok((select not enabled from public.servicem8_settings), 'a planner can’t change the ServiceM8 settings');
 
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
 set local role authenticated;

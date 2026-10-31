@@ -108,7 +108,8 @@ returns trigger language plpgsql security definer set search_path = public as $$
 begin
   if exists (select 1 from public.servicem8_jobs where work_order_id = old.id and state in ('sent','sending')
              and coalesce(sm8_status, '') not in ('Completed','Unsuccessful')) then
-    raise exception 'Work order % is still open in ServiceM8. Cancel it first, so the mechanic''s job is closed too', old.number using errcode = '22023';
+    raise exception 'Work order % is still open in ServiceM8 (job %). Complete it there first, so the job isn''t left open', old.number,
+      coalesce((select job_no from public.servicem8_jobs where work_order_id = old.id), '?') using errcode = '22023';
   end if;
   return old;
 end; $$;

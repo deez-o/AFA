@@ -188,7 +188,7 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   ok(r.statusCode === 501 && /SUPABASE_SERVICE_ROLE_KEY/.test(r.body.error), 'without the service key it says how to switch it on');
   r = await call({ body: { action: 'flush' } }); ok(r.statusCode === 401, 'not signed in: refused');
   r = await call({ token: 'tok-planner', body: { action: 'flush' } }); ok(r.statusCode === 403, 'a planner can’t send to ServiceM8');
-  r = await call({ token: 'tok-mech', body: { action: 'setup' } }); ok(r.statusCode === 403, 'a mechanic can’t change the ServiceM8 setup');
+  r = await call({ token: 'tok-mech', body: { action: 'setup' } }); ok(r.statusCode !== 403, 'a mechanic can set up ServiceM8 (full access to Fleet)');
   r = await call({ token: 'tok-mech', body: { action: 'status' } }); ok(r.statusCode === 200 && r.body.mode === 'key' && r.body.connected, 'status: using an API key, connected');
 
   // sending a new work order
