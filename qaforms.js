@@ -282,8 +282,11 @@ function parseDocket(t){
   if(net==null){const g=wt(/\bGross\b[^\n0-9]{0,18}\n?[^\n0-9]{0,6}(\d{1,3}[.,]\d{1,3}|\d{4,6})\s*(kg|t\b|ton\w*|tom\w*)?/i),ta=wt(/\bTare\b[^\n0-9]{0,18}\n?[^\n0-9]{0,6}(\d{1,3}[.,]\d{1,3}|\d{4,6})\s*(kg|t\b|ton\w*|tom\w*)?/i);if(g!=null&&ta!=null&&g>ta)net=g-ta}
   if(net!=null)out.tonnes=String(Math.round(net*1000)/1000).replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'');
   /* the truck: "Rego: 123ABC" / "Rego No ABC 123" / "Truck Rego XX12YY": the whole plate, spaces dropped */
-  /* (stays on its own line, so an empty "Trailer Rego:" never picks up the next line; a space joins "ABC 123" but not "XB30XX Net") */
-  const rg=t.match(/R[e3]g(?:[o0c]|istration)?\.?[ \t]*(?:No\.?|Number)?[ \t]*[:.,\-]?[ \t]*([A-Z0-9]{2,8})(?:[ \-]([A-Z0-9]{2,4})\b)?/i);
+  /* (stays on its own line, so an empty "Trailer Rego:" never picks up the next line; a space joins "ABC 123" but not "XB30XX Net").
+     The label must be a word of its own: "MORETON BAY REGIONAL" is not "Rego" + "IONA1". The Truck line's rego comes first. */
+  const REGO=/(?:^|[^A-Za-z])R[e3]?[gq9](?:[o0c]|istration)?\.?(?![A-Za-z])[ \t]*(?:No\.?|Number)?[ \t]*[:.,\-]?[ \t]*([A-Z0-9]{2,8})(?:[ \-]([A-Z0-9]{2,4})\b)?/i;
+  const truckLine=t.split('\n').find(l=>/[tT1Il]?r?uck\b[^\n]*R[e3]?[gq9][o0c]/i.test(l)&&!/trail/i.test(l.slice(0,12)));
+  const rg=(truckLine&&truckLine.match(REGO))||t.split('\n').filter(l=>!/trail/i.test(l)).map(l=>l.match(REGO)).find(Boolean);
   if(rg){let v=(rg[1]+(rg[2]&&rg[1].length<=4&&rg[1].length+rg[2].length<=8?rg[2]:'')).toUpperCase();
     const m=v.match(/^([A-Z]{2,3})([A-Z0-9]{2,4})$/);if(m)v=m[1]+m[2].replace(/O/g,'0').replace(/[IL]/g,'1');
     if(v.length>=4)out.rego=v.slice(0,9)}
@@ -323,7 +326,7 @@ function LayingEditor({f}){
     try{const [w,c]=await Promise.all([loadOcr(),prepDocket(file)]);const {data}=await w.recognize(c);const got=parseDocket(data.text||'');
       const gap=fillDocketGap(got.docket,rows.map(r=>r.docket),got.docketGapAt);
       const odd=!gap.guess&&!!got.docket&&gap.odd;
-      addRow({...layRow(),time,docket:gap.docket||'',rego:got.rego||'',tonnes:got.tonnes||'',product:got.product||'',docket_load:got.load||'',scanned:true,docket_check:!!gap.guess||odd});
+      addRow({...layRow(),time,docket:gap.docket||'',rego:got.rego||'',tonnes:got.tonnes||'',product:got.product||'',docket_load:got.load||'',scanned:true,docket_check:!!got.docket});   /* always check a scanned docket number */
       if(gap.guess){const k=gap.guess.digit!=null?rows.findIndex(r=>r.docket===gap.guess.from):-1;
         setErr(gap.guess.digit!=null?`One digit of the docket number wasn’t printed (the printer leaves a gap). It’s been filled in as ${gap.guess.digit} from load ${k+1}: check it against the docket.`
           :'One digit of the docket number wasn’t printed (the printer leaves a gap). Type the missing digit in place of the “?”.')}

@@ -25,4 +25,7 @@ ok(g.docket === '1477?3012' && g.guess.digit === null, 'nothing to go on: a "?" 
 ok(fillDocketGap('14773012', ['147763999'], parseDocket('Delivery No: 1477 3012').docketGapAt).docket === '147763012', 'a gap read as a space: that is where the digit goes (filled from an earlier load)');
 ok(!fillDocketGap('147757629', ['147757000']).guess, 'a full docket number is left alone');
 ok(!fillDocketGap('1477324', ['147757000']).guess && fillDocketGap('1477324', ['147757000']).odd, 'a number that read badly (two short) isn’t guessed at, but is marked to check');
+ok(parseDocket('Truck: SCH40XX 1ruck Reqo: XB3OXX\nCustomer Name: MORETON BAY REGIONAL COUNCIL').rego === 'XB30XX', 'the Truck line\'s rego (read as "Reqo"), not "REGIONAL"');
+ok(parseDocket('Truck: SCH40XX wuck Rgo: XB3OXX\nCustomer Name: MORETON BAY REGIONAL COUNCIL').rego === 'XB30XX', '"Rgo" with the e missed still counts');
+ok(!parseDocket('Customer Name: MORETON BAY REGIONAL COUNCIL').rego, 'with no Rego label at all, "REGIONAL" is never taken as a rego');
 console.log(fails ? `${fails} FAILED` : 'ALL DOCKET TESTS PASSED'); process.exit(fails ? 1 : 0);
