@@ -546,7 +546,53 @@ function JobsManager({data,setData,onImport,onMerge}){
 }
 
 /* ---------- sidebar ---------- */
-function Sidebar({data,setData,days,tab,setTab,onClose,onMaint,renameId,setRenameId,onImport,onMerge,screen,onImportMachines,notify}){
+/* the Settings sections: crews, asphalt plant, mixes, seal, trucks, subcontractors (staff and machines live on their own screens) */
+function settingsTabs(data,screen){
+  const tabOK=t=>screen==='machines'||screen==='fleet'?t==='machine':(t!=='person'&&t!=='machine');
+  return [...orderOf(data).filter(t=>TYPES[t]).sort((a,b)=>(b==='crew')-(a==='crew')).map(t=>[t,TYPES[t].tab||TYPES[t].label,data.resources.filter(r=>r.type===t).length]),
+    ['mixes','Mixes',mixTypesOf(data).length],['seal','Seal',sealTypesOf(data).length],['trucks','Trucks',truckCosOf(data).length],['subs','Subcontractors',subCosOf(data).length]].filter(([t])=>tabOK(t))}
+const SETTINGS_DESC={crew:'Crews on the schedule and the work they do',aplant:'Asphalt plants and their location',mixes:'Asphalt mixes',seal:'Seal types and lists',trucks:'Trucking companies',subs:'Subcontractor companies',machine:'Machines and categories'};
+
+/* Schedule › Settings: a big window with the sections down the left (a row of tabs on a phone) */
+function SettingsWindow({onClose,...p}){
+  const {data,tab,setTab,screen}=p;
+  const tabs=settingsTabs(data,screen);
+  useEffect(()=>{if(!tabs.some(([t])=>t===tab)&&tab!=='person'&&tab!=='machine'&&tabs[0])setTab(tabs[0][0])},[tab,tabs.length]);
+  useEffect(()=>{const h=e=>{if(e.key!=='Escape')return;if(document.querySelectorAll('.backdrop').length>1)return;onClose()};
+    window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)},[]);
+  const cur=tabs.find(([t])=>t===tab);
+  return html`<div class="fixed inset-0 z-40 flex items-stretch sm:items-center justify-center sm:p-6 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div id="settings-window" class="panel pop flex flex-col w-full sm:w-[min(1180px,100%)] h-full sm:h-[min(880px,100%)] overflow-hidden !rounded-none sm:!rounded-[14px]" role="dialog" aria-modal="true" aria-labelledby="settings-title"
+      style=${{paddingTop:'env(safe-area-inset-top, 0px)',paddingBottom:'env(safe-area-inset-bottom, 0px)'}}>
+      <div class="flex items-center gap-3 px-4 sm:px-5 py-3 border-b border-line">
+        <span class="text-muted inline-flex">${Icon.gear}</span>
+        <div class="min-w-0 flex-1">
+          <h2 id="settings-title" class="font-display text-[18px] font-semibold leading-tight">Schedule settings</h2>
+          <div class="text-[12.5px] text-muted truncate">Changes save straight away</div>
+        </div>
+        <button id="settings-close" class="btn btn-ghost" onClick=${onClose} aria-label="Close settings">${Icon.x}</button>
+      </div>
+      <div class="flex-1 min-h-0 flex flex-col sm:flex-row">
+        <nav class="shrink-0 sm:w-[220px] border-b sm:border-b-0 sm:border-r border-line bg-sunken overflow-x-auto sm:overflow-y-auto" aria-label="Settings sections">
+          <ul class="flex sm:flex-col gap-1 p-2" role="tablist">
+            ${tabs.map(([t,label,n])=>{const on=t===tab;return html`<li key=${t} class="shrink-0"><button type="button" role="tab" data-set-tab=${t} aria-selected=${String(on)} aria-pressed=${String(on)}
+              class=${'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-[13.5px] whitespace-nowrap '+(on?'bg-surface font-semibold text-ink shadow-sm':'text-muted hover:text-ink hover:bg-surface/60')}
+              style=${on?{boxShadow:'inset 3px 0 0 var(--accent)'}:null} onClick=${()=>{setTab(t);p.setRenameId&&p.setRenameId(null)}}>
+              <span class="flex-1">${label}</span><span class="mono text-[11.5px] text-faint">${n}</span></button></li>`})}
+          </ul>
+        </nav>
+        <section class="flex-1 min-w-0 min-h-0 flex flex-col">
+          ${cur&&html`<div class="hidden sm:block px-5 pt-4 pb-1">
+            <div class="font-display text-[16px] font-semibold">${cur[1]}</div>
+            ${SETTINGS_DESC[tab]&&html`<div class="text-[12.5px] text-muted">${SETTINGS_DESC[tab]}</div>`}</div>`}
+          <div class="flex-1 min-h-0"><${Sidebar} key=${tab} ...${p} bare=${true}/></div>
+        </section>
+      </div>
+    </div>
+  </div>`;
+}
+
+function Sidebar({data,setData,days,tab,setTab,onClose,onMaint,renameId,setRenameId,onImport,onMerge,screen,onImportMachines,notify,bare}){
   /* Staff and Machines only show on their own screens; the Schedule screen gets everything else */
   const tabOK=t=>screen==='machines'||screen==='fleet'?t==='machine':(t!=='person'&&t!=='machine');   /* staff are managed on the Staff screen (People) */
   const [q,setQ]=useState('');
@@ -610,41 +656,42 @@ function Sidebar({data,setData,days,tab,setTab,onClose,onMaint,renameId,setRenam
 
   const placeholders={crew:['Crew name, e.g. Crew 5','Type of work, e.g. Paving, Seal'],person:['Full name','Role, e.g. Roller operator'],machine:['Machine #, e.g. PV010','Description, e.g. Vogele Paver (2003)'],aplant:['Plant name, e.g. Asphalt plant 2','Location, e.g. Narangba']};
 
-  const tabsBar=html`<div class="seg w-full !flex flex-wrap gap-0.5" role="tablist" aria-label="Settings sections">
-        ${[...orderOf(data).filter(t=>TYPES[t]).map(t=>[t,TYPES[t].tab||TYPES[t].label,data.resources.filter(r=>r.type===t).length]),['mixes','Mixes',mixTypesOf(data).length],['seal','Seal',sealTypesOf(data).length],['trucks','Trucks',truckCosOf(data).length],['subs','Subcontractors',subCosOf(data).length]].filter(([t])=>tabOK(t))
+  const tabsBar=bare?null:html`<div class="seg w-full !flex flex-wrap gap-0.5" role="tablist" aria-label="Settings sections">
+        ${settingsTabs(data,screen)
           .map(([t,label,n])=>html`<button key=${t} role="tab" class="flex-auto !px-2 !text-[12.5px] whitespace-nowrap" aria-pressed=${tab===t} aria-selected=${tab===t} title=${`${label} (${n})`} onClick=${()=>{setTab(t);setConfirmId(null)}}>${label}</button>`)}
       </div>`;
-  const headTop=html`<div class="flex items-center justify-between gap-2">
+  const headTop=bare?null:html`<div class="flex items-center justify-between gap-2">
         <div class="font-display text-[17px] font-semibold leading-tight">${tab==='jobs'?'Jobs':'Settings'}</div>
         ${onClose&&html`<button class="btn btn-ghost lg:hidden" onClick=${onClose} aria-label=${tab==='jobs'?'Close jobs panel':'Close settings panel'}>${Icon.x}</button>`}
       </div>`;
+  const asideCls=bare?'flex flex-col h-full min-h-0 w-full overflow-hidden':'panel flex flex-col h-full min-h-0 w-full overflow-hidden';
   /* Jobs has its own button in the header, so it opens on its own without the settings tabs */
   if(tab==='jobs')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}</div>
     <${JobsManager} data=${data} setData=${setData} onImport=${onImport} onMerge=${onMerge}/>
   </aside>`;
-  if(tab==='subs')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
-    <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
+  if(tab==='subs')return html`<aside class=${asideCls}>
+    ${!bare&&html`<div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>`}
     <${SubsManager} data=${data} setData=${setData}/>
   </aside>`;
-  if(tab==='trucks')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
-    <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
+  if(tab==='trucks')return html`<aside class=${asideCls}>
+    ${!bare&&html`<div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>`}
     <${TrucksManager} data=${data} setData=${setData}/>
   </aside>`;
-  if(tab==='seal')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
-    <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
+  if(tab==='seal')return html`<aside class=${asideCls}>
+    ${!bare&&html`<div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>`}
     <${SealManager} data=${data} setData=${setData}/>
   </aside>`;
-  if(tab==='mixes')return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
-    <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>
+  if(tab==='mixes')return html`<aside class=${asideCls}>
+    ${!bare&&html`<div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">${headTop}${tabsBar}</div>`}
     <${MixesManager} data=${data} setData=${setData}/>
   </aside>`;
-  return html`<aside class="panel flex flex-col h-full min-h-0 w-full overflow-hidden">
+  return html`<aside class=${asideCls}>
     <div class="px-4 pt-4 pb-3 border-b border-line flex flex-col gap-3">
-      <div class="flex items-center justify-between gap-2">
+      ${!bare&&html`<div class="flex items-center justify-between gap-2">
         <div class="font-display text-[17px] font-semibold leading-tight">Settings</div>
         ${onClose&&html`<button class="btn btn-ghost lg:hidden" onClick=${onClose} aria-label="Close settings panel">${Icon.x}</button>`}
-      </div>
+      </div>`}
       ${tabsBar}
       <div>
         <label for="res-search" class="sr-only">Search ${TYPES[tab].label}</label>
@@ -5425,14 +5472,13 @@ function App({boot,live}){
   const [anchor,setAnchor]=useState(()=>view===3?todayNoon():mondayOf(TODAY));
   useEffect(()=>{if(narrow&&![3,7].includes(view)){setView(3);setAnchor(todayNoon())}else if(!narrow&&view===3){setView(7);setAnchor(mondayOf(TODAY))}},[narrow]);
   const [editing,setEditing]=useState(null);
-  const [drawer,setDrawer]=useState(false);
   const [panel,setPanel]=useState(false);   /* the Settings panel starts closed every time FraserFlow opens */
   useEffect(()=>{try{localStorage.setItem(KEY+':panel',panel?'shown':'hidden')}catch(e){}},[panel]);
   const [tab,setTab]=useState('crew');
   /* the side panel shows either Settings (crews, mixes, trucks…) or Jobs; each header button opens its own view and closes it when pressed again */
   const lastSet=useRef('crew');useEffect(()=>{if(tab!=='jobs')lastSet.current=tab},[tab]);
-  const panelOpen=()=>{let wide=true;try{wide=window.matchMedia('(min-width: 1024px)').matches}catch(e){}return wide?panel:drawer};
-  const showPanel=v=>{let wide=true;try{wide=window.matchMedia('(min-width: 1024px)').matches}catch(e){}if(wide)setPanel(v);else setDrawer(v)};
+  const panelOpen=()=>panel;
+  const showPanel=v=>setPanel(v);
   const toggleResources=()=>{if(tab==='jobs'){setTab(lastSet.current||'crew');showPanel(true)}else showPanel(!panelOpen())};
   const toggleJobs=()=>{if(tab==='jobs'&&panelOpen())showPanel(false);else{setTab('jobs');showPanel(true)}};
   /* roll "today" over at midnight when the page stays open */
@@ -5443,6 +5489,7 @@ function App({boot,live}){
   /* which screen of the left menu is open (remembered in this browser) */
   const isAdmin=can('staff.logins',2);
   const [screen,setScreen]=useState(()=>{try{const v=localStorage.getItem(KEY+':screen');return screenOK(v,live.role,boot)?v:homeScreen(live.role,boot)}catch(e){return homeScreen(live.role,boot)}});
+  useEffect(()=>{setPanel(false)},[screen]);   /* the Settings window closes when you move to another screen */
   /* Staff screen: the leave calendar, or the People list (staff and their logins) */
   const [staffView,setStaffView0]=useState(()=>{try{return localStorage.getItem(KEY+':staff-view')==='people'?'people':'leave'}catch(e){return 'leave'}});
   const setStaffView=v=>{setStaffView0(v);try{localStorage.setItem(KEY+':staff-view',v)}catch(e){}};
@@ -5478,9 +5525,7 @@ function App({boot,live}){
     try{return window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}catch(e){return 'light'}});
   useEffect(()=>{document.documentElement.setAttribute('data-theme',theme)},[theme]);
   const toggleTheme=()=>{const t=theme==='dark'?'light':'dark';setTheme(t);try{localStorage.setItem(KEY+':theme',t)}catch(e){}};
-  const onRename=r=>{setTab(r.type);setRenameId(r.id);
-    let wide=true;try{wide=window.matchMedia('(min-width: 1024px)').matches}catch(e){}
-    if(!wide)setDrawer(true);else setPanel(true)};
+  const onRename=r=>{setTab(r.type);setRenameId(r.id);setPanel(true)};
   /* collapsed sections and crew groups are remembered in this browser */
   /* paving tonnes and the asphalt plant start folded away: the crews show first (opening one is remembered) */
   const [collapsed,setCollapsed]=useState(()=>{let c={};try{c=JSON.parse(localStorage.getItem(KEY+':collapsed')||'{}')||{}}catch(e){}return {tonnes:true,aplant:true,...c}});
@@ -5587,10 +5632,7 @@ function App({boot,live}){
 
   return html`<div class="shell h-full flex gap-2 sm:gap-4">
     <${NavRail} screen=${screen} go=${goScreen} isAdmin=${isAdmin} role=${live.role} data=${data} badge=${{ideas:(data.suggestions||[]).length,staff:leaveDecider()?LR.list.filter(r=>r.status==='pending').length:0}}/>
-    <div id="resources-panel" class=${'hidden w-[300px] shrink-0 h-full'+(panel&&screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='staff'?' lg:block':'')}><${Sidebar} screen=${screen} notify=${setToast} onMaint=${openFleetAsset} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)}/></div>
-    ${drawer&&html`<div class="lg:hidden fixed inset-0 z-40 backdrop" onPointerDown=${e=>{if(e.target===e.currentTarget)setDrawer(false)}}>
-      <div class="h-full w-[min(330px,90vw)] p-3" style=${{paddingLeft:'max(12px, env(safe-area-inset-left, 0px))',paddingTop:'max(12px, env(safe-area-inset-top, 0px))',paddingBottom:'max(12px, env(safe-area-inset-bottom, 0px))'}}>
-        <${Sidebar} screen=${screen} notify=${setToast} onMaint=${openFleetAsset} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>setDrawer(false)}/></div></div>`}
+    ${panel&&tab!=='jobs'&&(screen==='schedule'||fleetCal)&&html`<${SettingsWindow} screen=${screen} notify=${setToast} onMaint=${openFleetAsset} onImportMachines=${()=>setMachImport(true)} data=${data} setData=${setData} days=${days} tab=${tab} setTab=${setTab} renameId=${renameId} setRenameId=${setRenameId} onImport=${()=>setImporting(true)} onMerge=${()=>setMerging(true)} onClose=${()=>{setPanel(false);setRenameId(null)}}/>`}
 
     <main class="flex-1 min-w-0 h-full flex flex-col gap-3">
       <header class="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -5598,8 +5640,8 @@ function App({boot,live}){
           <img src=${BRAND_OVAL} alt="Alex Fraser Group" class="block h-[38px] sm:h-[50px] w-auto select-none" draggable="false"/>
           <img src=${BRAND_TAG} alt="Building greener roads" class="brand-tag hidden xl:block h-[30px] w-auto select-none" draggable="false"/>
         </div>
-        ${screen!=='ideas'&&screen!=='jobs'&&(screen!=='fleet'||fleetCal)&&screen!=='prestarts'&&screen!=='qa'&&screen!=='staff'&&can('schedule.settings',1)&&!sup&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-pressed=${on} aria-controls="resources-panel"
-          title=${on?'Hide Settings':'Crews, plant, mixes, seal, trucks and subcontractors'}
+        ${screen==='schedule'&&can('schedule.settings',1)&&!sup&&(on=>html`<button id="btn-settings" class="btn" onClick=${toggleResources} aria-haspopup="dialog" aria-expanded=${String(on)}
+          title="Crews, plant, mixes, seal, trucks and subcontractors"
           style=${on?{background:'var(--sunken)',borderColor:'var(--line-strong)'}:null}>${Icon.gear} Settings</button>`)(panel&&tab!=='jobs')}
         ${screen==='schedule'&&can('schedule.exports',1)&&html`<${ExportsMenu} items=${[{id:'exp-program',label:'Daily program',desc:'PDF for each job working on a day',run:()=>setProgram(true)},
           ...(data.resources.some(r=>r.type==='crew'&&r.subbie)?[{id:'exp-subworks',label:'Subbie works',desc:'Upcoming works for a subcontractor crew',run:()=>setSubWorksOpen(true)}]:[])]}/>`}
