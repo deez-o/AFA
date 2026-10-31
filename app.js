@@ -368,7 +368,9 @@ function ListManager({title,hint,items,setItems,field,placeholder,data,setData,o
 
 function SealManager({data,setData}){
   const setter=key=>(list,extra)=>setData(d=>{const n={...d,[key]:list};return extra?extra(n):n});
-  return html`<div class="flex-1 min-h-0 overflow-y-auto">
+  /* the two lists side by side (one above the other on a phone) */
+  return html`<div class="flex-1 min-h-0 overflow-y-auto grid md:grid-cols-2 items-start">
+    <div id="seal-col" class="min-w-0">
     <${ListManager} title="Seal types" field="type" placeholder="e.g. 10mm Seal" data=${data} setData=${setData}
       hint="Seal types offered on Seal crew bookings, in this order. Paving jobs can't pick these. Click the pencil to rename one, set its default binder or mark it as a two coat seal."
       items=${sealTypesOf(data)} setItems=${setter('sealTypes')}
@@ -376,17 +378,21 @@ function SealManager({data,setData}){
       onRenamed=${(d,from,to,ed)=>{const mb={...sealBinderOf(d)};delete mb[from];if(ed&&ed.binder)mb[to]=ed.binder;
         const tc={...sealTwoCoatOf(d)};delete tc[from];if(ed&&ed.twoCoat)tc[to]=true;return {...d,sealBinder:mb,sealTwoCoat:tc}}}
       onRemoved=${(d,t)=>{const mb={...sealBinderOf(d)};delete mb[t];const tc={...sealTwoCoatOf(d)};delete tc[t];return {...d,sealBinder:mb,sealTwoCoat:tc}}}/>
-    <div class="border-t border-line mx-4"></div>
+    </div>
+    <div id="sealbind-col" class="min-w-0 border-t md:border-t-0 md:border-l border-line md:min-h-full">
     <${ListManager} title="Seal binders" field="binder" placeholder="e.g. C170" data=${data} setData=${setData}
       hint="Binders offered on Seal crew bookings, in this order. Separate from the asphalt binders under Mixes."
       items=${sealBindersOf(data)} setItems=${setter('sealBinders')}
       onRenamed=${(d,from,to)=>({...d,sealBinder:Object.fromEntries(Object.entries(sealBinderOf(d)).map(([k,v])=>[k,v===from?to:v]))})}/>
+    </div>
   </div>`;
 }
 function MixesManager({data,setData}){
   /* setItems(list, extra) saves the list and optionally applies another change (e.g. renaming inside bookings) */
   const setter=key=>(list,extra)=>setData(d=>{const n={...d,[key]:list};return extra?extra(n):n});
-  return html`<div class="flex-1 min-h-0 overflow-y-auto">
+  /* mixes and binders side by side (one above the other on a phone) */
+  return html`<div class="flex-1 min-h-0 overflow-y-auto grid md:grid-cols-2 items-start">
+    <div id="mixes-col" class="min-w-0">
     <${ListManager} title="Mixes" field="type" placeholder="e.g. AC14 HM" data=${data} setData=${setData}
       hint="Asphalt types offered in a job's Asphalt & Job Quantities tab, in this order. Click the pencil to rename a mix or set its RAP % and default binder."
       items=${mixTypesOf(data)} setItems=${setter('mixTypes')}
@@ -395,11 +401,13 @@ function MixesManager({data,setData}){
       onRenamed=${(d,from,to,ed)=>{const r={...(d.mixRap||{})};delete r[from];if(ed&&ed.hasRap)r[to]=Math.min(100,num(ed.rap));
         const mb={...mixBinderOf(d)};delete mb[from];if(ed&&ed.binder)mb[to]=ed.binder;return {...d,mixRap:r,mixBinder:mb}}}
       onRemoved=${(d,t)=>{const r={...(d.mixRap||{})};delete r[t];const mb={...mixBinderOf(d)};delete mb[t];return {...d,mixRap:r,mixBinder:mb}}}/>
-    <div class="border-t border-line mx-4"></div>
+    </div>
+    <div id="binders-col" class="min-w-0 border-t md:border-t-0 md:border-l border-line md:min-h-full">
     <${ListManager} title="Binders" field="binder" placeholder="e.g. A35P" data=${data} setData=${setData}
       hint="Binders offered for each mix line, in this order."
       items=${bindersOf(data)} setItems=${setter('binders')}
       onRenamed=${(d,from,to)=>({...d,mixBinder:Object.fromEntries(Object.entries(mixBinderOf(d)).map(([k,v])=>[k,v===from?to:v]))})}/>
+    </div>
   </div>`;
 }
 
@@ -551,7 +559,7 @@ function settingsTabs(data,screen){
   const tabOK=t=>screen==='machines'||screen==='fleet'?t==='machine':(t!=='person'&&t!=='machine');
   return [...orderOf(data).filter(t=>TYPES[t]).sort((a,b)=>(b==='crew')-(a==='crew')).map(t=>[t,TYPES[t].tab||TYPES[t].label,data.resources.filter(r=>r.type===t).length]),
     ['mixes','Mixes',mixTypesOf(data).length],['seal','Seal',sealTypesOf(data).length],['trucks','Trucks',truckCosOf(data).length],['subs','Subcontractors',subCosOf(data).length]].filter(([t])=>tabOK(t))}
-const SETTINGS_DESC={crew:'Crews on the schedule and the work they do',aplant:'Asphalt plants and their location',mixes:'Asphalt mixes',seal:'Seal types and lists',trucks:'Trucking companies',subs:'Subcontractor companies',machine:'Machines and categories'};
+const SETTINGS_DESC={crew:'Crews on the schedule and the work they do',aplant:'Asphalt plants and their location',mixes:'Asphalt mixes and binders',seal:'Seal types and seal binders',trucks:'Trucking companies and locations',subs:'Subcontractor companies',machine:'Machines and categories'};
 
 /* Schedule › Settings: a big window with the sections down the left (a row of tabs on a phone) */
 function SettingsWindow({onClose,...p}){
@@ -3281,20 +3289,24 @@ const truckSum=ts=>{const l=(ts||[]).filter(truckHas);return `${l.length} truck$
 
 function TrucksManager({data,setData}){
   const setter=key=>(list,extra)=>setData(d=>{const n={...d,[key]:list};return extra?extra(n):n});
-  return html`<div class="flex-1 min-h-0 overflow-y-auto">
+  /* the two lists side by side (one above the other on a phone) */
+  return html`<div class="flex-1 min-h-0 overflow-y-auto grid md:grid-cols-2 items-start">
+    <div id="trucks-col" class="min-w-0">
     <${ListManager} title="Trucks" field="truckco" placeholder="e.g. BIG DAVES" data=${data} setData=${setData}
       hint="Truck companies offered in a booking's Trucks & Subcontractors tab, in this order. Click the pencil to rename one or set its default driver and weight."
       items=${truckCosOf(data)} setItems=${setter('truckCos')} truckOf=${t=>truckDefOf(data,t)}
       onRenamed=${(d,from,to,ed)=>{const m={...truckDefsOf(d)};const prev=m[from]||{};delete m[from];
         const v=ed&&('driver' in ed||'w' in ed)?{driver:(ed.driver||'').trim(),w:ed.w||''}:prev;if(v.driver||v.w)m[to]=v;return {...d,truckDefs:m}}}
       onRemoved=${(d,t)=>{const m={...truckDefsOf(d)};delete m[t];return {...d,truckDefs:m}}}/>
-    <div class="border-t border-line mx-4"></div>
+    </div>
+    <div id="locs-col" class="min-w-0 border-t md:border-t-0 md:border-l border-line md:min-h-full">
     <${ListManager} title="Locations" field="progloc" placeholder="e.g. BALD HILLS YARD" data=${data} setData=${setData}
       hint="Where trucks load or meet, offered in the Location column of the Trucks & Subcontractors tab. The booking's own site address is always offered too and uses SITE's colour. Click a swatch to pick the colour it's highlighted in on the daily program."
       items=${programLocsOf(data)} setItems=${setter('programLocs')}
       colorOf=${t=>locColorOf(data,t)} onColor=${(t,c)=>setData(d=>({...d,locColors:{...locColorsOf(d),[t]:c}}))}
       onRenamed=${(d,from,to)=>{const m={...locColorsOf(d)};if(m[from]){m[to]=m[from];delete m[from]}return {...d,locColors:m}}}
       onRemoved=${(d,t)=>{const m={...locColorsOf(d)};delete m[t];return {...d,locColors:m}}}/>
+    </div>
   </div>`;
 }
 function SubsManager({data,setData}){
