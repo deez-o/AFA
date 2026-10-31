@@ -208,6 +208,8 @@ create table if not exists public.work_orders (
   constraint work_orders_dates check (end_date is null or start_date is null or end_date >= start_date)
 );
 create index if not exists work_orders_asset on public.work_orders (asset_id, status);
+-- the job number in ServiceM8, when the work is also booked there
+alter table public.work_orders add column if not exists servicem8_no text;
 -- one open service work order per machine and service plan: no duplicates when a service is due by several triggers
 create unique index if not exists work_orders_one_open_per_plan on public.work_orders (asset_id, plan_id)
   where plan_id is not null and status not in ('completed','closed','cancelled');

@@ -344,8 +344,8 @@ function ProfileDialog({ctx,a,onClose}){
 /* one dialog for new and existing work orders, including completing a service and verifying */
 function WorkOrderDialog({ctx,wo,init,onClose}){
   const {sb,notify,reload,perms,M,staff}=ctx;const isNew=!wo;
-  const [f,setF]=useState(()=>wo?{...wo,start_date:wo.start_date||'',end_date:wo.end_date||'',assigned_to:wo.assigned_to||'',description:wo.description||'',completion_notes:wo.completion_notes||'',parts:wo.parts||[]}
-    :{asset_id:'',wo_type:'request',plan_id:null,title:'',description:'',priority:'medium',assigned_to:'',start_date:'',end_date:'',parts:[],completion_notes:'',...(init||{})});
+  const [f,setF]=useState(()=>wo?{...wo,start_date:wo.start_date||'',end_date:wo.end_date||'',assigned_to:wo.assigned_to||'',description:wo.description||'',servicem8_no:wo.servicem8_no||'',completion_notes:wo.completion_notes||'',parts:wo.parts||[]}
+    :{asset_id:'',wo_type:'request',plan_id:null,title:'',description:'',servicem8_no:'',priority:'medium',assigned_to:'',start_date:'',end_date:'',parts:[],completion_notes:'',...(init||{})});
   /* fields ServiceM8 can change while this is open: refreshed unless you've changed them, and only saved if you have */
   const SYNCED=['start_date','end_date','assigned_to','completion_notes','parts'];
   const formOf=w=>({start_date:w.start_date||'',end_date:w.end_date||'',assigned_to:w.assigned_to||'',completion_notes:w.completion_notes||'',parts:w.parts||[]});
@@ -365,7 +365,8 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
     if(drop.length){const {error}=await sb.from('defects').update({work_order_id:null}).in('id',drop);if(error)throw error}};
   const locked=!isNew&&(!perms.work||((wo.status==='closed'||wo.status==='cancelled')&&!perms.mgr));
   const row=()=>({wo_type:f.wo_type,plan_id:f.plan_id||null,title:f.title.trim(),description:f.description.trim()||null,priority:f.priority,assigned_to:f.assigned_to.trim()||null,
-    start_date:f.start_date||null,end_date:f.end_date||f.start_date||null,parts:cleanParts(f.parts),completion_notes:f.completion_notes.trim()||null});
+    start_date:f.start_date||null,end_date:f.end_date||f.start_date||null,parts:cleanParts(f.parts),completion_notes:f.completion_notes.trim()||null,
+    ...((f.servicem8_no||'').trim()||(wo&&wo.servicem8_no)?{servicem8_no:(f.servicem8_no||'').trim()||null}:{})});
   const check=()=>{if(!f.asset_id)return 'Pick the machine.';if(!f.title.trim())return 'Give the work order a short title.';if(f.end_date&&f.start_date&&f.end_date<f.start_date)return 'The end date is before the start date.';return ''};
   const save=async status=>{const c=check();if(c){setErr(c);return}setErr('');setBusy(true);
     try{
@@ -421,6 +422,7 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
       <${Fld} label="Type"><select id="wo-type" class="field" style=${fs} value=${f.wo_type} onChange=${e=>setF({...f,wo_type:e.target.value})}>${Object.entries(WO_TYPE).map(([k,v])=>html`<option key=${k} value=${k}>${v}</option>`)}</select><//>
       <${Fld} label="Title" span=${true}><input id="wo-title" class="field" style=${fs} placeholder="e.g. 500 hr service, hydraulic hose leak" value=${f.title} onInput=${e=>setF({...f,title:e.target.value})}/><//>
       <${Fld} label="Description" span=${true}><textarea id="wo-desc" class="field" style=${{height:'auto',minHeight:64,padding:'8px 10px',fontSize:13}} rows="3" value=${f.description} onInput=${e=>setF({...f,description:e.target.value})}></textarea><//>
+      ${!(wo&&(sm8Of(ctx.db,wo.id)||{}).job_no)&&html`<${Fld} label="ServiceM8 #"><input id="wo-sm8-no" class="field mono" style=${fs} placeholder="If it’s booked in ServiceM8 by hand" value=${f.servicem8_no||''} onInput=${e=>setF({...f,servicem8_no:e.target.value})}/><//>`}
       <${Fld} label="Priority"><select id="wo-pri" class="field" style=${fs} value=${f.priority} onChange=${e=>setF({...f,priority:e.target.value})}>${Object.entries(PRI).map(([k,v])=>html`<option key=${k} value=${k}>${v}</option>`)}</select><//>
       <${Fld} label="Assigned mechanic or contractor"><${Combo} id="wo-assign" className="field" style=${fs} label="Assigned to" value=${f.assigned_to} onChange=${v=>setF({...f,assigned_to:v})} options=${staff}/><//>
       <${Fld} label="Scheduled from"><input id="wo-start" type="date" class="field mono" style=${fs} value=${f.start_date} onChange=${e=>setF({...f,start_date:e.target.value,end_date:f.end_date&&f.end_date>=e.target.value?f.end_date:e.target.value})}/><//>
@@ -706,26 +708,28 @@ function WorkOrders({ctx,open}){
   const {M,perms}=ctx;
   useEffect(()=>{if(perms.work)sm8Flush(ctx)},[]);   /* catch up on anything ServiceM8 didn't report */const [view,setView]=useState('open');const [q,setQ]=useState('');
   const ql=q.trim().toLowerCase();
-  const rows=ctx.db.work_orders.filter(w=>(view==='all'||(view==='open'?WO_OPEN(w.status):!WO_OPEN(w.status)))).filter(w=>{const a=M.byId.get(w.asset_id);return !ql||[w.number,w.title,w.assigned_to,a&&a.m.name].join(' ').toLowerCase().includes(ql)})
+  const rows=ctx.db.work_orders.filter(w=>(view==='all'||(view==='open'?WO_OPEN(w.status):!WO_OPEN(w.status)))).filter(w=>{const a=M.byId.get(w.asset_id);return !ql||[w.number,w.servicem8_no,(sm8Of(ctx.db,w.id)||{}).job_no,w.title,w.assigned_to,a&&a.m.name,a&&a.m.rego].join(' ').toLowerCase().includes(ql)})
     .sort((a,b)=>view==='open'?(['urgent','high','medium','low'].indexOf(a.priority)-['urgent','high','medium','low'].indexOf(b.priority))||(a.start_date||'9').localeCompare(b.start_date||'9')||b.number-a.number:b.number-a.number);
   return html`<section class="panel flex flex-col min-h-0">
     <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line">
       <div class="seg" role="group" aria-label="Show"><button type="button" aria-pressed=${view==='open'} onClick=${()=>setView('open')}>Open</button><button type="button" aria-pressed=${view==='done'} onClick=${()=>setView('done')}>Completed & closed</button><button type="button" aria-pressed=${view==='all'} onClick=${()=>setView('all')}>All</button></div>
-      <input id="wo-search" class="field" style=${{...fs,width:220}} placeholder="Search number, title, machine, mechanic" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search work orders"/>
+      <input id="wo-search" class="field" style=${{...fs,width:220}} placeholder="Search FF #, ServiceM8 #, rego, machine…" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search work orders"/>
       <span class="flex-1"></span>${perms.mgr&&ctx.db.sm8&&html`<button id="wo-sm8-settings" type="button" class="btn" onClick=${()=>open({k:'sm8'})}>ServiceM8${sm8On(ctx.db)?'':' (off)'}</button>`}${perms.work&&html`<button id="wo-new" type="button" class="btn btn-primary" onClick=${()=>open({k:'wo'})}>${Icon.plus} New work order</button>`}
     </div>
     <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="wo-table">
-      <thead><tr class="text-left">${['No.','Machine','Type','Title','Priority','Status','Assigned','Scheduled'].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+      <thead><tr class="text-left">${['FF #','ServiceM8 #','Machine','Rego','Type','Title','Priority','Status','Assigned','Scheduled'].map(h=>html`<th key=${h} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
       <tbody>${rows.map(w=>{const a=M.byId.get(w.asset_id);return html`<tr key=${w.id} class="border-t border-line cursor-pointer hover:bg-sunken" tabindex="0" onClick=${()=>open({k:'wo',wo:w})} onKeyDown=${e=>{if(e.key==='Enter')open({k:'wo',wo:w})}}>
           <td class="py-2 px-3 mono whitespace-nowrap">${w.number}</td>
+          <td class="py-2 px-3 mono whitespace-nowrap wo-sm8">${(sm8Of(ctx.db,w.id)||{}).job_no||w.servicem8_no||html`<span class="text-faint">–</span>`}</td>
           <td class="py-2 px-3 whitespace-nowrap">${a?html`<span class="inline-flex items-center gap-1.5">${stDot(a.status,8)} ${a.m.name}</span>`:w.asset_id}</td>
+          <td class="py-2 px-3 mono whitespace-nowrap wo-rego">${a&&a.m.rego||html`<span class="text-faint">–</span>`}</td>
           <td class="py-2 px-3 whitespace-nowrap">${WO_TYPE[w.wo_type]}${w.wo_type==='breakdown'&&w.safe_to_operate===false?html` <span class="text-[11px] font-semibold" style=${{color:'hsl(0 72% 47%)'}}>unsafe</span>`:''}</td>
           <td class="py-2 px-3 min-w-[200px]">${w.title}</td>
           <td class="py-2 px-3 whitespace-nowrap font-medium" style=${{color:PRI_COL[w.priority]}}>${PRI[w.priority]}</td>
           <td class="py-2 px-3 whitespace-nowrap">${woChip(w.status)}</td>
           <td class="py-2 px-3 whitespace-nowrap">${w.assigned_to||html`<span class="text-faint">–</span>`}${sm8Mark(sm8Of(ctx.db,w.id))}</td>
           <td class="py-2 px-3 mono whitespace-nowrap">${w.start_date?`${fmtShort(parse(w.start_date))}${w.end_date&&w.end_date!==w.start_date?' – '+fmtShort(parse(w.end_date)):''}`:html`<span class="text-faint">–</span>`}</td></tr>`})}
-        ${!rows.length&&html`<tr><td colspan="8" class="px-3 py-6 text-center text-muted">${view==='open'?'No open work orders.':'Nothing here yet.'}</td></tr>`}</tbody></table></div>
+        ${!rows.length&&html`<tr><td colspan="10" class="px-3 py-6 text-center text-muted">${view==='open'?'No open work orders.':'Nothing here yet.'}</td></tr>`}</tbody></table></div>
   </section>`;
 }
 
