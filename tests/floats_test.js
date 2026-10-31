@@ -207,4 +207,24 @@ ok(!ctx.FFL.needsFloat({ name: 'SS003', category: 'Bobcats' }, {}, CF) && !ctx.F
   let wait = 0; R.forEach((r, i) => { if (i && R[i - 1].to.key !== 'yard') wait += (r.leave - R[i - 1].done) / 6e4 });
   ok(R.length === 2 && wait <= 30 && R.every(r => !r.curfew && !r.late && !r.outHours), 'no waiting at a site for the curfew: the first move goes later (' + R.map(r => hm(r.leave) + '–' + hm(r.done)).join(', ') + ')');
 }
+
+// the user's case: two moves out of the yard, needed by 5pm; the old plan went at 6am, came back and waited for 9am
+{
+  const tr = () => ({ min: 30, km: 25 });
+  const mk = (id, b) => ({ id, moves: [{ m: id, name: 'Y' + id }], from: { key: 'yard' }, to: { key: b }, earliest: t('2026-11-08 12:00'), latest: t('2026-11-09 17:00') });
+  const cdy = cfgOf({});   // day driver 6am–4pm
+  const R = planFloat([mk('1', 'S1'), mk('2', 'S2')], cdy, tr, {}).runs;
+  let wait = 0; R.forEach((r, i) => { if (i) wait += (r.leave - R[i - 1].done) / 6e4 });
+  ok(R.length === 2 && wait <= 10 && R.every(r => !r.curfew && !r.late) && R[0].leave >= t('2026-11-09 09:00'), 'two moves out of the yard for 5pm: start 9am and do both, no 6am start and wait (' + R.map(r => hm(r.leave) + '–' + hm(r.done)).join(', ') + ')');
+}
+
+// back to the yard at 6am (as soon as it can), wait at the yard, out again at 9am: do both from 9am instead
+for (const mins of [10, 15, 20]) {
+  const tr = (a, b) => ({ min: a && b && a.key === b.key ? 0 : mins, km: 10 });
+  const R = planFloat([
+    { id: 'b', moves: [{ m: 'b', name: 'B1' }], from: { key: 'S1' }, to: { key: 'yard' }, earliest: t('2026-11-08 16:00'), latest: t('2026-11-10 04:00') },
+    { id: 'o', moves: [{ m: 'o', name: 'O1' }], from: { key: 'yard' }, to: { key: 'S2' }, earliest: t('2026-11-08 12:00'), latest: t('2026-11-09 17:00') }], cfgOf({}), tr, {}).runs.filter(r => r.pick.getDate() === 9);
+  let wait = 0; R.forEach((r, i) => { if (i) wait += (r.leave - R[i - 1].done) / 6e4 });
+  ok(R.length === 2 && wait <= 10 && R[0].depart >= t('2026-11-09 09:00') && R.every(r => !r.curfew), 'back to the yard then out again (' + mins + ' min drives): both from 9am, no wait at the yard (' + R.map(r => r.from.key + '→' + r.to.key + ' ' + hm(r.leave) + '–' + hm(r.done)).join(', ') + ')');
+}
 console.log(fails ? `${fails} FAILED` : 'ALL FLOAT TESTS PASSED'); process.exit(fails ? 1 : 0);

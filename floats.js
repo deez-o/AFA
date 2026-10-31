@@ -214,23 +214,24 @@ function planFloat(trips,cfg,travel,plan,opt={}){
     clock=done;loc=t.to}
   closeGaps(out,cfg,travel);
   return {runs:out,skipped}}
-/* the float shouldn't sit about away from the yard mid-shift (e.g. waiting at a site for a curfew to end): each
+/* the float shouldn't sit about mid-shift (e.g. waiting at a site or the yard for a curfew to end): each
    shift is re-planned to start later and/or in another order so its moves run back to back, as long as every move stays
    on time, out of the curfew, in the driver's hours, on the same day, and the shift keeps to the 12-hour / 10-hour rules.
-   Waiting at the yard is fine. Shifts with a time set by hand or a ticked-off move stay as they are. */
+   A shorter shift that starts later beats an early start with a wait. Shifts with a time set by hand or a ticked-off move stay as they are. */
 function closeGaps(runs,cfg,travel){
   const L=+cfg.loadMin||0,U=+cfg.unloadMin||0;
   const shifts=[];runs.forEach((r,i)=>{const p=runs[i-1];if(!p||(r.leave-p.done)/6e4>=REST_MIN)shifts.push([]);shifts[shifts.length-1].push(r)});
-  /* time spent waiting anywhere but the yard */
+  /* time the driver spends waiting mid-shift, wherever it is (at a drop, back at the yard, or early at a pick-up) */
   const idleOf=list=>{let w=0;list.forEach((r,i)=>{const p=list[i-1];
-    if(p&&p.to.key!=='yard')w+=Math.max(0,(r.leave-p.done)/6e4);           /* waiting at the last drop */
-    if(r.from.key!=='yard')w+=Math.max(0,(r.pick-addMin(r.leave,r.deadhead.min||0))/6e4)});return w};   /* early at the pick-up */
+    if(p)w+=Math.max(0,(r.leave-p.done)/6e4);
+    w+=Math.max(0,(r.pick-addMin(r.leave,r.deadhead.min||0))/6e4)});return w};
   shifts.forEach((sh,si)=>{
     if(sh.length<2||sh.some(r=>r.fixed||r.ticked))return;
     const before=idleOf(sh);if(before<15)return;
     const prevDone=si>0?shifts[si-1][shifts[si-1].length-1].done:null,nextLeave=si<shifts.length-1?shifts[si+1][0].leave:null;
     const startLoc=sh[0].fromLoc;
-    const orders=[sh,[...sh].sort((a,b)=>a.latest-b.latest||a.earliest-b.earliest),[...sh].sort((a,b)=>a.earliest-b.earliest||a.latest-b.latest)];
+    const perms=xs=>xs.length<=1?[xs]:xs.flatMap((x,i)=>perms([...xs.slice(0,i),...xs.slice(i+1)]).map(p=>[x,...p]));
+    const orders=sh.length<=5?perms(sh):[sh,[...sh].sort((a,b)=>a.latest-b.latest||a.earliest-b.earliest),[...sh].sort((a,b)=>a.earliest-b.earliest||a.latest-b.latest)];
     let best=null;
     orders.forEach(ord=>{
       const from=sh[0].leave,to=sh[sh.length-1].done;
