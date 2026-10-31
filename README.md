@@ -167,6 +167,32 @@ Lab in the left menu (administrators only until it's released in Settings): ever
 - Bookings that already had it keep it, but are flagged: a red ⚠ on the booking bar (today onwards), a warning when the booking opens, ⚠ on the Machines tab. A plan with a newly added restricted machine can't be sent to the schedule.
 - Machine pickers also warn (without blocking) when a machine's **service is overdue or due soon**, or it has **open defects**. Fleet › Calendar marks restricted machines.
 
+### ServiceM8 (the contract mechanic)
+Work orders go to the contract mechanic's **ServiceM8** as jobs, under AFA's client record in his account, and their progress comes back. He works entirely in ServiceM8:
+
+| He does this in ServiceM8 | The work order here |
+| --- | --- |
+| Books the job in | **Scheduled**, with his dates (so the machine shows as down on the schedule board) |
+| Starts work (time recorded on the job) | **In progress** |
+| Puts the job in his "awaiting parts" queue | **Awaiting parts** |
+| Marks it **Completed** | **Completed**: his *Work Done* becomes the completion notes, his materials the parts, and "Hours: 4530" / "Km: 123456" in *Work Done* a meter reading. A scheduled service becomes the service record, so the next one is worked out from it. Its defects are marked repaired |
+| Marks it **Unsuccessful** | **Cancelled** |
+
+Verifying and closing stay here. Changing a work order's title, description or priority here updates his job; cancelling it here marks his job Unsuccessful (with a note). New work orders and breakdowns go automatically; tick off *Send to ServiceM8* on a new one (or click **Don't send** while it waits) to keep it here. Each work order shows where it is with ServiceM8, with **Refresh now**; the list marks those in ServiceM8 with *SM8* (*SM8 !* when sending failed).
+
+FraserFlow only ever looks at jobs it made. When ServiceM8 reports a change, the job is checked against FraserFlow's own list first; his other clients' jobs are never fetched.
+
+**Set up (once):**
+1. Supabase → SQL Editor: run `supabase/servicem8.sql` (then `tests/servicem8_test.sql` to check it).
+2. Vercel → Settings → Environment Variables: `SUPABASE_SERVICE_ROLE_KEY` (as for logins), then **one** of these:
+   - **An add-on (recommended):** register at servicem8.com/developer-registration, add an add-on in the Developer menu (it doesn't have to be listed in the Add-on Store) with its Return URL on FraserFlow's address, and add its `SERVICEM8_APP_ID` and `SERVICEM8_APP_SECRET`. He connects it himself, approves what it can do, and can disconnect it from ServiceM8 any time.
+   - **An API key:** he makes one in ServiceM8 → Settings → API Keys and you add it as `SERVICEM8_API_KEY`. Quicker, but it opens his whole account.
+   - Also add `CRON_SECRET` (any long random text): Vercel's daily check (5 am) then sends anything still waiting and catches up on changes.
+   Redeploy.
+3. Fleet → Work orders → **ServiceM8** (administrators): connect (with the add-on, he signs in to his ServiceM8 on the next page), fill in AFA's client name in his ServiceM8, his business name and the depot address, click **Set up in ServiceM8**, pick his "awaiting parts" queue, then tick **Send work orders to ServiceM8** and Save.
+
+Files: `api/servicem8.js` (the server side), `supabase/servicem8.sql`, `tests/servicem8_test.sql`, `tests/api_servicem8_test.js` (`node tests/api_servicem8_test.js`).
+
 ### Reports
 Fleet › **Reports**: work order backlog, service compliance, prestart compliance (prestarts on the days each machine was booked), downtime, breakdowns, defects and service history. Pick the dates and category; export each to **CSV** (Excel) or a branded **PDF**. Each machine's panel has a **History PDF**.
 
