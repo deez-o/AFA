@@ -100,7 +100,7 @@ module.exports = async (req, res) => {
     docket: docket.replace(/\?/g, ''), docketGapAt: gapAt >= 0 ? gapAt : null, docketGap: gapAt >= 0 || !!x.docket_gap,
     tonnes: isFinite(tonnes) && tonnes > 0 && tonnes < 100 ? String(Math.round(tonnes * 1000) / 1000) : '',
     rego: String(x.rego || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 9),
-    product: String(x.product || '').trim().slice(0, 20),
+    product: String(x.product || '').trim().replace(/^\d{5,}\s*[-–]\s*/, '').slice(0, 20),   // "10086002 - SME2" → "SME2"
     load: (d => d ? String(+d) : '')(String(x.load || '').replace(/[^0-9]/g, '').slice(0, 6)),
     unsure: Array.isArray(x.unsure) ? x.unsure : [],
     note: String(x.note || '').slice(0, 200),
