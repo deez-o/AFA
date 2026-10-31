@@ -449,20 +449,16 @@ function FloatLoads({data,cfg,set:set0}){
           </div>
         <div class="flex flex-wrap gap-2 items-center">${(g.items||[]).map(no=>Chip(no,()=>set({groups:groups.map((x,k)=>k===i?{...x,items:x.items.filter(y=>y!==no)}:x)}),'g:'+i))}
           ${!(g.items||[]).length&&html`<span class="text-[12.5px] text-muted px-1">Drag machines here</span>`}${AddNo(g.items||[],v=>set({groups:groups.map((x,k)=>k===i?{...x,items:[...(x.items||[]),v]}:x)}),'fl-group-add-'+i,'Add a machine to '+g.name)}</div></div>`)}
-      <div class="grid gap-1.5 rounded-lg border border-dashed border-line p-3 fl-drop" data-drop="pool" ...${drop('pool')} style=${dropStyle('pool')}>
-        <span class="label">Not in a group yet</span>
-        <div class="flex flex-wrap gap-2">${ms.filter(m=>!groups.some(g=>(g.items||[]).some(no=>isNo(no,m.name,m.rego)))&&!alone.some(no=>isNo(no,m.name,m.rego))).map(m=>Chip(noOf(m),null,'pool'))}</div>
-        <span class="text-[12px] text-muted">Drag a machine into a group, or back here to take it out.</span></div>
 </div>
-    <div class="grid gap-1.5"><span class="label">Loads that fit</span>
-      ${combos.length===0&&html`<span class="text-[12.5px] text-muted">None: every machine goes on its own load.</span>`}
+    <div class="grid gap-1.5"><span class="label">Configurations</span>
+      ${combos.length===0&&html`<span class="text-[12.5px] text-muted">None yet: every machine goes on the float by itself.</span>`}
       ${combos.map((c,i)=>html`<div key=${i} class="flex flex-wrap items-center gap-1.5 fl-combo">
         ${(c.items||[]).map((it,j)=>html`${j>0&&html`<span class="text-muted">+</span>`}<span key=${j} class="inline-flex items-center fl-part"><select class="field" style=${{height:40,maxWidth:300,borderTopRightRadius:0,borderBottomRightRadius:0}} value=${it} onChange=${e=>setCombo(i,e.target.value?c.items.map((x,k)=>k===j?e.target.value:x):c.items.filter((_,k)=>k!==j))} aria-label=${'Part '+(j+1)+': '+lab(it)}>${opts}</select>
-          <button type="button" class="btn fl-part-x" style=${{height:40,width:34,padding:0,justifyContent:'center',borderTopLeftRadius:0,borderBottomLeftRadius:0,marginLeft:-1}} title="Take this out of the load" aria-label=${'Take '+(lab(it)||'this')+' out of the load'} onClick=${()=>setCombo(i,c.items.filter((_,k)=>k!==j))}>${Icon.x}</button></span>`)}
-        <button type="button" class="btn" style=${{height:40}} aria-label="Add another machine to this load" onClick=${()=>setCombo(i,[...(c.items||[]),''])}>${Icon.plus}</button>
-        <button type="button" class="btn btn-ghost" style=${{height:40,color:'var(--bad)'}} aria-label="Remove this load" onClick=${()=>set({combos:combos.filter((_,k)=>k!==i)})}>${Icon.trash}</button></div>`)}
-      <button type="button" id="fl-combo-add" class="btn justify-self-start" style=${{height:28}} onClick=${()=>set({combos:[...combos,{items:['','']}]})}>${Icon.plus} Add a load</button>
-      <span class="text-[12px] text-muted">Part of a load fits too: “paver + 2 small rollers” also allows a paver with one small roller. Numbers in amber don’t match a machine yet.</span></div>
+          <button type="button" class="btn fl-part-x" style=${{height:40,width:34,padding:0,justifyContent:'center',borderTopLeftRadius:0,borderBottomLeftRadius:0,marginLeft:-1}} title="Take this out of the configuration" aria-label=${'Take '+(lab(it)||'this')+' out of the configuration'} onClick=${()=>setCombo(i,c.items.filter((_,k)=>k!==j))}>${Icon.x}</button></span>`)}
+        <button type="button" class="btn" style=${{height:40}} aria-label="Add another machine to this configuration" onClick=${()=>setCombo(i,[...(c.items||[]),''])}>${Icon.plus}</button>
+        <button type="button" class="btn btn-ghost" style=${{height:40,color:'var(--bad)'}} aria-label="Remove this configuration" onClick=${()=>set({combos:combos.filter((_,k)=>k!==i)})}>${Icon.trash}</button></div>`)}
+      <button type="button" id="fl-combo-add" class="btn justify-self-start" style=${{height:28}} onClick=${()=>set({combos:[...combos,{items:['','']}]})}>${Icon.plus} Add a configuration</button>
+      <span class="text-[12px] text-muted">Part of a configuration fits too: “paver + 2 small rollers” also allows a paver with one small roller. Numbers in amber don’t match a machine yet.</span></div>
   </div>`}
 
 /* ---------- the run sheet ---------- */
