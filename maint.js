@@ -59,8 +59,16 @@ const planCats=p=>planCatList(p).map(c=>c.toLowerCase());
 const planIds=p=>Array.isArray(p&&p.asset_ids)?p.asset_ids:[];   /* a plan for several hand-picked machines */
 const ivsOf=p=>Array.isArray(p&&p.intervals)?p.intervals.filter(v=>+v.every>0).sort((a,b)=>a.every-b.every):[];
 const ivLabel=(p,v)=>(v.label||'').trim()||`${fmtN(+v.every)} ${ivUnit(p)==='km'?'km':'h'} service`;
+/* which of a plan's services a record was ("… · 750 h service"), if it says */
+const stageNamed=(p,rec)=>{const t=String(rec&&rec.service_type||'').toLowerCase().trim();if(!t)return null;
+  return [...ivsOf(p)].sort((a,b)=>ivLabel(p,b).length-ivLabel(p,a).length).find(v=>t.endsWith(ivLabel(p,v).toLowerCase()))||null};
 function stageOf(p,last){const ivs=ivsOf(p);if(ivs.length<2||!last)return null;const v0=last[ivUnit(p)];if(v0==null)return null;
-  const base=+ivs[0].every,cycle=+ivs[ivs.length-1].every;const M=Math.round((+v0+base)/base)*base;const r=M%cycle||cycle;
+  const base=+ivs[0].every,cycle=+ivs[ivs.length-1].every;
+  /* the last one says which service it was (e.g. the 750): the next is the one after it in the cycle (the 1000) */
+  const named=stageNamed(p,last);
+  if(named){const nx=(+named.every+base)%cycle||cycle;const v=ivs.find(x=>+x.every===nx)||[...ivs].reverse().find(x=>nx%+x.every===0)||ivs[0];
+    return {every:+v.every,at:+v0+base,label:ivLabel(p,v),notes:(v.notes||'').trim()}}
+  const M=Math.round((+v0+base)/base)*base;const r=M%cycle||cycle;
   const v=ivs.find(x=>+x.every===r)||[...ivs].reverse().find(x=>r%+x.every===0)||ivs[0];return {every:+v.every,at:M,label:ivLabel(p,v),notes:(v.notes||'').trim()}}
 const svcName=x=>x.stage?`${x.plan.name} · ${x.stage.label}`:x.plan.name;
 const ivTxt=p=>{const ivs=ivsOf(p);return ivs.length>1?ivs.map(v=>fmtN(+v.every)).join(' / ')+(ivUnit(p)==='km'?' km':' h'):null};
@@ -284,7 +292,11 @@ function ServiceDialog({ctx,a,plan,baseline,onClose}){
   const {sb,notify,reload,staff}=ctx;const px=plan&&!baseline&&a.plans.find(y=>y.plan.id===plan.id);const stg=px&&px.stage;
   const [f,setF]=useState({done_on:iso(TODAY),hours:a.mt!=='km'&&a.cur.hours?String(a.cur.hours.value):'',km:a.mt!=='hours'&&a.cur.km?String(a.cur.km.value):'',mechanic:'',work_done:stg&&stg.notes||'',notes:'',parts:[],service_type:plan?(stg?svcName(px):plan.name):''});
   const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
-  const save=async()=>{setErr('');if(!f.service_type.trim()){setErr('Say what service was done.');return}if(!f.done_on){setErr('Pick the date it was done.');return}
+  /* a plan with several services (250 / 500 / 750 / 1000 h): say which one this was */
+  const ivs=plan?ivsOf(plan):[];const multi=ivs.length>1;
+  const [ivPick,setIvPick]=useState(()=>{if(!multi)return '';if(stg){const v=ivs.find(x=>+x.every===stg.every);return v?String(v.every):''}return ''});
+  const pickIv=v=>{setIvPick(v);const iv=ivs.find(x=>String(x.every)===v);if(iv)setF(x=>({...x,service_type:`${plan.name} · ${ivLabel(plan,iv)}`,work_done:!baseline&&(iv.notes||'').trim()?iv.notes.trim():x.work_done}))};
+  const save=async()=>{setErr('');if(multi&&!ivPick){setErr('Pick which service it was.');return}if(!f.service_type.trim()){setErr('Say what service was done.');return}if(!f.done_on){setErr('Pick the date it was done.');return}
     setBusy(true);const {error}=await sb.from('service_records').insert({asset_id:a.m.id,plan_id:plan?plan.id:null,service_type:f.service_type.trim(),done_on:f.done_on,hours:n0(f.hours),km:n0(f.km),
       mechanic:f.mechanic.trim()||null,work_done:f.work_done.trim()||null,notes:f.notes.trim()||null,parts:cleanParts(f.parts),baseline:!!baseline});
     setBusy(false);if(error){setErr(errMsg(error));return}notify(baseline?'Last service recorded':'Service recorded');reload();onClose()};
@@ -292,6 +304,10 @@ function ServiceDialog({ctx,a,plan,baseline,onClose}){
     foot=${html`${err&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="sv-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>${busy?'Saving…':'Save service'}</button>`}>
     ${baseline&&html`<p class="text-[12.5px] text-muted mb-3">Enter when this service was last done, and at what hours or km. FraserFlow works out when the next one is due from here.</p>`}
     <div class="grid sm:grid-cols-2 gap-3">
+      ${multi&&html`<${Fld} label=${baseline?'Which service was the last one?':'Which service is this?'} span=${true}>
+        <div class="flex flex-wrap gap-1.5" role="radiogroup" id="sv-stage">${ivs.map(v=>{const on=ivPick===String(v.every);return html`<button key=${v.every} type="button" role="radio" aria-checked=${String(on)} data-every=${v.every}
+          class=${'px-3 py-1.5 rounded-lg border text-[13px] '+(on?'font-semibold':'')} style=${on?{background:'var(--accent)',color:'var(--accent-ink)',borderColor:'var(--accent)'}:{borderColor:'var(--line-strong)'}} onClick=${()=>pickIv(String(v.every))}>${ivLabel(plan,v)}</button>`})}</div>
+        ${baseline&&ivPick&&(()=>{const base=+ivs[0].every,cyc=+ivs[ivs.length-1].every;const nx=(+ivPick+base)%cyc||cyc;const v=ivs.find(x=>+x.every===nx);return v&&html`<span class="text-[12px] text-muted mt-1 block">So the next one is the ${ivLabel(plan,v)}, ${fmtN(base)} ${ivUnit(plan)==='km'?'km':'hours'} after this.</span>`})()}<//>`}
       <${Fld} label="Service" span=${true}><${Combo} id="sv-type" className="field" style=${fs} label="Service" value=${f.service_type} onChange=${v=>setF({...f,service_type:v})} options=${ctx.plans.map(p=>p.name)}/><//>
       <${Fld} label="Date done"><input id="sv-date" type="date" class="field mono" style=${fs} value=${f.done_on} max=${iso(TODAY)} onChange=${e=>setF({...f,done_on:e.target.value})}/><//>
       ${!baseline&&html`<${Fld} label="Mechanic or contractor"><${Combo} id="sv-mech" className="field" style=${fs} label="Mechanic" value=${f.mechanic} onChange=${v=>setF({...f,mechanic:v})} options=${staff}/><//>`}
@@ -596,17 +612,23 @@ function AssetPanel({ctx,a,onClose,open,behind}){
   const reads=ctx.db.meter_readings.filter(r=>r.asset_id===a.m.id&&['manual','correction','replacement','work_order'].includes(r.source));
   const down=data.blocks.filter(b=>b.resourceId===a.m.id&&KINDS[b.kind]&&KINDS[b.kind].for==='machine'&&!b.fromMaintenance);
   const hist=[
-    ...recs.map(r=>({ts:r.done_on===localDay(r.created_at)?r.created_at:r.done_on+'T12:00:00',ic:'svc',t:`${r.baseline?'Last service before FraserFlow: ':''}${r.service_type}`,d:[r.hours!=null&&`${fmtN(+r.hours)} h`,r.km!=null&&`${fmtN(+r.km)} km`,r.mechanic,r.work_done,(r.parts||[]).length&&'Parts: '+partsTxt(r.parts),r.notes].filter(Boolean).join(' · ')})),
-    ...a.wos.flatMap(w=>[{ts:w.created_at,ic:'wo',t:`${woNo(w)} raised: ${w.title}`,d:`${WO_TYPE[w.wo_type]} · ${PRI[w.priority]}${w.wo_type==='breakdown'&&w.safe_to_operate===false?' · not safe to operate':''}`,wo:w},
+    ...recs.map(r=>({del:{table:'service_records',id:r.id,what:'this service'},ts:r.done_on===localDay(r.created_at)?r.created_at:r.done_on+'T12:00:00',ic:'svc',t:`${r.baseline?'Last service before FraserFlow: ':''}${r.service_type}`,d:[r.hours!=null&&`${fmtN(+r.hours)} h`,r.km!=null&&`${fmtN(+r.km)} km`,r.mechanic,r.work_done,(r.parts||[]).length&&'Parts: '+partsTxt(r.parts),r.notes].filter(Boolean).join(' · ')})),
+    ...a.wos.flatMap(w=>[{del:['completed','closed'].includes(w.status)?{table:'work_orders',id:w.id,what:`${woNo(w)} (the whole work order)`}:null,ts:w.created_at,ic:'wo',t:`${woNo(w)} raised: ${w.title}`,d:`${WO_TYPE[w.wo_type]} · ${PRI[w.priority]}${w.wo_type==='breakdown'&&w.safe_to_operate===false?' · not safe to operate':''}`,wo:w},
       ...(w.completed_at?[{ts:w.completed_at,ic:'done',t:`${woNo(w)} completed`,d:[w.completion_notes,(w.parts||[]).length&&'Parts: '+partsTxt(w.parts)].filter(Boolean).join(' · '),wo:w}]:[]),
       ...(w.verified_at?[{ts:w.verified_at,ic:'ok',t:`${woNo(w)} verified and closed`,d:'',wo:w}]:[])]),
-    ...reads.map(r=>({ts:r.read_at,ic:'meter',t:`${r.kind==='hours'?'Hours':'Km'} reading ${fmtN(+r.value)}${r.source==='correction'?' (correction)':r.source==='replacement'?' (new meter)':''}`,d:r.note||''})),
+    ...reads.map(r=>({del:{table:'meter_readings',id:r.id,what:'this reading'},ts:r.read_at,ic:'meter',t:`${r.kind==='hours'?'Hours':'Km'} reading ${fmtN(+r.value)}${r.source==='correction'?' (correction)':r.source==='replacement'?' (new meter)':''}`,d:r.note||''})),
     ...(ctx.db.prestarts||[]).filter(p=>p.asset_id===a.m.id&&p.result!=='pass').map(p=>({ts:p.submitted_at,ic:p.result==='unsafe'?'unsafe':'ps',t:`Prestart by ${p.operator_name}: ${p.result==='unsafe'?'do not operate':'defects reported'}`,d:`${p.failed} item${p.failed===1?'':'s'} failed`,ps:p})),
     ...(ctx.db.defects||[]).filter(d=>d.asset_id===a.m.id).flatMap(d=>[{ts:d.created_at,ic:d.severity==='critical'?'unsafe':'ps',t:`D-${d.number} reported: ${d.title}`,d:`${d.severity} · by ${d.reported_name}${d.times_reported>1?` · seen ${d.times_reported} times`:''}`,df:d},
       ...(d.closed_at?[{ts:d.closed_at,ic:d.status==='dismissed'?'meter':'ok',t:`D-${d.number} ${d.status==='dismissed'?'dismissed':'repair verified'}`,d:d.resolution||'',df:d}]:[])]),
     ...(ctx.db.restrictions||[]).filter(r=>r.asset_id===a.m.id&&r.released_at).map(r=>({ts:r.released_at,ic:'ok',t:'Returned to service',d:[r.reason,r.release_note].filter(Boolean).join(' · ')})),
-    ...down.map(b=>({ts:b.start+'T00:00:00',ic:'down',t:`${KINDS[b.kind].label}${b.title?': '+b.title:''}`,d:`On the schedule ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`}))
+    ...down.map(b=>({del:{block:b.id,what:'this booking on the machine calendar'},ts:b.start+'T00:00:00',ic:'down',t:`${KINDS[b.kind].label}${b.title?': '+b.title:''}`,d:`On the schedule ${fmtShort(parse(b.start))}${b.end!==b.start?' – '+fmtShort(parse(b.end)):''}`}))
   ].map(h=>({...h,at:localDay(h.ts),t0:new Date(h.ts).getTime()})).sort((x,y)=>y.t0-x.t0);   /* newest first, by when it actually happened */
+  /* administrators can take things out of the history */
+  const isAdmin=FF_PERM.role==='admin';const [delAsk,setDelAsk]=useState(null);const [delBusy,setDelBusy]=useState(false);
+  const delItem=async h=>{const x=h.del;setDelBusy(true);try{
+      if(x.block){ctx.setData(d=>({...d,blocks:d.blocks.filter(b=>b.id!==x.block)}))}
+      else{const {data:gone,error}=await ctx.sb.from(x.table).delete().eq('id',x.id).select('id');if(error)throw error;if(!gone||!gone.length)throw new Error('Not removed: only an administrator can delete it'+(x.table==='work_orders'?', and only once it’s completed or closed':'')+'.')}
+      ctx.notify('Removed from the history');setDelAsk(null);ctx.reload()}catch(e){ctx.notify(errMsg(e))}finally{setDelBusy(false)}};
   const IC={svc:'hsl(145 55% 36%)',wo:'var(--accent)',done:'hsl(212 75% 48%)',ok:'hsl(145 55% 36%)',meter:'var(--faint)',down:'hsl(252 60% 55%)',ps:'hsl(30 90% 46%)',unsafe:'hsl(0 72% 47%)'};
   const p=a.p||{};
   return html`<${Modal} wide=${true} noEsc=${behind} title=${html`<span class="inline-flex items-center gap-2 flex-wrap">${a.m.name} <span class="text-muted font-normal text-[15px]">${a.m.sub||''}</span> ${stChip(a.status)}</span>`}
@@ -668,10 +690,13 @@ function AssetPanel({ctx,a,onClose,open,behind}){
       ${window.FFP&&html`<${window.FFP.AssetPrestarts} ctx=${ctx} a=${a} open=${open}/>`}
 
       <section class="grid gap-2"><h3 class="font-display text-[15px] font-semibold">Maintenance history</h3>
-        ${!hist.length?html`<div class="text-[12.5px] text-muted">Nothing recorded yet.</div>`:html`<ol class="grid gap-0 relative">${hist.map((h,i)=>html`<li key=${i} class="grid grid-cols-[86px_14px_1fr] gap-2 text-[12.5px] py-1.5">
+        ${!hist.length?html`<div class="text-[12.5px] text-muted">Nothing recorded yet.</div>`:html`<ol class="grid gap-0 relative">${hist.map((h,i)=>html`<li key=${i} class=${'grid gap-2 text-[12.5px] py-1.5 '+(isAdmin?'grid-cols-[86px_14px_1fr_auto]':'grid-cols-[86px_14px_1fr]')}>
             <span class="mono text-muted">${fmtShort(parse(h.at))} ${parse(h.at).getFullYear()!==TODAY.getFullYear()?parse(h.at).getFullYear():''}</span>
             <span class="mt-1 w-2.5 h-2.5 rounded-full" style=${{background:IC[h.ic]}}></span>
-            <span class="min-w-0">${h.df?html`<button type="button" class="font-medium text-left hover:underline" onClick=${()=>open({k:'defect',d:h.df})}>${h.t}</button>`:h.ps?html`<button type="button" class="font-medium text-left hover:underline" onClick=${()=>open({k:'ps',ps:h.ps})}>${h.t}</button>`:h.wo?html`<button type="button" class="font-medium text-left hover:underline" onClick=${()=>open({k:'wo',wo:h.wo})}>${h.t}</button>`:html`<span class="font-medium">${h.t}</span>`}${h.d&&html`<span class="block text-muted whitespace-pre-line">${h.d}</span>`}</span></li>`)}</ol>`}
+            <span class="min-w-0">${h.df?html`<button type="button" class="font-medium text-left hover:underline" onClick=${()=>open({k:'defect',d:h.df})}>${h.t}</button>`:h.ps?html`<button type="button" class="font-medium text-left hover:underline" onClick=${()=>open({k:'ps',ps:h.ps})}>${h.t}</button>`:h.wo?html`<button type="button" class="font-medium text-left hover:underline" onClick=${()=>open({k:'wo',wo:h.wo})}>${h.t}</button>`:html`<span class="font-medium">${h.t}</span>`}${h.d&&html`<span class="block text-muted whitespace-pre-line">${h.d}</span>`}</span>${isAdmin&&html`<span class="flex items-start gap-1 hist-del">${h.del&&(delAsk===i?html`<span class="inline-flex items-center gap-1 text-[12px]"><span class="text-muted">Delete ${h.del.what}?</span>
+                <button type="button" class="btn" style=${{height:26,background:'var(--bad)',color:'#fff',borderColor:'var(--bad)'}} disabled=${delBusy} onClick=${()=>delItem(h)}>Delete</button>
+                <button type="button" class="btn" style=${{height:26}} onClick=${()=>setDelAsk(null)}>Keep</button></span>`
+              :html`<button type="button" class="w-7 h-7 inline-flex items-center justify-center rounded-md text-faint hover:text-[var(--bad)] hover:bg-sunken" title="Delete from the history (administrators)" aria-label=${'Delete '+h.t} onClick=${()=>setDelAsk(i)}>${Icon.trash}</button>`)}</span>`}</li>`)}</ol>`}
       </section>
 
       ${window.FFP&&ctx.db.p3?html`<${window.FFP.FilesSection} ctx=${ctx} a=${a}/>`:html`<section class="rounded-lg border border-dashed border-line p-3"><div class="label">Manuals and documents</div><div class="text-[12.5px] text-muted mt-1">Arrives once supabase/prestarts.sql has been run.</div></section>`}
