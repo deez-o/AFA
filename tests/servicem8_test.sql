@@ -131,6 +131,12 @@ select pg_temp.ok(exists (select 1 from public.service_records where work_order_
 select pg_temp.ok(exists (select 1 from public.meter_readings where asset_id = 't-mach-1' and kind = 'hours' and value = 1250 and source = 'service'),
   'and its hours become the machine’s reading');
 select pg_temp.ok(not (pg_temp.link('00000000-0000-0000-0000-00000000d002')).dirty, 'completing from ServiceM8 isn’t sent back to it');
+select pg_temp.as_server();
+set local role service_role;
+select public.servicem8_apply('00000000-0000-0000-0000-00000000d002', '{"status":"in_progress"}', null, '[]', '{"sm8_status":"Work Order"}');
+select public.servicem8_apply('00000000-0000-0000-0000-00000000d002', '{"status":"completed"}', json_build_object('done_on', current_date, 'hours', 1260)::jsonb, '[]', '{"sm8_status":"Completed"}');
+reset role;
+select pg_temp.ok((select count(*) from public.service_records where work_order_id = '00000000-0000-0000-0000-00000000d002') = 1, 'reopened and completed again: still one service record');
 
 -- 7. A repair completed with a lower reading; then verified here, and ServiceM8 can't change it ------------
 select pg_temp.as_server();
@@ -160,6 +166,19 @@ set local role authenticated;
 update public.work_orders set status = 'cancelled' where id = '00000000-0000-0000-0000-00000000d003';
 reset role;
 select pg_temp.ok((pg_temp.link('00000000-0000-0000-0000-00000000d003')).dirty, 'cancelling a work order here is passed on to his job');
+select pg_temp.refused($$delete from public.work_orders where id = '00000000-0000-0000-0000-00000000d003'$$, 'a work order whose job is still open in ServiceM8 can’t be deleted');
+
+-- 9. An edit while it is being sent isn't lost ------------------------------------------------------
+select pg_temp.as_server();
+set local role service_role;
+update public.servicem8_jobs set state = 'sending', dirty = false where work_order_id = '00000000-0000-0000-0000-00000000d001';
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
+set local role authenticated;
+update public.work_orders set status = 'open' where id = '00000000-0000-0000-0000-00000000d001';
+update public.work_orders set title = 'Renamed while sending' where id = '00000000-0000-0000-0000-00000000d001';
+reset role;
+select pg_temp.ok((pg_temp.link('00000000-0000-0000-0000-00000000d001')).dirty, 'a change made while it is being sent is passed on afterwards');
 
 select 'ALL SERVICEM8 TESTS PASSED' as result;
 rollback;

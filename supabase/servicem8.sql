@@ -53,7 +53,8 @@ create table if not exists public.servicem8_jobs (
   dirty         boolean not null default false,   -- changed here since it was sent (title, description, priority, cancelled)
   job_uuid      text unique,
   job_no        text,                             -- ServiceM8's own job number
-  sm8_status    text,                             -- Quote / Work Order / Completed / Unsuccessful
+  sm8_status    text,                             -- Quote / Work Order / Completed / Unsuccessful (as last seen)
+  sm8_queue     text,                             -- the job's ServiceM8 queue (as last seen)
   last_error    text,
   attempts      int not null default 0,
   sent_at       timestamptz,
@@ -61,6 +62,7 @@ create table if not exists public.servicem8_jobs (
   requested_by  uuid default auth.uid(),
   updated_at    timestamptz not null default now()
 );
+alter table public.servicem8_jobs add column if not exists sm8_queue text;
 create index if not exists servicem8_jobs_todo on public.servicem8_jobs (state) where state in ('pending','sending','error') or dirty;
 
 -- 4. New work orders queue themselves to be sent ---------------------------------------------
@@ -84,12 +86,25 @@ begin
   if coalesce(current_setting('servicem8.syncing', true), '') = 'on' then return null; end if;
   if new.title is distinct from old.title or new.description is distinct from old.description
      or new.priority is distinct from old.priority or (new.status = 'cancelled' and old.status <> 'cancelled') then
-    update public.servicem8_jobs set dirty = true, updated_at = now() where work_order_id = new.id and state = 'sent';
+    update public.servicem8_jobs set dirty = true, updated_at = now() where work_order_id = new.id and state in ('sent','sending');
   end if;
   return null;
 end; $$;
 drop trigger if exists work_orders_servicem8_dirty on public.work_orders;
 create trigger work_orders_servicem8_dirty after update on public.work_orders for each row execute function public.servicem8_mark_dirty();
+
+-- a work order whose job is still open in ServiceM8 can't be deleted: cancel it first, so his job is closed too
+create or replace function public.servicem8_keep_open_jobs()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from public.servicem8_jobs where work_order_id = old.id and state in ('sent','sending')
+             and coalesce(sm8_status, '') not in ('Completed','Unsuccessful')) then
+    raise exception 'Work order % is still open in ServiceM8. Cancel it first, so the mechanic''s job is closed too', old.number using errcode = '22023';
+  end if;
+  return old;
+end; $$;
+drop trigger if exists work_orders_servicem8_delete on public.work_orders;
+create trigger work_orders_servicem8_delete before delete on public.work_orders for each row execute function public.servicem8_keep_open_jobs();
 
 -- 5. "Send to ServiceM8" / "Don't send" from the work order (mechanics, supervisors, administrators) ---------
 create or replace function public.servicem8_request(p_wo uuid, p_send boolean)
@@ -126,7 +141,7 @@ end; $$;
 -- p_patch:   {status, start_date, end_date, parts, completion_notes, assigned_to}, each only when it should change
 -- p_service: {done_on, hours, km, mechanic} when a scheduled service is completed (becomes the service record)
 -- p_meters:  [{kind:'hours'|'km', value}] readings from his notes (for other work orders; kept only if newest)
--- p_job:     {job_no, sm8_status, removed}
+-- p_job:     {job_no, sm8_status, queue_uuid, removed}
 create or replace function public.servicem8_apply(p_wo uuid, p_patch jsonb, p_service jsonb, p_meters jsonb, p_job jsonb)
 returns text language plpgsql security definer set search_path = public as $$
 declare w public.work_orders; nxt text; m jsonb; cur numeric;
@@ -137,6 +152,7 @@ begin
 
   update public.servicem8_jobs set synced_at = now(), updated_at = now(), last_error = null,
     job_no = coalesce(p_job->>'job_no', job_no), sm8_status = coalesce(p_job->>'sm8_status', sm8_status),
+    sm8_queue = case when p_job ? 'queue_uuid' then nullif(p_job->>'queue_uuid', '') else sm8_queue end,
     state = case when (p_job->>'removed')::boolean then 'removed' else state end
    where work_order_id = p_wo;
 
@@ -156,7 +172,8 @@ begin
    where id = p_wo;
 
   if nxt = 'completed' and w.status <> 'completed' then
-    if w.wo_type = 'service' and p_service is not null then
+    if w.wo_type = 'service' and p_service is not null
+       and not exists (select 1 from public.service_records where work_order_id = w.id) then   -- never twice for one work order
       -- the service record (its hours and km become meter readings, and the next service is worked out from it)
       insert into public.service_records (asset_id, plan_id, work_order_id, service_type, done_on, hours, km, mechanic, work_done, parts)
       values (w.asset_id, w.plan_id, w.id, w.title, coalesce((p_service->>'done_on')::date, (now() at time zone 'Australia/Brisbane')::date),
@@ -196,14 +213,16 @@ revoke all on function public.servicem8_apply(uuid, jsonb, jsonb, jsonb, jsonb) 
 grant execute on function public.servicem8_apply(uuid, jsonb, jsonb, jsonb, jsonb) to service_role;
 revoke all on function public.servicem8_queue_new() from public, anon, authenticated;
 revoke all on function public.servicem8_mark_dirty() from public, anon, authenticated;
+revoke all on function public.servicem8_keep_open_jobs() from public, anon, authenticated;
+
+-- settings changes are audited; the link isn't (it is touched on every refresh, and the work order's own changes are audited)
+drop trigger if exists servicem8_settings_audit on public.servicem8_settings;
+create trigger servicem8_settings_audit after insert or update or delete on public.servicem8_settings for each row execute function public.maint_audit();
+drop trigger if exists servicem8_jobs_audit on public.servicem8_jobs;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['servicem8_settings','servicem8_jobs'] loop
-    execute format('drop trigger if exists %I_audit on public.%I', t, t);
-    execute format('create trigger %I_audit after insert or update or delete on public.%I for each row execute function public.maint_audit()', t, t);
-  end loop;
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
     foreach t in array array['servicem8_settings','servicem8_jobs'] loop
       if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then

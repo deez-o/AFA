@@ -22,8 +22,12 @@ function pureChecks() {
   ok(r.patch.status === 'in_progress', 'time recorded on the job → In progress');
   r = mapJob({ job: { active: 1, status: 'Work Order', queue_uuid: 'q-parts' }, activities: [], materials: [], wo: { ...wo, status: 'in_progress' }, cfg });
   ok(r.patch.status === 'awaiting_parts', 'in his "awaiting parts" queue → Awaiting parts');
-  r = mapJob({ job: { active: 1, status: 'Work Order', queue_uuid: '' }, activities: [act(1, '2026-11-05 07:00:00', '2026-11-05 09:00:00')], materials: [], wo: { ...wo, status: 'awaiting_parts' }, cfg });
-  ok(r.patch.status === 'scheduled', 'out of the parts queue with a booking → Scheduled');
+  r = mapJob({ job: { active: 1, status: 'Work Order', queue_uuid: '' }, activities: [act(1, '2026-11-05 07:00:00', '2026-11-05 09:00:00')], materials: [], wo: { ...wo, status: 'awaiting_parts' }, cfg, prev: { sm8_queue: 'q-parts' } });
+  ok(r.patch.status === 'scheduled', 'he takes it out of the parts queue, with a booking → Scheduled');
+  r = mapJob({ job: { active: 1, status: 'Work Order', queue_uuid: '' }, activities: [], materials: [], wo: { ...wo, status: 'awaiting_parts' }, cfg, prev: { sm8_queue: null } });
+  ok(!r.patch.status, '“Awaiting parts” set here (not his queue) stays');
+  r = mapJob({ job: { active: 1, status: 'Work Order' }, activities: [{ active: 1, activity_was_scheduled: 0, activity_was_recorded: 1, start_date: '2026-11-03 07:00:00' }], materials: [], wo, cfg });
+  ok(r.patch.status === 'in_progress' && !r.patch.start_date, 'recorded time only: In progress, and it isn’t taken as a booking');
   r = mapJob({ job: { active: 1, status: 'Work Order' }, activities: [act(1, '2026-11-05 07:00:00', '2026-11-05 09:00:00')], materials: [], wo: { ...wo, status: 'in_progress' }, cfg });
   ok(!r.patch.status, 'never backwards: In progress stays In progress when only a booking is seen');
   r = mapJob({ job: { active: 1, status: 'Completed', work_done_description: 'Replaced hose. Hours: 4530', completion_date: '2026-11-04 14:00:00' },
@@ -38,8 +42,10 @@ function pureChecks() {
     profile: { meter_type: 'hours' }, latest: {} });
   ok(r.service && r.service.done_on === '2026-11-04' && r.service.mechanic === 'Smith Mechanical' && /Completed in ServiceM8/.test(r.patch.completion_notes),
     'a service: becomes the service record, dated when he completed it; empty Work Done gets a note');
-  r = mapJob({ job: { active: 1, status: 'Work Order' }, activities: [], materials: [], wo: { ...wo, status: 'completed' }, cfg });
+  r = mapJob({ job: { active: 1, status: 'Work Order' }, activities: [], materials: [], wo: { ...wo, status: 'completed' }, cfg, prev: { sm8_status: 'Completed' } });
   ok(r.patch.status === 'in_progress', 'he reopens a completed job → In progress');
+  r = mapJob({ job: { active: 1, status: 'Work Order' }, activities: [act(0, '2026-11-03 07:00:00', '2026-11-03 08:00:00')], materials: [], wo: { ...wo, status: 'completed' }, cfg, prev: { sm8_status: 'Work Order' } });
+  ok(!r.patch.status, 'completed here while his job is still open: it stays completed (not undone by the next refresh)');
   r = mapJob({ job: { active: 1, status: 'Unsuccessful' }, activities: [act(1, '2026-11-05 07:00:00', '2026-11-05 09:00:00')], materials: [{ active: 1, name: 'x', quantity: 1 }], wo, cfg });
   ok(r.patch.status === 'cancelled' && !r.patch.parts && !r.patch.start_date, 'Unsuccessful → Cancelled (no parts or dates carried over)');
   r = mapJob({ job: { active: 0, status: 'Work Order' }, activities: [], materials: [], wo, cfg });
@@ -165,6 +171,13 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   rpcCalls.length = 0;
   r = await call({ method: 'POST', query: { hook: key }, body: { object: 'job', entry: [{ uuid: link.job_uuid, changed_fields: ['status'] }] } });
   ok(r.statusCode === 200 && rpcCalls.length === 1 && rpcCalls[0].p_patch.status === 'completed' && rpcCalls[0].p_meters[0].value === 4530, 'he completes our job: the work order is completed with his notes and the reading');
+
+  db.settings.enabled = false; sm8Calls.length = 0; rpcCalls.length = 0;
+  r = await call({ method: 'POST', query: { hook: key }, body: { object: 'job', entry: [{ uuid: link.job_uuid }] } });
+  ok(r.statusCode === 200 && !sm8Calls.length && !rpcCalls.length, 'switched off: reports are acknowledged and ignored (ServiceM8 doesn’t keep retrying)');
+  db.settings.enabled = true;
+  r = await call({ method: 'POST', query: { hook: 'ü'.repeat(24) }, body: {} });
+  ok(r.statusCode === 403, 'an odd key (other characters, other length) is refused, not an error');
 
   // a change made in FraserFlow
   db.links[0].sm8_status = 'Work Order'; db.jobs[link.job_uuid].status = 'Work Order';

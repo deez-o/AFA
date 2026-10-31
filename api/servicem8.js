@@ -152,14 +152,15 @@ const qtyTxt = v => { const n = Number(v); return isFinite(n) && String(v).trim(
 
 // A ServiceM8 job (with its bookings and materials) → what should change on the work order.
 // Returns { patch, service, meters, job } for servicem8_apply, or null when nothing should change.
-function mapJob({ job, activities, materials, wo, cfg, profile, latest }) {
+function mapJob({ job, activities, materials, wo, cfg, profile, latest, prev }) {
   const st = String(job.status || '');
-  const jobInfo = { job_no: job.generated_job_id != null ? String(job.generated_job_id) : null, sm8_status: st || null };
+  const was = prev || {};   // what the job looked like last time: only changes made in ServiceM8 move the work order
+  const jobInfo = { job_no: job.generated_job_id != null ? String(job.generated_job_id) : null, sm8_status: st || null, queue_uuid: job.queue_uuid || '' };
   if (!yes(job.active)) return { patch: null, service: null, meters: null, job: { ...jobInfo, removed: true } };
   if (['closed', 'cancelled'].includes(wo.status)) return { patch: null, service: null, meters: null, job: jobInfo };
   const acts = (activities || []).filter(a => yes(a.active == null ? 1 : a.active));
-  const booked = acts.filter(a => yes(a.activity_was_scheduled));
-  const worked = acts.filter(a => !yes(a.activity_was_scheduled));
+  const worked = acts.filter(a => yes(a.activity_was_recorded) || !yes(a.activity_was_scheduled));   // time he recorded on the job
+  const booked = acts.filter(a => yes(a.activity_was_scheduled) && !yes(a.activity_was_recorded));
   const patch = {};
   const starts = booked.map(a => day(a.start_date)).filter(Boolean).sort();
   const ends = booked.map(a => day(a.end_date) || day(a.start_date)).filter(Boolean).sort();
@@ -186,12 +187,13 @@ function mapJob({ job, activities, materials, wo, cfg, profile, latest }) {
   } else if (st === 'Unsuccessful') {
     next = 'cancelled';
   } else if (wo.status === 'completed') {
-    next = 'in_progress';   // he reopened the job
+    if (was.sm8_status === 'Completed') next = 'in_progress';   // he reopened the job; completed here (not there) stays completed
   } else if (cfg.parts_queue_uuid && job.queue_uuid === cfg.parts_queue_uuid) {
     next = 'awaiting_parts';
   } else {
     const seen = worked.length ? 'in_progress' : booked.length ? 'scheduled' : null;
-    if (wo.status === 'awaiting_parts') next = seen || ((patch.start_date || wo.start_date) ? 'scheduled' : 'open');   // out of the parts queue
+    const leftQueue = wo.status === 'awaiting_parts' && cfg.parts_queue_uuid && was.sm8_queue === cfg.parts_queue_uuid;   // he took it out of the parts queue
+    if (leftQueue) next = seen || ((patch.start_date || wo.start_date) ? 'scheduled' : 'open');
     else if (seen && rank[seen] > (rank[wo.status] ?? 0)) next = seen;   // only forwards: open → scheduled → in progress
   }
   if (next !== wo.status) patch.status = next;
@@ -236,7 +238,7 @@ async function sendOne(D, S, cfg, link) {
   // claim it, so two sends at once can't both make a job
   const uuid = link.job_uuid || crypto.randomUUID();
   const claimed = await D.patch(`servicem8_jobs?work_order_id=eq.${wo.id}&state=eq.${link.state}&updated_at=eq.${q(link.updated_at)}`,
-    { state: 'sending', job_uuid: uuid, attempts: (link.attempts || 0) + 1, updated_at: new Date().toISOString() });
+    { state: 'sending', job_uuid: uuid, dirty: false, attempts: (link.attempts || 0) + 1, updated_at: new Date().toISOString() });
   if (!claimed || !claimed.length) return 'busy';
   try {
     let exists = false;
@@ -247,7 +249,7 @@ async function sendOne(D, S, cfg, link) {
       await S.post('/job.json', { uuid, status: 'Work Order', company_uuid: company, job_address: (cfg.job_address || '').trim() || (cfg.client_name || 'AFA'),
         job_description: describeJob({ wo, ...ctx }), purchase_order_number: 'FF WO ' + wo.number });
     }
-    await D.patch(`servicem8_jobs?work_order_id=eq.${wo.id}`, { state: 'sent', dirty: false, sent_at: new Date().toISOString(), last_error: null, updated_at: new Date().toISOString() });
+    await D.patch(`servicem8_jobs?work_order_id=eq.${wo.id}`, { state: 'sent', sent_at: new Date().toISOString(), last_error: null, updated_at: new Date().toISOString() });
     await pullOne(D, S, cfg, { ...link, job_uuid: uuid, state: 'sent' }, wo, ctx);
     return 'sent';
   } catch (e) {
@@ -282,7 +284,7 @@ async function pullOne(D, S, cfg, link, wo, ctx) {
   const f = filt(`job_uuid eq '${link.job_uuid}' and active eq 1`);
   const [activities, materials] = yes(job.active) ? await Promise.all([S.get(`/jobactivity.json?${f}`), S.get(`/jobmaterial.json?${f}`)]) : [[], []];
   ctx = ctx || await jobContext(D, wo);
-  const m = mapJob({ job, activities, materials, wo, cfg, profile: ctx.profile, latest: ctx.latest });
+  const m = mapJob({ job, activities, materials, wo, cfg, profile: ctx.profile, latest: ctx.latest, prev: link });
   return D.rpc('servicem8_apply', { p_wo: wo.id, p_patch: m.patch || {}, p_service: m.service, p_meters: m.meters || [], p_job: m.job });
 }
 
@@ -300,8 +302,9 @@ async function flush(D, S, cfg, { sendLimit = 10, refresh = 5, staleMinutes = 15
   if (refresh) {
     const since = new Date(Date.now() - staleMinutes * 60e3).toISOString();
     const stale = await D.get(`servicem8_jobs?state=eq.sent&or=(synced_at.is.null,synced_at.lt.${q(since)})&select=*,work_orders!inner(status)&work_orders.status=not.in.(closed,cancelled)&order=synced_at.asc.nullsfirst&limit=${refresh}`);
-    for (const l of stale || []) {
-      try { await pullOne(D, S, cfg, l); out.refreshed++; } catch (e) { out.errors.push({ wo: l.work_order_id, error: errText(e) }); }
+    const list = stale || [];
+    for (let i = 0; i < list.length; i += 5) {   // five at a time
+      await Promise.all(list.slice(i, i + 5).map(l => pullOne(D, S, cfg, l).then(() => { out.refreshed++; }, e => { out.errors.push({ wo: l.work_order_id, error: errText(e) }); })));
     }
   }
   return out;
@@ -334,8 +337,8 @@ async function handler(req, res, env = process.env, http = fetch) {
     if (req.method !== 'POST') return sendText(res, 405, 'Use POST');
     const sec = await D.one('servicem8_secrets?id=eq.1&select=webhook_key');
     const key = (sec && sec.webhook_key) || '';
-    const given = String(Q.hook || '');
-    if (!key || given.length !== key.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(key))) return sendText(res, 403, 'Unknown');
+    const h = v => crypto.createHash('sha256').update(String(v)).digest();
+    if (!key || !crypto.timingSafeEqual(h(Q.hook || ''), h(key))) return sendText(res, 403, 'Unknown');
     const b = await readBody(req);
     if (b.mode === 'subscribe' && b.challenge) return sendText(res, 200, String(b.challenge));
     if (b.object !== 'job') return sendText(res, 200, 'ignored');
@@ -344,6 +347,7 @@ async function handler(req, res, env = process.env, http = fetch) {
     const links = await D.get(`servicem8_jobs?state=eq.sent&job_uuid=in.(${ids.map(q).join(',')})&select=*`);
     if (!links || !links.length) return sendText(res, 200, 'not ours');   // another client's job: never looked at
     const cfg = await settings(D);
+    if (!cfg.enabled) return sendText(res, 200, 'switched off');
     const A = await credentials(env, D, http);
     if (!A.ok) return sendText(res, 503, 'not connected');
     const S = client(A, http);
@@ -373,7 +377,7 @@ async function handler(req, res, env = process.env, http = fetch) {
     if (!cfg.enabled) return send(res, 200, { off: true });
     const A = await credentials(env, D, http);
     if (!A.ok) return send(res, 200, { connected: false });
-    return send(res, 200, await flush(D, client(A, http), cfg, { sendLimit: 50, refresh: 200, staleMinutes: 60 }));
+    return send(res, 200, await flush(D, client(A, http), cfg, { sendLimit: 25, refresh: 100, staleMinutes: 60 }));
   }
 
   // 4. people in FraserFlow

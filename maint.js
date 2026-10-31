@@ -339,8 +339,9 @@ function WorkOrderDialog({ctx,wo,init,onClose}){
     try{
       if(isNew){const r=row();const st=status||(r.start_date?'scheduled':'open');const {data:made,error}=await sb.from('work_orders').insert({...r,asset_id:f.asset_id,status:st}).select('id').single();if(error)throw error;
         await linkDefects(made.id);
-        if(sm8On(ctx.db)&&toSm8!==(sm8c.auto_send!==false)){const {error:e3}=await sb.rpc('servicem8_request',{p_wo:made.id,p_send:toSm8});if(e3)throw e3}
-        notify(dsel.size?`Work order created for ${dsel.size} defect${dsel.size===1?'':'s'}`:'Work order created')}
+        let sm8w='';   /* the work order is saved either way: a ServiceM8 problem is only a warning */
+        if(sm8On(ctx.db)&&toSm8!==(sm8c.auto_send!==false)){const {error:e3}=await sb.rpc('servicem8_request',{p_wo:made.id,p_send:toSm8});if(e3)sm8w=' (ServiceM8: '+errMsg(e3)+')'}
+        notify((dsel.size?`Work order created for ${dsel.size} defect${dsel.size===1?'':'s'}`:'Work order created')+sm8w)}
       else{const r=row();if(WO_OPEN(wo.status))await linkDefects(wo.id);const next=status||(wo.status==='open'&&r.start_date?'scheduled':wo.status);
         if(next==='completed'&&wo.status!=='completed'){
           if(!r.completion_notes)throw new Error('Add completion notes: what was done.');
