@@ -4194,17 +4194,15 @@ async function importMachineExtras(sb,getData,list){
   let nP=0,nR=0,nC=0,noCols=false;const bad=[];
   for(const x of list){const id=idOf(x);if(!id)continue;const X=x.xt;
     const kg=v=>xNum(v)?`${fmtN(xNum(v))} kg`:'';
-    const rego=[X.regoStatus&&`Rego ${X.regoStatus.toLowerCase()}${X.regoExpiry?' until '+X.regoExpiry:''}`,!X.regoStatus&&X.regoExpiry&&`Rego expires ${X.regoExpiry}`,
-      X.coi&&`COI ${X.coi}${X.coiDue?' due '+X.coiDue:''}`,!X.coi&&X.coiDue&&`Inspection due ${X.coiDue}`,
-      [X.gvm&&'GVM '+kg(X.gvm),X.gcm&&'GCM '+kg(X.gcm),X.atm&&'ATM '+kg(X.atm),X.tare&&'Tare '+kg(X.tare)].filter(Boolean).join(', '),X.purpose&&`${X.purpose} use`].filter(Boolean).join(' · ');
+    const rego=[X.regoExpiry&&`Rego expires ${X.regoExpiry}`,X.coiDue&&`COI due ${X.coiDue}`,
+      [X.gvm&&'GVM '+kg(X.gvm),X.gcm&&'GCM '+kg(X.gcm),X.atm&&'ATM '+kg(X.atm),X.tare&&'Tare '+kg(X.tare)].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
     const old=P.get(id);const keepNotes=old&&old.notes?String(old.notes).split('\n').filter(l=>!/^Rego |^COI |^Inspection due/.test(l)).join('\n').trim():'';
     const notes=[keepNotes,rego,X.notes].filter(Boolean).join('\n')||null;
     const mt=/both/i.test(X.meter||'')?'both':/^k/i.test(X.meter||'')?'km':/^h/i.test(X.meter||'')?'hours':null;
     const base={...(X.make?{make:X.make}:{}),...(X.model?{model:X.model}:{}),...(xNum(X.year)?{year:Math.round(xNum(X.year))}:{}),...(X.serial?{serial:X.serial}:{}),...(mt?{meter_type:mt}:{}),...(x.retired?{retired:true}:{})};
     /* registration details go in their own fields on the machine's card; before supabase/maintenance.sql adds them, they're kept in the notes */
     const n0=v=>xNum(v)==null?null:Math.round(xNum(v));
-    const reg=Object.fromEntries(Object.entries({rego_status:X.regoStatus||null,rego_expiry:xDate(X.regoExpiry),purpose:X.purpose||null,coi_number:X.coi||null,coi_due:xDate(X.coiDue),
-      gvm:n0(X.gvm),gcm:n0(X.gcm),atm:n0(X.atm),tare:n0(X.tare),nhvc:X.nhvc||null}).filter(([,v])=>v!=null));
+    const reg=Object.fromEntries(Object.entries({rego_expiry:xDate(X.regoExpiry),coi_due:xDate(X.coiDue),gvm:n0(X.gvm),gcm:n0(X.gcm),atm:n0(X.atm),tare:n0(X.tare)}).filter(([,v])=>v!=null));
     const save=async row=>{const {error}=old?await sb.from('asset_profiles').update(row).eq('asset_id',id):await sb.from('asset_profiles').insert({asset_id:id,...row});return error};
     try{let error=await save({...base,...reg,notes:[keepNotes,X.notes].filter(Boolean).join('\n')||null});
       if(error&&/column/i.test(error.message||'')){noCols=true;error=await save({...base,notes})}

@@ -622,8 +622,8 @@ function AssetPanel({ctx,a,onClose,open,behind}){
           <${MachinePhoto} key=${a.m.id} ctx=${ctx} a=${a}/>
           ${[['Make / model',[p.make,p.model].filter(Boolean).join(' ')],['Year',p.year],['Serial',p.serial],['Meters',a.mt==='both'?'Hours and km':a.mt==='km'?'Kilometres':'Engine hours'],['Notes',p.notes]].map(([k,v])=>html`<div key=${k} class="flex gap-2 text-[12.5px]"><span class="text-muted w-[92px] shrink-0">${k}</span><span class=${v?'':'text-faint'}>${v||'–'}</span></div>`)}
           ${(()=>{const d=v=>v?fmtShort(parse(String(v).slice(0,10)))+' '+parse(String(v).slice(0,10)).getFullYear():'';const kg=v=>v?fmtN(v)+' kg':'';
-            const rows=[['Rego',[a.m.rego,p.rego_status].filter(Boolean).join(' · ')],['Rego expiry',d(p.rego_expiry),dueTone(p.rego_expiry)],['Inspection',[p.coi_number,p.coi_due&&'due '+d(p.coi_due)].filter(Boolean).join(' · '),dueTone(p.coi_due)],
-              ['Purpose',p.purpose],['Weights',[p.gvm&&'GVM '+kg(p.gvm),p.gcm&&'GCM '+kg(p.gcm),p.atm&&'ATM '+kg(p.atm),p.tare&&'Tare '+kg(p.tare)].filter(Boolean).join(' · ')],['NHV code',p.nhvc]].filter(r=>r[1]);
+            const rows=[['Rego',a.m.rego],['Rego expiry',d(p.rego_expiry),dueTone(p.rego_expiry)],['COI due',d(p.coi_due),dueTone(p.coi_due)],
+              ['Weights',[p.gvm&&'GVM '+kg(p.gvm),p.gcm&&'GCM '+kg(p.gcm),p.atm&&'ATM '+kg(p.atm),p.tare&&'Tare '+kg(p.tare)].filter(Boolean).join(' · ')]].filter(r=>r[1]);
             return rows.length>0&&html`<div class="border-t border-line mt-1.5 pt-1.5 grid gap-1 ap-reg"><span class="label">Registration</span>${rows.map(([k,v,tone])=>html`<div key=${k} class="flex gap-2 text-[12.5px]"><span class="text-muted w-[92px] shrink-0">${k}</span><span style=${tone?{color:tone.c,fontWeight:600}:null}>${v}${tone?` (${tone.t})`:''}</span></div>`)}</div>`})()}
         </section>
         <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
@@ -837,8 +837,8 @@ function MachinesTab({ctx,open}){
 }
 
 /* registration details on a machine's fleet profile (supabase/maintenance.sql adds the columns) */
-const REG_FIELDS=[['rego_status','Rego status','text'],['rego_expiry','Rego expiry','date'],['purpose','Purpose of use','text'],['coi_number','Inspection (COI) no.','text'],['coi_due','Inspection due','date'],
-  ['gvm','GVM (kg)','int'],['gcm','GCM (kg)','int'],['atm','ATM (kg)','int'],['tare','Tare (kg)','int'],['nhvc','NHV charging code','text']];
+const REG_FIELDS=[['rego_expiry','Rego expiry','date'],['coi_due','Inspection (COI) due','date'],
+  ['gvm','GVM (kg)','int'],['gcm','GCM (kg)','int'],['atm','ATM (kg)','int'],['tare','Tare (kg)','int']];
 const regVal=(t,v)=>{v=String(v??'').trim();if(!v)return null;if(t==='int'){const n=parseInt(v.replace(/[^\d]/g,''),10);return isFinite(n)?n:null}return v};
 /* how soon a date is: past (red), within 30 days (amber), or fine */
 const dueTone=d=>{if(!d)return null;const n=diffDays(TODAY,parse(String(d).slice(0,10)));return n<0?{c:'var(--bad)',t:'overdue'}:n<=30?{c:'hsl(30 90% 38%)',t:`in ${n} day${n===1?'':'s'}`}:null};
@@ -910,7 +910,7 @@ function MachineDialog({ctx,a,isNew,startDel,onClose}){
       </div>
       <div class="grid sm:grid-cols-2 gap-3 border-t border-line pt-3" id="mc-reg">
         <div class="sm:col-span-2 label">Registration and inspection</div>
-        ${REG_FIELDS.map(([k,l,t])=>html`<${Fld} key=${k} label=${l}><input id=${'mc-'+k} type=${t==='date'?'date':t==='int'?'number':'text'} class=${'field'+(t!=='text'||k==='coi_number'||k==='nhvc'?' mono':'')} style=${fs} value=${f[k]} disabled=${!canP} onInput=${e=>setF({...f,[k]:e.target.value})}/><//>`)}
+        ${REG_FIELDS.map(([k,l,t])=>html`<${Fld} key=${k} label=${l}><input id=${'mc-'+k} type=${t==='date'?'date':t==='int'?'number':'text'} class=${'field'+(t!=='text'?' mono':'')} style=${fs} value=${f[k]} disabled=${!canP} onInput=${e=>setF({...f,[k]:e.target.value})}/><//>`)}
       </div>
     </div><//>`;
 }
