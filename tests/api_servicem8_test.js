@@ -72,7 +72,7 @@ let db, sm8Calls, rpcCalls;
 function reset() {
   db = {
     settings: { id: 1, enabled: true, auto_send: true, client_name: 'AFA', company_uuid: null, contractor_name: 'Smith Mechanical', job_address: '1 Depot Rd', parts_queue_uuid: null },
-    secrets: { id: 1, webhook_key: 'k'.repeat(48) },
+    secrets: { id: 1, webhook_key: 'ab'.repeat(24) },
     links: [{ work_order_id: WO1, state: 'pending', dirty: false, job_uuid: null, attempts: 0, updated_at: '2026-10-31T00:00:00+00:00' }],
     wos: [{ id: WO1, number: 1042, asset_id: 'm1', wo_type: 'breakdown', priority: 'high', title: 'Hose burst', description: 'Left boom', status: 'open' }],
     jobs: {}, companies: [],
@@ -129,9 +129,9 @@ async function http(url, o = {}) {
   }
   throw new Error('unexpected call ' + url);
 }
-async function call({ method = 'POST', token, body, query = {}, headers = {}, env = ENV }) {
+async function call({ method = 'POST', token, body, query = {}, headers = {}, env = ENV, url }) {
   const res = { statusCode: 0, headers: {}, setHeader(k, v) { this.headers[k] = v }, end(s) { this.raw = s; try { this.body = JSON.parse(s) } catch (e) { this.body = s } } };
-  await handler({ method, query, headers: { ...(token ? { authorization: 'Bearer ' + token } : {}), host: 'ff.example.com', ...headers }, body }, res, env, http);
+  await handler({ method, query, url, headers: { ...(token ? { authorization: 'Bearer ' + token } : {}), host: 'ff.example.com', ...headers }, body }, res, env, http);
   return res;
 }
 
@@ -163,7 +163,15 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   r = await call({ method: 'POST', query: { hook: 'x'.repeat(48) }, body: { object: 'job', entry: [{ uuid: link.job_uuid }] } });
   ok(r.statusCode === 403, 'a report with the wrong key is refused');
   r = await call({ method: 'POST', query: { hook: key }, body: { mode: 'subscribe', challenge: 'abc123' } });
-  ok(r.statusCode === 200 && r.raw === 'abc123', 'ServiceM8’s challenge is answered');
+  ok(r.statusCode === 200 && r.raw === 'abc123', 'ServiceM8’s challenge is answered (form POST)');
+  r = await call({ method: 'GET', query: { hook: key, mode: 'subscribe', challenge: 'c08f57bd' } });
+  ok(r.statusCode === 200 && r.raw === 'c08f57bd', 'ServiceM8’s challenge is answered (in the address, GET)');
+  r = await call({ method: 'POST', query: { hook: key + '?mode=subscribe&challenge=c08f57bd' }, body: {} });
+  ok(r.statusCode === 200 && r.raw === 'c08f57bd', 'ServiceM8’s challenge is answered (tacked onto the address after the key)');
+  r = await call({ method: 'POST', query: { hook: key }, body: { challenge: 'zz9' } });
+  ok(r.statusCode === 200 && r.raw === 'zz9', 'ServiceM8’s challenge is answered (no mode given)');
+  r = await call({ method: 'POST', headers: {}, query: {}, body: { challenge: 'p1' }, url: '/api/servicem8-hook/' + key });
+  ok(r.statusCode === 200 && r.raw === 'p1', 'the key can come in the path');
   sm8Calls.length = 0;
   r = await call({ method: 'POST', query: { hook: key }, body: { object: 'job', entry: [{ uuid: JOB_OTHER, changed_fields: ['status'] }] } });
   ok(r.statusCode === 200 && sm8Calls.length === 0, 'a change to one of his other clients’ jobs: ignored without looking at it');
@@ -198,7 +206,7 @@ async function call({ method = 'POST', token, body, query = {}, headers = {}, en
   reset(); db.companies.push({ uuid: '00000000-0000-0000-0000-0000000000e7', name: 'AFA' });
   r = await call({ token: 'tok-admin', body: { action: 'setup' } });
   const sub = sm8Calls.find(c => c.url.includes('webhook_subscriptions'));
-  ok(r.statusCode === 200 && db.settings.company_uuid === '00000000-0000-0000-0000-0000000000e7' && sub && sub.body.includes('object=job') && sub.body.includes(encodeURIComponent('https://ff.example.com/api/servicem8?hook=' + db.secrets.webhook_key)),
+  ok(r.statusCode === 200 && db.settings.company_uuid === '00000000-0000-0000-0000-0000000000e7' && sub && sub.body.includes('object=job') && sub.body.includes(encodeURIComponent('https://ff.example.com/api/servicem8-hook/' + db.secrets.webhook_key)),
     'setup: finds the existing AFA client and tells ServiceM8 where to report job changes');
   r = await call({ method: 'GET', query: { cron: '1' }, headers: { authorization: 'Bearer nope' } }); ok(r.statusCode === 401, 'the daily check needs CRON_SECRET');
   r = await call({ method: 'GET', query: { cron: '1' }, headers: { authorization: 'Bearer cron' } }); ok(r.statusCode === 200 && r.body.sent === 1, 'the daily check sends anything still waiting');

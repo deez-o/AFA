@@ -22,7 +22,7 @@
 //     { action: 'queues' }                       administrators: his job queues (to pick "awaiting parts")
 //     { action: 'disconnect' }                   administrators: forget the add-on's tokens
 //   GET  /api/servicem8?action=callback&code=…&state=…   ServiceM8 returns here after he connects
-//   POST /api/servicem8?hook=<key>                       ServiceM8 reports a job change
+//   POST /api/servicem8-hook/<key>                       ServiceM8 reports a job change (and checks the address when subscribing)
 //   GET  /api/servicem8?cron=1  (Authorization: Bearer <CRON_SECRET>)   the daily check
 
 const crypto = require('crypto');
@@ -332,15 +332,19 @@ async function handler(req, res, env = process.env, http = fetch) {
   const D = database(env, http);
   const Q = queryOf(req);
 
-  // 1. ServiceM8 reporting a change to a job
-  if (Q.hook != null) {
-    if (req.method !== 'POST') return sendText(res, 405, 'Use POST');
+  // 1. ServiceM8 reporting a change to a job (the key is in the path: /api/servicem8-hook/<key>, see vercel.json)
+  const hookKey = Q.hook != null ? Q.hook : (String(req.url || '').match(/\/servicem8-hook\/([0-9a-f]+)/i) || [])[1];
+  if (hookKey != null) {
     const sec = await D.one('servicem8_secrets?id=eq.1&select=webhook_key');
     const key = (sec && sec.webhook_key) || '';
+    const given = String(hookKey).match(/^[0-9a-f]*/i)[0];   // ignore anything ServiceM8 tacks on after the key
     const h = v => crypto.createHash('sha256').update(String(v)).digest();
-    if (!key || !crypto.timingSafeEqual(h(Q.hook || ''), h(key))) return sendText(res, 403, 'Unknown');
-    const b = await readBody(req);
-    if (b.mode === 'subscribe' && b.challenge) return sendText(res, 200, String(b.challenge));
+    if (!key || !crypto.timingSafeEqual(h(given), h(key))) return sendText(res, 403, 'Unknown');
+    // the check when subscribing: answer with the challenge, however it is sent (query or body, GET or POST)
+    const b = req.method === 'POST' ? await readBody(req) : {};
+    const challenge = b.challenge || Q.challenge || (String(hookKey).match(/challenge=([^&]+)/) || [])[1];
+    if (challenge && !b.object) return sendText(res, 200, decodeURIComponent(String(challenge)));
+    if (req.method !== 'POST') return sendText(res, 200, 'ok');
     if (b.object !== 'job') return sendText(res, 200, 'ignored');
     const ids = (Array.isArray(b.entry) ? b.entry : []).map(e => e && e.uuid).filter(safeId);
     if (!ids.length) return sendText(res, 200, 'ok');
@@ -432,7 +436,7 @@ async function handler(req, res, env = process.env, http = fetch) {
     if (!key) { key = crypto.randomBytes(24).toString('hex'); await D.patch('servicem8_secrets?id=eq.1', { webhook_key: key, updated_at: new Date().toISOString() }); }
     const hook = async fields => {
       const r = await http(SM8_HOOKS, { method: 'POST', headers: { ...A.headers, 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-        body: new URLSearchParams({ object: 'job', fields: fields.join(','), callback_url: origin(req, env) + '/api/servicem8?hook=' + key, unique_id: 'fraserflow' }).toString() });
+        body: new URLSearchParams({ object: 'job', fields: fields.join(','), callback_url: origin(req, env) + '/api/servicem8-hook/' + key, unique_id: 'fraserflow' }).toString() });
       if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`ServiceM8 ${r.status}: ${t.slice(0, 200)}`); }
     };
     let hooks = 'full';
