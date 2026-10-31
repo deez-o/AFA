@@ -2967,7 +2967,10 @@ function NavRail({screen,go,isAdmin,role,data,badge={}}){
     return html`<button key=${k} class=${'shrink-0 flex flex-col items-center gap-0.5 sm:gap-1 rounded-lg py-2 sm:py-2.5 text-[9.5px] sm:text-[11px] font-semibold transition-colors '+(on?'':'text-muted hover:text-ink hover:bg-sunken')}
       style=${on?{background:'var(--accent-soft)',color:'var(--accent)'}:null} aria-current=${on?'page':undefined} onClick=${()=>go(k)} title=${k==='staff'&&staffIsLeave()?'Leave':s.label}>
       <span class="relative inline-flex">${k==='staff'&&staffIsLeave()?NAV_ICON.schedule:NAV_ICON[k]}${badge[k]>0&&html`<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center" style=${{background:'var(--accent)',color:'var(--accent-ink)'}} title=${badge[k]+' new'}>${badge[k]}</span>`}</span><span>${k==='staff'&&staffIsLeave()?'Leave':s.label}</span>${role==='admin'&&s.preview&&previewOf(data).includes(k)&&html`<span class="-mt-0.5 text-[8.5px] font-bold uppercase tracking-wide px-1 rounded leading-[13px]" style=${{background:'var(--ink)',color:'var(--surface)'}} title="Only you can see this while it is in progress">Preview</span>`}</button>`};
-  const all=Object.entries(SCREENS).filter(([k])=>screenOK(k,role,data));
+  const PRESTART_ORDER=['qa','prestarts','staff'];   /* prestart users: Sign on, then Prestarts, then Leave */
+  const rank=k=>{const i=PRESTART_ORDER.indexOf(k);return i<0?PRESTART_ORDER.length:i};
+  const all0=Object.entries(SCREENS).filter(([k])=>screenOK(k,role,data));
+  const all=signOnRole()?[...all0].sort((a,b)=>rank(a[0])-rank(b[0])):all0;
   if(all.length<2)return null;   /* one screen (operators: Prestarts): no menu needed */
   /* bottom of the bar: features still in progress (admin only, until released), then Ideas */
   const low=([k,s])=>s.bottom||(s.preview&&previewOf(data).includes(k));
