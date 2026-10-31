@@ -256,31 +256,22 @@ drop trigger if exists work_orders_rules on public.work_orders;
 create trigger work_orders_rules before insert or update on public.work_orders for each row execute function public.maint_work_order_rules();
 
 -- scheduled work shows on the schedule board as machine downtime (a booking on the machine's row).
--- Completed or closed early: the downtime ends the day it was finished, and goes if the work hadn't started.
+-- Once the work order is completed, closed or cancelled the booking comes off the calendar.
 create or replace function public.maint_sync_downtime()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare bid text; e date; done date;
+declare bid text;
 begin
   bid := 'wo-' || coalesce(new.id, old.id)::text;
-  if tg_op = 'DELETE' or new.start_date is null or new.status = 'cancelled' then
+  if tg_op = 'DELETE' or new.start_date is null or new.status in ('completed','closed','cancelled') then
     delete from public.items where kind = 'block' and id = bid;
     return null;
-  end if;
-  e := coalesce(new.end_date, new.start_date);
-  if new.status in ('completed','closed') then
-    done := (coalesce(new.completed_at, now()) at time zone 'Australia/Brisbane')::date;
-    if new.start_date > done then
-      delete from public.items where kind = 'block' and id = bid;
-      return null;
-    end if;
-    if e > done then e := done; end if;
   end if;
   insert into public.items (kind, id, data)
   values ('block', bid, jsonb_build_object(
     'resourceId', new.asset_id,
     'kind', case when new.wo_type = 'service' then 'service' else 'repair' end,
     'start', new.start_date::text,
-    'end', e::text,
+    'end', coalesce(new.end_date, new.start_date)::text,
     'title', 'WO ' || new.number || ' · ' || new.title,
     'woId', new.id::text,
     'fromMaintenance', true))
@@ -291,14 +282,11 @@ end; $$;
 drop trigger if exists work_orders_downtime on public.work_orders;
 create trigger work_orders_downtime after insert or update or delete on public.work_orders
   for each row execute function public.maint_sync_downtime();
--- work orders already finished early: tidy their downtime the same way (safe to run again)
-delete from public.items i using public.work_orders w
- where i.kind = 'block' and i.id = 'wo-' || w.id::text and w.status in ('completed','closed')
-   and w.start_date > (coalesce(w.completed_at, now()) at time zone 'Australia/Brisbane')::date;
-update public.items i set data = jsonb_set(i.data, '{end}', to_jsonb(((coalesce(w.completed_at, now()) at time zone 'Australia/Brisbane')::date)::text))
-  from public.work_orders w
- where i.kind = 'block' and i.id = 'wo-' || w.id::text and w.status in ('completed','closed')
-   and (i.data->>'end') > ((coalesce(w.completed_at, now()) at time zone 'Australia/Brisbane')::date)::text;
+-- tidy bookings left behind by work orders already finished, cancelled or deleted (safe to run again)
+delete from public.items i
+ where i.kind = 'block' and i.id like 'wo-%'
+   and not exists (select 1 from public.work_orders w where i.id = 'wo-' || w.id::text
+                    and w.start_date is not null and w.status not in ('completed','closed','cancelled'));
 
 -- 6. Service records (each service done, with what was done and parts used) ---
 create table if not exists public.service_records (
