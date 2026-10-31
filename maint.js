@@ -790,6 +790,7 @@ function MachinesTab({ctx,open}){
       <select class="field w-auto" style=${fs} value=${cat} onChange=${e=>setCat(e.target.value)} aria-label="Category"><option value="">All categories</option>${machineCatsOf(data).map(c=>html`<option key=${c} value=${c}>${c}</option>`)}</select>
       ${nRet>0&&html`<label class="inline-flex items-center gap-1.5 text-[12.5px] cursor-pointer"><input type="checkbox" class="w-4 h-4" checked=${ret} onChange=${e=>setRet(e.target.checked)}/>Show retired (${nRet})</label>`}
       <span class="text-[12.5px] text-muted">${shown.length} machine${shown.length===1?'':'s'}</span><span class="flex-1"></span>
+      ${canAdd&&ctx.onImportMachines&&html`<button id="mc-import" type="button" class="btn" onClick=${ctx.onImportMachines} title="Update machines from an Excel list (rego details, readings and more)">${Icon.download} Import from Excel</button>`}
       ${canAdd&&html`<button id="mc-add" type="button" class="btn btn-primary" onClick=${()=>setDlg({isNew:true})}>${Icon.plus} Add machine</button>`}
     </div>
     <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="mc-table">
