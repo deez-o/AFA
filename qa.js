@@ -380,6 +380,7 @@ function useMe(sb,me,data,email){
 function QaScreen({data,live,notify}){
   const sb=live.sb;const me=live.user.id;const role=roleKey(live.role);const canFill=FILL_ROLES.includes(role);
   const [day,setDay]=useState(()=>iso(TODAY));const [openId,setOpenId]=useState(null);
+  const canAll=['admin','superuser','planner'].includes(role);const [mode,setMode]=useState('day');const [fromAll,setFromAll]=useState(false);
   const who=useMe(sb,me,data,live.user.email);
   const {v,err,save}=useQa(sb,me,{date:day},[day]);
   const ctx={sb,me,myName:who.name,canFill,isManager:role==='admin'||role==='superuser',save,notify};
@@ -388,7 +389,9 @@ function QaScreen({data,live,notify}){
   const myCrew=who.staff&&who.staff.crewId;
   const list=entriesOn(data,day).sort((a,b)=>(b.crewId===myCrew)-(a.crewId===myCrew));
   const op=openId&&v.packs.find(p=>p.id===openId);const cur=op&&list.find(e=>e.b.id===op.block_id&&e.k===op.shift_date);
-  if(op&&cur)return html`<div class="flex-1 min-h-0 overflow-y-auto pr-1" id="qa-scroll"><${PackView} key=${op.id} ctx=${ctx} data=${data} e=${cur} pack=${op} sigs=${v.sigs} onBack=${()=>setOpenId(null)}/></div>`;
+  if(openId&&!op&&fromAll&&mode==='day')return html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`;
+  if(op&&cur)return html`<div class="flex-1 min-h-0 overflow-y-auto pr-1" id="qa-scroll"><${PackView} key=${op.id} ctx=${ctx} data=${data} e=${cur} pack=${op} sigs=${v.sigs} onBack=${()=>{setOpenId(null);if(fromAll){setFromAll(false);setMode('all')}}}/></div>`;
+  if(canAll&&mode==='all')return html`<${AllPacks} sb=${sb} data=${data} onDay=${()=>setMode('day')} onOpen=${p=>{setDay(p.shift_date);setOpenId(p.id);setFromAll(true);setMode('day')}}/>`;
   const start=e=>{const p=newPack(data,e,who.name);save({t:'pack',row:p});setOpenId(p.id)};
   const another=(e,ps)=>{const p=copyPack(ps[ps.length-1],ps.length);save({t:'pack',row:p});setOpenId(p.id)};
   return html`<div class="flex-1 min-h-0 overflow-y-auto pr-1 grid grid-cols-[minmax(0,1fr)] gap-3 content-start" id="qa-scroll">
@@ -397,6 +400,7 @@ function QaScreen({data,live,notify}){
       <input id="qa-day" type="date" class="field w-auto" style=${fs} value=${day} onChange=${ev=>ev.target.value&&setDay(ev.target.value)}/>
       <button type="button" class="btn px-2" aria-label="Next day" onClick=${()=>setDay(iso(addDays(parse(day),1)))}>${Icon.chevR}</button>
       <button type="button" class="btn" disabled=${day===iso(TODAY)} onClick=${()=>setDay(iso(TODAY))}>Today</button>
+      ${canAll&&html`<button id="qa-see-all" type="button" class="btn btn-primary" onClick=${()=>setMode('all')}>See all QA packs</button>`}
       <span class="flex-1"></span>${v.waiting>0&&html`<span id="qa-waiting" class="text-[12px] font-medium" style=${{color:'hsl(38 90% 40%)'}}>${v.waiting} change${v.waiting===1?'':'s'} waiting for reception</span>`}
       <span class="text-[12.5px] text-muted">Signed in as ${who.name}</span>
     </div>
@@ -413,6 +417,38 @@ function QaScreen({data,live,notify}){
             <button type="button" class=${'btn qa-open'+(!canFill&&!mineS&&p.status==='draft'?' btn-primary':'')} onClick=${()=>setOpenId(p.id)}>${canFill?(p.status==='draft'?'Continue':'Open'):(!mineS&&p.status==='draft'?'Read & sign':'Open')}</button></div>`})}
         ${ps.length>0&&canFill&&html`<div><button type="button" class="text-[12.5px] font-medium inline-flex items-center gap-1 qa-another" style=${{color:'var(--accent)'}} onClick=${()=>another(e,ps)}>${Icon.plus} Add another QA pack for this shift</button><span class="text-[11.5px] text-muted"> · copies the details from ${packName(ps[ps.length-1],ps)}, not the signatures</span></div>`}
       </div>`})}
+  </div>`;
+}
+
+/* ---------- every QA pack in one list (planners, superusers, administrators) ---------- */
+function AllPacks({sb,data,onOpen,onDay}){
+  const [rows,setRows]=useState(null);const [err,setErr]=useState('');const [q,setQ]=useState('');const [st,setSt]=useState('');
+  useEffect(()=>{let off=false;(async()=>{try{const {data:ps,error}=await sb.from('qa_packs').select('id,block_id,shift_date,status,label,submitted_at,submitted_name,job_id,crew_id,created_at,jsa,toolbox');if(error)throw error;if(!off)setRows(ps||[])}catch(x){if(!off){setErr(errMsg(x));setRows([])}}})();return()=>{off=true}},[]);
+  const info=p=>{const b=data.blocks.find(x=>x.id===p.block_id);const j=data.jobs.find(x=>x.id===(p.job_id||(b&&b.jobId)));const crewId=p.crew_id||(b&&(coverOf(b,p.shift_date)||b.resourceId));const crew=data.resources.find(r=>r.id===crewId);
+    const hd=(p.jsa||{}).head||{};return {b,j,crew,hd}};
+  const all=(rows||[]).map(p=>({p,...info(p)}));
+  const ql=q.trim().toLowerCase();
+  const shown=all.filter(x=>(!st||x.p.status===st)&&(!ql||[x.j&&jobLabel(x.j),x.j&&x.j.projectNo,x.j&&x.j.address,x.crew&&x.crew.name,x.p.label,x.p.submitted_name,x.hd.foreman,x.hd.supervisor,x.hd.job_no,x.hd.location,x.p.shift_date,fmtShort(parse(x.p.shift_date))].filter(Boolean).join(' ').toLowerCase().includes(ql)))
+    .sort((a,b)=>String(b.p.shift_date).localeCompare(String(a.p.shift_date))||String(b.p.created_at||'').localeCompare(String(a.p.created_at||'')));
+  return html`<div class="flex-1 min-h-0 overflow-y-auto pr-1 grid grid-cols-[minmax(0,1fr)] gap-3 content-start" id="qa-all">
+    <div class="panel px-4 py-3 flex flex-wrap items-center gap-2">
+      <button type="button" class="btn" onClick=${onDay}>${Icon.chevL} By day</button>
+      <div class="font-display text-[16px] font-semibold mr-2">All QA packs</div>
+      <input id="qa-all-search" class="field flex-1 min-w-[200px]" style=${fs} placeholder="Search job, project, crew, supervisor, date" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search QA packs"/>
+      <select id="qa-all-status" class="field w-auto" style=${fs} value=${st} onChange=${e=>setSt(e.target.value)} aria-label="Status"><option value="">All</option><option value="submitted">Submitted</option><option value="draft">In progress</option></select>
+      <span class="text-[12.5px] text-muted">${rows?`${shown.length} pack${shown.length===1?'':'s'}`:''}</span></div>
+    ${err&&html`<div class="panel px-4 py-3 text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
+    ${!rows?html`<div class="panel p-6 text-[13px] text-muted">Loading…</div>`:html`<div class="panel overflow-x-auto"><table class="w-full text-[12.5px] min-w-[760px]" id="qa-all-table">
+      <thead><tr class="text-left">${['Date','Job','Crew','Pack','Status','Submitted by',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
+      <tbody>${shown.map(x=>html`<tr key=${x.p.id} class="border-t border-line hover:bg-sunken cursor-pointer qa-all-row" tabindex="0" onClick=${()=>x.b&&onOpen(x.p)} onKeyDown=${e=>{if(e.key==='Enter'&&x.b)onOpen(x.p)}}>
+          <td class="py-2 px-3 whitespace-nowrap font-medium">${WD[parse(x.p.shift_date).getDay()]} ${fmtShort(parse(x.p.shift_date))} ${parse(x.p.shift_date).getFullYear()}</td>
+          <td class="py-2 px-3"><div class="font-medium truncate max-w-[280px]">${x.j?jobLabel(x.j):(x.hd.location||'Job')}</div><div class="text-[11.5px] text-muted truncate max-w-[280px]">${[x.j&&x.j.projectNo&&'P '+x.j.projectNo,x.hd.supervisor&&'Supervisor '+x.hd.supervisor].filter(Boolean).join(' · ')}</div></td>
+          <td class="py-2 px-3 whitespace-nowrap">${x.crew?x.crew.name:'–'}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${x.p.label||'Pack'}${x.p.toolbox?html` <span class="text-[11px] text-muted">· toolbox</span>`:''}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${x.p.status==='submitted'?html`<span class="text-[11.5px] font-semibold px-1.5 py-0.5 rounded" style=${{background:'hsl(145 55% 36% / .14)',color:'hsl(145 55% 28%)'}}>Submitted</span>`:html`<span class="text-[11.5px] font-semibold px-1.5 py-0.5 rounded" style=${{background:'hsl(38 95% 50% / .16)',color:'hsl(30 90% 32%)'}}>In progress</span>`}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${x.p.submitted_name?html`${x.p.submitted_name}<div class="text-[11.5px] text-muted">${fmtDT(x.p.submitted_at)}</div>`:html`<span class="text-faint">–</span>`}</td>
+          <td class="py-2 px-3 text-right whitespace-nowrap">${x.b?html`<span class="text-[12px] font-medium" style=${{color:'var(--accent)'}}>Open ${Icon.chevR}</span>`:html`<span class="text-[11.5px] text-muted">Booking removed</span>`}</td></tr>`)}
+        ${!shown.length&&html`<tr><td colspan="7" class="px-3 py-6 text-center text-muted">${ql||st?'No QA packs match.':'No QA packs yet.'}</td></tr>`}</tbody></table></div>`}
   </div>`;
 }
 
