@@ -1267,19 +1267,16 @@ function PlantPicker({f,set,data}){
     ${machines.length===0
       ?html`<div class="text-[12.5px] text-muted md:col-span-2">No machines yet. Add them in Fleet › Machines.</div>`
       :html`${machines.length>8&&html`<input id="pl-search" class="field field-sm md:col-start-1 max-w-[420px]" style=${{height:32,fontSize:13}} placeholder="Search machine #, description, rego or category" value=${pq} onInput=${e=>setPq(e.target.value)} aria-label="Search machines"/>`}
-      <div class="grid gap-3 md:col-start-1 pm-list">
+      <div class="grid gap-2 md:col-start-1 pm-list">
         ${plantSections.length===0&&html`<div class="text-[12.5px] text-muted">No machines match.</div>`}
-        ${plantSections.map(sec=>html`<div key=${'h-'+sec.key} class="grid gap-1.5">
+        ${plantSections.map(sec=>html`<div key=${'h-'+sec.key} class="grid gap-1">
           <div class="flex items-center gap-2"><span class="label" style=${{color:'var(--ink)'}}>${sec.label}</span><span class="mono text-[11px] text-faint">${sec.rows.length}</span><span class="flex-1 h-px bg-line"></span></div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5">${sec.rows.map(m=>{const st=status(m);const on=picked.has(m.id);const blocked=!!(st&&st.block&&!on);
-            return html`<label key=${m.id} class=${'flex items-center gap-2.5 px-2.5 py-2 rounded-lg border min-w-0 '+(blocked?'opacity-60 cursor-not-allowed':'cursor-pointer hover:bg-sunken')}
-              style=${on?{borderColor:'var(--accent)',background:'var(--accent-soft)'}:{borderColor:'var(--line)'}} title=${blocked?'Restricted: can’t be added':''}>
-              <input id=${'pl-'+m.id} type="checkbox" class="w-4 h-4 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${on} ref=${el=>{if(el)el.indeterminate=!one&&!on&&onSome(m.id)}} disabled=${blocked} onChange=${()=>toggle(m.id)}/>
-              <${Badge} r=${m} size=${24}/>
-              <div class="min-w-0 flex-1">
-                <div class="text-[13px] truncate"><span class="font-medium mono">${m.name}</span> <span class="text-muted">${m.sub}</span></div>
-                ${(st||m.rego)&&html`<div class="text-[11.5px] truncate" style=${st?{color:st.tone}:null}>${st?st.text:html`<span class="mono text-faint">${m.rego}</span>`}</div>`}
-              </div></label>`})}</div></div>`)}
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-1">${sec.rows.map(m=>{const st=status(m);const on=picked.has(m.id);const blocked=!!(st&&st.block&&!on);
+            return html`<label key=${m.id} class=${'flex items-center gap-1.5 px-2 py-1 rounded-md border min-w-0 '+(blocked?'opacity-60 cursor-not-allowed':'cursor-pointer hover:bg-sunken')}
+              style=${on?{borderColor:'var(--accent)',background:'var(--accent-soft)'}:{borderColor:'var(--line)'}} title=${[m.name,m.sub,m.rego,st&&st.text,blocked&&'Restricted: can’t be added'].filter(Boolean).join(' · ')}>
+              <input id=${'pl-'+m.id} type="checkbox" class="w-3.5 h-3.5 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${on} ref=${el=>{if(el)el.indeterminate=!one&&!on&&onSome(m.id)}} disabled=${blocked} onChange=${()=>toggle(m.id)}/>
+              <div class="min-w-0 flex-1 text-[12px] leading-tight truncate"><span class="font-semibold mono">${m.name}</span> <span class="text-muted">${m.sub}</span></div>
+              ${st&&html`<span class="w-2 h-2 rounded-full shrink-0" style=${{background:st.tone}}></span>`}</label>`})}</div></div>`)}
       </div>`}
     ${machines.length>0&&(()=>{const sel=machines.filter(m=>picked.has(m.id)||(!one&&onSome(m.id)));const warn=sel.filter(m=>status(m)).length;
       return html`<div class="rounded-lg border border-line bg-sunken p-2.5 grid gap-2 content-start md:col-start-2 md:row-start-2 md:row-span-3 md:sticky md:top-0" aria-label="Machines selected for this job">
