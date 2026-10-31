@@ -1218,9 +1218,18 @@ function RestrictedNote({data,ids,what}){
   return html`<div class="rounded-lg px-3 py-2 text-[12.5px] font-medium restricted-note" style=${{background:'hsl(0 80% 96%)',color:'hsl(0 72% 38%)',boxShadow:'inset 0 0 0 1.5px hsl(0 72% 47%)'}}>
     ${bad.map(m=>m.name).join(', ')} ${bad.length===1?'is':'are'} restricted (do not use): ${bad.map(m=>data.alerts[m.id].restriction).filter(Boolean).join('; ')}. Take ${bad.length===1?'it':'them'} off ${what} and pick another machine.</div>`;
 }
+/* which machines a booking offers: never transport trucks or trailers; seal jobs only spray seal plant and brooms;
+   paving jobs the crew's own plant, steel and multi rollers, watercarts and crew trucks (anything already on the booking always shows) */
+const machCatKey=m=>((m&&m.category)||'').trim().toLowerCase();
+function machineFitsJob(m,crew){
+  const c=machCatKey(m);if(/transport|trailer/.test(c))return false;
+  if(isSealCrew(crew))return /spray|seal|broom/.test(c);
+  if(crew&&isPavingCrew(crew))return m.crewId===crew.id||/steel|multi|water ?cart|crew truck/.test(c);
+  return true}
 function PlantPicker({f,set,data}){
-  const machines=data.resources.filter(r=>r.type==='machine');
   const crew=data.resources.find(r=>r.id===f.resourceId);
+  const onBooking=new Set([...(f.plantIds||[]),...Object.values(f.shiftData||{}).flatMap(q=>(q&&q.plantIds)||[])]);
+  const machines=data.resources.filter(r=>r.type==='machine'&&(onBooking.has(r.id)||machineFitsJob(r,crew)));
   const own=machines.filter(m=>m.crewId===f.resourceId);
   const [pq,setPq]=useState('');const ql=pq.trim().toLowerCase();
   const hit=m=>!ql||[m.name,m.sub,m.rego,m.category].join(' ').toLowerCase().includes(ql);
