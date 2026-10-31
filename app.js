@@ -5418,8 +5418,8 @@ function PersonDialog({data,setData,person,onClose,notify,prof,sb,canEdit,admin,
       <${SFld} label="Crew"><select id="pd-crew" class="field" value=${f.crewId} onChange=${e=>setF({...f,crewId:e.target.value})}><option value="">No crew</option>${crews.map(c=>html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select><//>
       <${SFld} label="Colour"><div class="flex flex-wrap gap-1.5 pt-1">${HUES.map(h=>html`<button key=${h} type="button" class="w-6 h-6 rounded-full" aria-label=${'Colour '+h} aria-pressed=${f.hue===h} style=${{background:`hsl(${h} 65% 55%)`,boxShadow:f.hue===h?'0 0 0 2px var(--surface),0 0 0 4px var(--ink)':'none'}} onClick=${()=>setF({...f,hue:h})}></button>`)}</div><//>
       ${withLogin&&html`<div class="sm:col-span-2 rounded-lg border border-line p-3 grid sm:grid-cols-2 gap-3" id="pd-login">
-        <label class="sm:col-span-2 inline-flex items-center gap-2 text-[13px] font-medium cursor-pointer"><input id="pd-login-on" type="checkbox" class="w-4 h-4" checked=${lg.on} onChange=${e=>setLg({...lg,on:e.target.checked})}/>Create their login</label>
-        ${lg.on&&html`<${SFld} label="Username"><input id="pd-login-name" class="field mono" autocapitalize="none" spellcheck="false" placeholder="e.g. jsmith" value=${loginName} onInput=${e=>setLg({...lg,login:e.target.value,edited:true})}/><//>
+        <div class="sm:col-span-2 text-[13px] font-medium">Their login</div>
+        ${html`<${SFld} label="Username"><input id="pd-login-name" class="field mono" autocapitalize="none" spellcheck="false" placeholder="e.g. jsmith" value=${loginName} onInput=${e=>setLg({...lg,login:e.target.value,edited:true})}/><//>
           <${SFld} label="Role"><select id="pd-login-role" class="field" value=${lg.role} onChange=${e=>setLg({...lg,role:e.target.value})}>${loginRoles().filter(([k])=>k!=='admin'||myRole==='admin').map(([k,l])=>html`<option key=${k} value=${k}>${l}</option>`)}</select><//>
           <div class="sm:col-span-2 text-[12px] text-muted">They sign in with this username and the password <span class="mono font-semibold text-ink">${TEMP_PASSWORD}</span>, then choose their own.</div>`}
       </div>`}
@@ -5492,9 +5492,9 @@ function StaffPeople({data,setData,live,notify,onAddLeave}){
 </tr>`})}
           ${!list.length&&html`<tr><td colspan="7" class="px-3 py-6 text-center text-muted">${people.length?'No staff match.':'No staff yet.'+(canEdit?' Add your first staff member.':'')}</td></tr>`}</tbody></table></div>
     </section>
-    ${admin&&profs&&html`<section class="panel flex flex-col min-h-0" id="sp-loose">
-      <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line"><h3 class="font-display text-[15px] font-semibold">Logins without a staff member</h3><span class="text-[12px] text-muted">e.g. office staff. Link a login to someone on staff so their prestarts carry their name.</span><span class="flex-1"></span>
-        <button id="lg-add" type="button" class="btn" onClick=${()=>{setMade(null);setDlg({k:'login'})}}>${Icon.plus} New login</button></div>
+    ${admin&&profs&&loose.length>0&&html`<section class="panel flex flex-col min-h-0" id="sp-loose">
+      <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line"><h3 class="font-display text-[15px] font-semibold">Logins without a staff member</h3><span class="text-[12px] text-muted">Older logins not linked to anyone. Link each one to their staff member, or delete it. This list goes once they're all sorted.</span><span class="flex-1"></span>
+</div>
       <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="lg-table">
         <thead><tr class="text-left">${['Username','Role','Staff member',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
         <tbody>${loose.map(p=>html`<tr key=${p.id} class="border-t border-line" data-email=${p.email}>
