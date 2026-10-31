@@ -114,6 +114,10 @@ body.is-dragging,body.is-dragging *{cursor:grabbing!important;user-select:none}
 .reo-line{position:absolute;left:0;right:0;height:3px;background:var(--accent);z-index:25;pointer-events:none;border-radius:2px}
 .blk:hover{transform:translateY(-1px);box-shadow:0 3px 10px rgba(0,0,0,.12);z-index:3}
 .blk .t{overflow:hidden;text-overflow:ellipsis}
+/* phones: the job name wraps onto up to three lines; the bar's icons sit in a small row above it */
+.blk .blk-m{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;word-break:break-word;font-size:10.5px;line-height:1.15;min-width:0}
+.blk .blk-icons{display:flex;align-items:center;gap:2px;min-height:0;transform:scale(.8);transform-origin:left center}
+.blk .blk-icons:empty{display:none}
 .blk.blk-done{filter:grayscale(1);opacity:.5}
 .blk-pending{opacity:.72;outline:2px dashed currentColor;outline-offset:-2px;cursor:pointer!important}
 .blk-edge{position:absolute;top:0;bottom:0;width:9px;z-index:3;cursor:ew-resize;touch-action:none}
@@ -149,7 +153,7 @@ tailwind.config={theme:{extend:{colors:{
 </head>
 <body>
 <div id="root"></div>
-<script src="/app.js?v=202610311847"></script>
+<script src="/app.js?v=202610311855"></script>
 <script>/* installable app: the service worker (sw.js) */
 if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));</script>
 </body>

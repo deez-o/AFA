@@ -893,6 +893,8 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
   const N=days.length;
   const colMin=view===3?54:view===7?(narrow?64:120):view===14?68:view===60?26:40;
   const nameW=narrow?(readOnly?104:118):view===7?210:180;
+  /* phones: taller bars so the job's name wraps onto a few lines and can be read */
+  const LANE=narrow?58:32,BAR_H=narrow?54:28;
   const rangeStart=days[0];
   const todayIdx=diffDays(rangeStart,TODAY);
   const [sel,setSel]=useState(null);
@@ -982,8 +984,8 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
       const todays=effBlocks.filter(b=>b.resourceId===r.id&&b.kind==='job'&&covers(b,k)&&!exbinOf(b,k));
       const names=[...new Set(todays.flatMap(b=>plantMaintOn(data,effBlocks,k,b.shift||'day')))];
       return names.length?{i,names}:null}).filter(Boolean):[];
-    const flagTop=10+lanes*32;
-    const h=Math.max(56,lanes*28+(lanes-1)*4+20+(flags.length?20:0));
+    const flagTop=10+lanes*LANE;
+    const h=Math.max(56,lanes*LANE+16+(flags.length?20:0));
     const selHere=sel&&sel.rid===r.id;
     const crew=r.crewId&&data.resources.find(c=>c.id===r.crewId);
     const ppl=r.type==='crew'?membersOf(data,r.id,'person').length:0;
@@ -1021,9 +1023,9 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
           const dragging=preview&&preview.id===it.b.id;
           const jobDone=(it.b.kind==='job'||it.b.kind==='onjob'||v)&&!!(data.jobs.find(j=>j.id===it.b.jobId)||{}).completed;
           return html`<div key=${it.b.id} class=${'blk'+(dragging?' dragging':'')+(pend?' blk-pending':'')+(jobDone?' blk-done':'')} data-done=${jobDone?'1':null} role="button" tabindex="0" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
-            style=${{...blockStyle(it.b,data),top:10+it.lane*32,left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
+            style=${{...blockStyle(it.b,data),top:10+it.lane*LANE,...(narrow?{height:BAR_H,flexDirection:'column',alignItems:'stretch',justifyContent:'center',gap:1,padding:'2px 4px',whiteSpace:'normal'}:{}),left:`calc(${it.s/N*100}% + 3px)`,width:`calc(${span/N*100}% - 6px)`,
               borderTopLeftRadius:it.cutL?0:6,borderBottomLeftRadius:it.cutL?0:6,borderTopRightRadius:it.cutR?0:6,borderBottomRightRadius:it.cutR?0:6,
-              justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined}}
+              ...(narrow?{}:{justifyContent:compact?'center':'flex-start',padding:compact?'0 2px':undefined})}}
             title=${`${vTip}${title}${night?' (night works)':''} · ${r.name}${!v&&it.b.kind==='job'&&it.b.shiftData?Object.keys(it.b.shiftData).filter(k=>coverOf(it.b,k)&&k>=it.b.start&&k<=it.b.end).sort().map(k=>`\n${WD[parse(k).getDay()]} ${fmtShort(parse(k))}: done by ${data.resources.find(c=>c.id===coverOf(it.b,k))?.name||'another crew'}`).join(''):''}${it.b.crewSize?`\n${it.b.crewSize} man crew`:''}${it.b.kind==='job'&&it.b.inductionReq?(it.b.inductionDone?'\nSite induction: paperwork sent':'\nSite induction required: paperwork not sent'):''}${it.b.kind==='job'&&!it.b.sapEntered?'\nNot entered into SAP':''}${it.b.kind==='job'&&it.b.creditIssue?'\nCredit issue':''}${it.b.projectNo?`\nProject ${it.b.projectNo}`:''}${it.b.quoteNo?`\nQuote ${it.b.quoteNo}`:''}${it.b.notes?`\n${it.b.notes.length>140?it.b.notes.slice(0,140)+'…':it.b.notes}`:''}${it.b.kind==='job'&&it.b.shiftData?(t=>t.tonnes||t.area?`\n${fmtN(t.tonnes)} t · ${fmtN(t.area)} m² over ${t.filled} shift${t.filled===1?'':'s'}`:'')(qtyTotals(it.b)):''}\n${fmtShort(parse(it.b.start))} – ${fmtShort(parse(it.b.end))}${v?(it.b.cover?'\nClick to edit the booking':'\nClick to edit the crew job'):''}`}
             onPointerDown=${e=>v||pend?e.stopPropagation():startDrag(e,it.b)}
             onClick=${v?()=>onEdit(it.b.parent):pend?()=>onEdit(it.b):undefined}
@@ -1032,6 +1034,7 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
             ${(it.b.kind==='job'||it.b.kind==='onjob')&&days.slice(it.s,it.e+1).map((d,i)=>{const src=it.b.kind==='onjob'?it.b.parent:it.b;
                 const off=!worksOn(it.b,d),cov=!off&&!it.b.cover&&coverOf(src,iso(d));if(!off&&!cov)return null;
                 return html`<span key=${'w'+i} class=${'wkoff'+(cov?' cov':'')} aria-hidden="true" style=${{left:`${i/span*100}%`,width:`${100/span}%`}}></span>`})}
+            <span class=${narrow?'blk-icons':'contents'}>
             ${it.cutL&&html`<span aria-hidden="true">‹</span>`}
             ${night&&html`<span class="shrink-0 inline-flex" title="Night works">${Icon.moon}</span>`}
             ${(src=>src&&src.kind==='job'&&html`
@@ -1043,11 +1046,14 @@ function Board({data,days,view,narrow,readOnly,onCreate,onEdit,onMove,onResize,o
               ${src.creditIssue&&html`<span class="shrink-0 inline-flex items-center justify-center rounded-full font-bold" style=${{width:14,height:14,fontSize:10,lineHeight:1,background:'hsl(0 75% 46%)',color:'#fff',boxShadow:'0 0 0 1.5px #fff'}} title="Credit issue">$</span>`}`)(v?(it.b.cover?it.b.parent:null):it.b)}
             ${!v&&quoteFresh.has(it.b.id)&&html`<span class="shrink-0 w-2 h-2 rounded-full" style=${{background:'var(--accent)',boxShadow:'0 0 0 2px var(--surface)'}} title="Quote number changed in the last 48 hours"></span>`}
             ${v&&!compact&&!it.b.cover&&html`<span class="shrink-0 inline-flex opacity-80">${Icon.pin}</span>`}
-            ${compact
+            </span>
+            ${narrow
+              ?(sl=>html`<span class="blk-m"><span class="font-semibold">${sl[0]}</span>${sl[1]&&html` <span class="opacity-80">${sl[1]}</span>`}</span>`)(shortLabel(it.b))
+              :compact
               ?(sl=>html`<span class="flex flex-col min-w-0 max-w-full leading-[1.15] text-center"><span class="t text-[10px] font-semibold">${sl[0]}</span>${sl[1]&&html`<span class="t text-[9.5px] opacity-80">${sl[1]}</span>`}</span>`)(shortLabel(it.b))
               :html`<span class="t">${title}</span>`}
-            ${!compact&&span>=2&&view===7&&html`<span class="ml-auto mono text-[10.5px] opacity-70 shrink-0">${span}d</span>`}
-            ${it.cutR&&html`<span aria-hidden="true" class=${compact?'':'ml-auto'}>›</span>`}
+            ${!narrow&&!compact&&span>=2&&view===7&&html`<span class="ml-auto mono text-[10.5px] opacity-70 shrink-0">${span}d</span>`}
+            ${!narrow&&it.cutR&&html`<span aria-hidden="true" class=${compact?'':'ml-auto'}>›</span>`}
             ${!v&&!pend&&!readOnly&&!it.cutL&&html`<span class="blk-edge blk-edge-l" aria-hidden="true" title="Drag to change the start date" onPointerDown=${e=>startDrag(e,it.b,'start')} onClick=${e=>e.stopPropagation()}></span>`}
             ${!v&&!pend&&!readOnly&&!it.cutR&&html`<span class="blk-edge blk-edge-r" aria-hidden="true" title="Drag to extend or shorten" onPointerDown=${e=>startDrag(e,it.b,'end')} onClick=${e=>e.stopPropagation()}></span>`}
           </div>`;})}
