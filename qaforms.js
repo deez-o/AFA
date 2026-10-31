@@ -142,11 +142,16 @@ function SketchDialog({initial,aspect:a0,onSave,onClose}){
   const [AR]=useState(()=>a0||(window.innerHeight>window.innerWidth*1.15?3/4:4/3));
   const cv=useRef(null),box=useRef(null);const [hist,setHist]=useState(()=>[initial||[]]);const shapes=hist[hist.length-1];
   const [tool,setTool]=useState('pen');const [col,setCol]=useState(DG_COLOURS[0]);const [thick,setThick]=useState(false);
-  const cur=useRef(null);const drag=useRef(null);const [,tick]=useState(0);const [txt,setTxt]=useState(null);const [sz,setSz]=useState({w:600,h:450});
+  const cur=useRef(null);const drag=useRef(null);const [,tick]=useState(0);const [txt,setTxt]=useState(null);const [sz,setSz]=useState({w:300,h:225});
   const [sel,setSel]=useState(null);const [mine,setMine]=useState(quickMine);
   const push=n=>setHist(h=>[...h,n]);
-  useEffect(()=>{const fit=()=>{const r=box.current&&box.current.getBoundingClientRect();if(!r)return;let w=r.width,h=w/AR;if(h>r.height){h=r.height;w=h*AR}setSz({w:Math.floor(w),h:Math.floor(h)})};
-    fit();window.addEventListener('resize',fit);return()=>window.removeEventListener('resize',fit)},[]);
+  /* the page fits the space inside the box (less its padding), so the whole drawing shows without zooming out;
+     refitted when the space changes (turning the phone, the tools wrapping onto more rows) */
+  useEffect(()=>{const fit=()=>{const el=box.current;if(!el)return;const cs=getComputedStyle(el);
+      const W=el.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight),H=el.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
+      if(W<=0||H<=0)return;let w=W,h=w/AR;if(h>H){h=H;w=h*AR}setSz(o=>o.w===Math.floor(w)&&o.h===Math.floor(h)?o:{w:Math.floor(w),h:Math.floor(h)})};
+    fit();window.addEventListener('resize',fit);let ro=null;try{ro=new ResizeObserver(fit);ro.observe(box.current)}catch(e){}
+    return()=>{window.removeEventListener('resize',fit);try{ro&&ro.disconnect()}catch(e){}}},[]);
   const view=()=>{let l=cur.current?[...shapes,cur.current]:shapes;const dr=drag.current;if(dr&&dr.moved)l=l.map((x,k)=>k===dr.i?moved(dr.orig,dr.dx,dr.dy):x);return l};
   useEffect(()=>{const c=cv.current;if(!c)return;const dpr=Math.min(2,window.devicePixelRatio||1);c.width=Math.round(sz.w*dpr);c.height=Math.round(sz.h*dpr);
     const g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);drawShapes(g,sz.w,sz.h,view(),true,sel)});
@@ -174,7 +179,7 @@ function SketchDialog({initial,aspect:a0,onSave,onClose}){
   const tb='inline-flex items-center justify-center h-9 px-2.5 rounded-lg border text-[12.5px] font-medium shrink-0';
   const selS=sel!=null&&shapes[sel];
   return html`<div class="fixed inset-0 z-[70] flex flex-col" style=${{background:'var(--bg)'}} role="dialog" aria-modal="true" aria-label="Draw the site diagram" id="qa-sketch">
-    <div class="flex items-center gap-1.5 px-2 py-2 overflow-x-auto border-b border-line" style=${{background:'var(--surface)'}}>
+    <div class="flex flex-wrap items-center gap-1.5 px-2 py-2 border-b border-line shrink-0" style=${{background:'var(--surface)'}} id="dg-tools">
       ${DG_TOOLS.map(([k,l])=>html`<button key=${k} type="button" id=${'dg-tool-'+k} class=${tb} aria-pressed=${tool===k} style=${{borderColor:tool===k?'var(--accent)':'var(--line)',background:tool===k?'var(--accent-soft)':'var(--surface)'}} onClick=${()=>{setTool(k);setTxt(null);if(k!=='select')setSel(null)}}>${l}</button>`)}
       <span class="w-px h-6 bg-line mx-1 shrink-0"></span>
       ${DG_COLOURS.map(c=>html`<button key=${c} type="button" class="w-8 h-8 rounded-full shrink-0 dg-colour" aria-label=${'Colour '+c} aria-pressed=${col===c} style=${{background:c,boxShadow:col===c?'0 0 0 2px var(--surface),0 0 0 4px var(--ink)':'none'}}
@@ -190,12 +195,12 @@ function SketchDialog({initial,aspect:a0,onSave,onClose}){
         <button type="button" id="dg-sel-del" class="btn shrink-0" style=${{height:32,color:'var(--bad)'}} onClick=${delSel}>${Icon.trash} Delete</button>`
       :html`<span class="text-[12px] text-muted leading-snug" style=${{display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>${tool==='select'?'Tap something to select it, then drag it, change its colour or delete it.':tool==='text'?'Tap where the label goes, then type it or pick a quick label.':tool==='pen'?'Draw freehand. Mark patchwork clearly, with chainages.':'Drag from one point to another. Turn the phone sideways for more room.'}</span>`}
     </div>
-    <div ref=${box} class="flex-1 min-h-0 p-3 flex items-center justify-center">
+    <div ref=${box} class="flex-1 min-h-0 min-w-0 overflow-hidden p-3 flex items-center justify-center">
       <div class="relative" style=${{width:sz.w,height:sz.h}}>
         <canvas ref=${cv} id="dg-canvas" class="block rounded-lg border border-line" style=${{width:sz.w,height:sz.h,touchAction:'none',cursor:tool==='text'?'text':tool==='select'?'pointer':'crosshair',background:'#fff'}}
           onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}></canvas>
         ${txt&&html`<div class="absolute grid gap-1.5 rounded-lg p-2 shadow" id="dg-textbox" style=${{left:Math.max(0,Math.min(txt.p[0]*sz.w,sz.w-280)),top:Math.max(0,Math.min(txt.p[1]*sz.h-20,sz.h-170)),width:Math.min(280,sz.w),background:'var(--surface)',border:'1px solid var(--line)',zIndex:2}}>
-          <div class="flex items-center gap-1"><input id="dg-text" class="field" style=${{height:32,fontSize:13,flex:1,minWidth:0}} placeholder="Label" autoFocus=${true} value=${txt.value} onInput=${e=>{const v=e.target.value;setTxt(t=>({...t,value:v}))}} onKeyDown=${e=>{if(e.key==='Enter')addText();if(e.key==='Escape')setTxt(null)}}/>
+          <div class="flex items-center gap-1"><input id="dg-text" class="field" style=${{height:36,fontSize:16,flex:1,minWidth:0}} placeholder="Label" autoFocus=${true} value=${txt.value} onInput=${e=>{const v=e.target.value;setTxt(t=>({...t,value:v}))}} onKeyDown=${e=>{if(e.key==='Enter')addText();if(e.key==='Escape')setTxt(null)}}/>
             <button id="dg-text-add" type="button" class="btn btn-primary" style=${{height:32}} onClick=${()=>addText()}>${txt.edit!=null?'Save':'Add'}</button></div>
           ${txt.edit==null&&html`<div class="flex flex-wrap gap-1 max-h-[96px] overflow-y-auto" id="dg-quick">${[...DG_QUICK,...mine].map(q=>html`<span key=${q} class="inline-flex items-center rounded-full border border-line text-[12px] overflow-hidden">
               <button type="button" class="px-2 py-0.5 hover:bg-sunken dg-q" onClick=${()=>addText(q)}>${q}</button>${mine.includes(q)&&html`<button type="button" class="px-1 text-faint hover:text-ink" aria-label=${'Remove quick label '+q} onClick=${()=>dropQuick(q)}>×</button>`}</span>`)}</div>
