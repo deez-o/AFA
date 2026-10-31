@@ -739,7 +739,7 @@ function Dashboard({ctx,open}){
   const rank={out:0,service:1,due:2,ok:3};
   const list=act.filter(a=>(!cat||machCatOf(a.m).toLowerCase()===cat.toLowerCase())&&(!crew||(crew==='~'?!a.m.crewId:a.m.crewId===crew))&&(!st||a.status===st)&&(!ql||[a.m.name,a.m.sub,a.m.rego,a.p&&a.p.make,a.p&&a.p.model].join(' ').toLowerCase().includes(ql)))
     .sort((x,y)=>rank[x.status]-rank[y.status]||y.overdue-x.overdue||x.m.name.localeCompare(y.m.name));
-  const attention=act.flatMap(a=>a.plans.filter(x=>x.state==='overdue'||x.state==='soon').map(x=>({a,x}))).sort((u,v)=>(u.x.state==='overdue'?0:1)-(v.x.state==='overdue'?0:1));
+  const attention=act.flatMap(a=>a.plans.filter(x=>x.state==='overdue').map(x=>({a,x})));   /* only overdue services (due soon shows in the counts and the table) */
   const crews=data.resources.filter(r=>r.type==='crew');
   return html`<div class="grid gap-3">
     <div class="grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-10">${cards.map(([k,v,s,c])=>html`<div key=${k} class="panel px-3 py-2.5 min-w-0"><div class="label leading-tight">${k}</div><div class="font-display text-[22px] font-semibold tnum" style=${c?{color:c}:null}>${v}</div>${s&&html`<div class="text-[11px] text-muted truncate" title=${s}>${s}</div>`}</div>`)}</div>
