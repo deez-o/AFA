@@ -4643,7 +4643,8 @@ function PlanForm({plan,data,save,onDelete,onSchedule,onPdf,onOpenBooking,onShif
 /* ---------- the Planning screen ---------- */
 function PlanningScreen({data,setData,notify,onOpenBooking}){
   const plans=plansOf(data);
-  const [sel,setSel]=useState(()=>{try{return localStorage.getItem(KEY+':plan')||''}catch(e){return ''}});
+  /* on a phone: the list of plans, or one plan with "All plans" to go back (it opens on the list) */
+  const [sel,setSel]=useState(()=>{try{if(!window.matchMedia('(min-width: 768px)').matches)return '';return localStorage.getItem(KEY+':plan')||''}catch(e){return ''}});
   const [q,setQ]=useState('');const [confirmDel,setConfirmDel]=useState(null);const [sched,setSched]=useState(null);
   const cur=plans.find(p=>p.id===sel)||null;
   const pick=id=>{setSel(id);try{localStorage.setItem(KEY+':plan',id)}catch(e){}};
@@ -4664,7 +4665,7 @@ function PlanningScreen({data,setData,notify,onOpenBooking}){
   const schedInfo=sched&&(()=>{const p=plansOf(data).find(x=>x.id===sched.id)||sched;const ds=planDates(p,data);const c=planConflicts(data,p);const bk0=planBooking(data,p);const crew=bk0&&data.resources.find(r=>r.id===bk0.resourceId);
     const old=data.blocks.find(b=>b.id===p.bookingId);return {p,ds,c,crew,old,seal:sealPlanOf(data,p)}})();
   return html`<div class="flex-1 min-h-0 flex gap-3">
-    <aside class="panel w-[280px] shrink-0 flex flex-col min-h-0 overflow-hidden">
+    <aside id="pl-list" class=${'panel w-full md:w-[280px] shrink-0 flex-col min-h-0 overflow-hidden '+(cur?'hidden md:flex':'flex')}>
       <div class="p-3 border-b border-line grid gap-2">
         ${can('planning',2)&&html`<button type="button" class="btn btn-primary justify-center" onClick=${add}>${Icon.plus} New plan</button>`}
         <input class="field field-sm" style=${{height:30,fontSize:13}} placeholder="Search plans" value=${q} onInput=${e=>setQ(e.target.value)} aria-label="Search plans"/>
@@ -4678,7 +4679,8 @@ function PlanningScreen({data,setData,notify,onOpenBooking}){
             <span class="text-[11px] font-semibold" style=${{color:sc}}>${sl}</span></button></li>`})}
       </ul>
     </aside>
-    <div id="pl-scroll" class="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1">
+    <div id="pl-scroll" class=${'flex-1 min-w-0 min-h-0 overflow-y-auto md:pr-1 '+(cur?'':'hidden md:block')}>
+      ${cur&&html`<div class="md:hidden mb-2"><button id="pl-back" type="button" class="btn" onClick=${()=>pick('')}>${Icon.chevL} All plans</button></div>`}
       ${!cur?html`<div class="panel p-8 text-center grid gap-3 place-items-center">
           <div class="font-display text-[18px] font-semibold">Job planning</div>
           <p class="text-[13px] text-muted max-w-[520px]">Fill in the site inspection and the method for a job: site details and map pins, asphalt and profiling for each shift, the machines, trucking and subcontractors needed, and the safety checks. Send it to the schedule to create or update the crew’s booking, then print the plan as a PDF for the crew.</p>
