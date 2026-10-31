@@ -341,6 +341,9 @@ function fillDocketGap(doc,others,gapAt){
   if(best){const d=best.q[best.j];return {docket:doc.slice(0,best.j)+d+doc.slice(best.j),guess:{at:best.j,digit:d,from:best.q}}}
   const at=Math.min(gapAt!=null?gapAt:DOCKET_GAP_AT,doc.length);return {docket:doc.slice(0,at)+'?'+doc.slice(at),guess:{at,digit:null}};
 }
+/* loads are grouped by their run location ("Run 1", "run 1 " and "RUN 1" are the same run) */
+const runKey=r=>String((r&&r.comments)||'').trim().replace(/\s+/g,' ').toLowerCase();
+const runName=r=>String((r&&r.comments)||'').trim().replace(/\s+/g,' ');
 const fmt2=n=>(Math.round(n*100)/100).toLocaleString('en-AU',{maximumFractionDigits:2});
 const layRow=()=>({docket:'',rego:'',time:hhmm(),temp:'',tonnes:'',ch_start:'',ch_finish:'',comments:''});
 const LAY_NEED=[['docket','Docket number'],['rego','Truck rego'],['time','Time in'],['temp','Temperature'],['tonnes','Tonnes'],['ch_start','Chainage start'],['ch_finish','Chainage finish'],['comments','Run location / comments']];
@@ -376,14 +379,14 @@ function LayingEditor({f}){
     finally{setBusy('')}};
   const close=i=>{const miss=layMissing(rows[i]);if(miss.length){setTried(i);setErr('Fill in: '+miss.map(([,l])=>l).join(', ')+'.');return}setTried(-1);setErr('');setOpen(-1)};
   const bad=(i,k)=>tried===i&&layMissing(rows[i]).some(([x])=>x===k)?{boxShadow:'inset 0 0 0 1.5px var(--bad)',borderColor:'var(--bad)'}:null;
-  let run=0;const tot=rows.reduce((a,r)=>a+n0(r.tonnes),0);
+  let run=0;const runBy={};const tot=rows.reduce((a,r)=>a+n0(r.tonnes),0);
   const canAdd=f.canEdit&&blocker<0&&!busy;
   return html`<${FormCard} f=${f} id="laying" title="Asphalt laying record (paving)" sub=${`${rows.length} load${rows.length===1?'':'s'} · ${fmt2((tot))} t`} sigForms=${[]}>
     ${/* the date placed is the shift's date, and the temp gun serial comes from the JSA (Quality): neither is asked again here */''}
     <div class="grid gap-2" id="qa-lay-rows">
-      ${rows.map((r,i)=>{run+=n0(r.tonnes);const isOpen=i===open&&f.canEdit;
+      ${rows.map((r,i)=>{run+=n0(r.tonnes);const rk=runKey(r);runBy[rk]=(runBy[rk]||0)+n0(r.tonnes);const runSoFar=runBy[rk];const isOpen=i===open&&f.canEdit;
         return isOpen?html`<div key=${i} class=${rowStyle+' qa-row-laying qa-lay-open'} style=${{boxShadow:'inset 0 0 0 1.5px var(--accent)'}}>
-            <div class="flex items-center gap-2 text-[12.5px]"><span class="font-semibold whitespace-nowrap">Load ${i+1}</span><span class="text-muted">${r.scanned==='ai'?'read from the docket by AI · ':r.scanned?'from the docket · ':''}progressive total ${fmt2((run))} t</span></div>
+            <div class="flex items-center gap-2 text-[12.5px]"><span class="font-semibold whitespace-nowrap">Load ${i+1}</span><span class="text-muted">${r.scanned==='ai'?'read from the docket by AI · ':r.scanned?'from the docket · ':''}${rk?`${runName(r)}: ${fmt2(runSoFar)} t · `:''}job total ${fmt2((run))} t</span></div>
             ${(()=>{const k=rows.findIndex((x,j)=>j!==i&&!blank(r.docket)&&x.docket===r.docket);return k>=0&&html`<div id="qa-lay-dup" class="text-[12.5px] font-medium rounded-md px-2 py-1" style=${{background:'hsl(38 90% var(--blk-l))'}}>Docket ${r.docket} is already on load ${k+1}. Scanned twice?</div>`})()}
             ${(()=>{const box=(k,id,extra)=>html`<input id=${id} class="field" style=${{...fs,...(k==='docket'&&r.docket_check&&!bad(i,k)?{boxShadow:'inset 0 0 0 1.5px hsl(38 90% 48%)',borderColor:'hsl(38 90% 48%)'}:{}),...(bad(i,k)||{})}} value=${r[k]==null?'':r[k]}
                 onInput=${e=>setRow(i,{[k]:k==='rego'?e.target.value.toUpperCase():e.target.value,...(k==='docket'?{docket_check:false}:{})})} ...${extra||{}}/>`;
@@ -401,9 +404,8 @@ function LayingEditor({f}){
             <span class="mono">${r.docket||html`<span class="text-faint">no docket</span>`}</span>
             <span class="mono">${r.rego||'–'}</span><span>${r.time||''}</span>
             <span>${blank(r.temp)?'':r.temp+' °C'}</span>${!rowDone(r)&&html`<span style=${{color:'var(--bad)',fontWeight:600}}>missing ${layMissing(r).map(([,l])=>l.toLowerCase()).join(', ')}</span>`}
-            <span class="font-semibold tnum">${r.tonnes||'–'} t</span><span class="text-muted tnum">total ${fmt2((run))} t</span>
+            <span class="font-semibold tnum">${r.tonnes||'–'} t</span>${rk&&html`<span class="tnum qa-lay-runtot" title=${'Progressive total for '+runName(r)}><span class="text-muted">${runName(r)}:</span> <span class="font-semibold">${fmt2(runSoFar)} t</span></span>`}<span class="text-muted tnum">job ${fmt2((run))} t</span>
             ${(r.ch_start||r.ch_finish)&&html`<span class="text-muted">Ch ${r.ch_start||'?'}–${r.ch_finish||'?'}</span>`}
-            ${r.comments&&html`<span class="text-muted truncate max-w-[220px]">${r.comments}</span>`}
             <span class="flex-1"></span>${f.canEdit&&html`<button type="button" class="btn qa-lay-edit" style=${{height:28,fontSize:12}} disabled=${open>=0&&open!==i} onClick=${()=>{setOpen(i);setErr('')}}>${Icon.pencil} Edit</button>`}</div>`})}
     </div>
     ${err&&html`<div id="qa-lay-err" class="text-[12.5px]" style=${{color:'var(--bad)'}}>${err}</div>`}
@@ -412,7 +414,11 @@ function LayingEditor({f}){
         <input ref=${fileRef} id="qa-lay-file" type="file" accept="image/*" capture="environment" class="sr-only" disabled=${!(canAdd&&open<0)} onChange=${e=>{const fl=e.target.files&&e.target.files[0];e.target.value='';scan(fl)}}/></label>
       <button id="qa-lay-add" type="button" class="btn" style=${{height:42}} disabled=${!(canAdd&&open<0)} onClick=${()=>addRow(layRow())}>Add without scanning</button>
       ${blocker>=0&&open<0&&html`<span class="text-[12px]" style=${{color:'hsl(30 90% 38%)'}}>Finish load ${blocker+1} (${blank(rows[blocker].temp)?'temperature':'docket and tonnes'}) before adding another.</span>`}</div>`}
-    <div class="text-[13.5px] font-semibold" id="qa-lay-total">Total: ${fmt2((tot))} t</div><//>`;
+    ${(()=>{const runs=[];rows.forEach(r=>{const k=runKey(r);let g=runs.find(x=>x.k===k);if(!g){g={k,name:k?runName(r):'No run location',t:0,n:0};runs.push(g)}g.t+=n0(r.tonnes);g.n++});
+      return runs.length>1||(runs.length===1&&runs[0].k)?html`<div class="rounded-lg bg-sunken border border-line px-3 py-2 grid gap-1" id="qa-lay-runs">
+        ${runs.map(g=>html`<div key=${g.k||'-'} class="flex items-baseline gap-2 text-[13px]"><span class="flex-1 min-w-0 truncate">${g.name} <span class="text-muted text-[12px]">· ${g.n} load${g.n===1?'':'s'}</span></span><span class="font-semibold tnum">${fmt2(g.t)} t</span></div>`)}
+        <div class="flex items-baseline gap-2 text-[13.5px] font-semibold border-t border-line pt-1" id="qa-lay-total"><span class="flex-1">Job total</span><span class="tnum">${fmt2(tot)} t</span></div></div>`
+      :html`<div class="text-[13.5px] font-semibold" id="qa-lay-total">Job total: ${fmt2((tot))} t</div>`})()}<//>`;
 }
 /* the calibrated temp gun's serial: entered once, on the JSA (an older laying record may have its own) */
 const laySerial=(p,d)=>String((((p||{}).jsa||{}).quality||{}).serial||'').trim()||String((d||{}).serial||'').trim();

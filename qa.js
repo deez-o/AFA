@@ -356,9 +356,10 @@ function PackView({ctx,data,e,pack,sigs,onBack,inModal}){
     ${(()=>{const i=order.findIndex(t=>t.id===sec);const nx=order[i+1];return nx&&html`<div class="flex justify-end"><button id="qa-next" type="button" class="btn" onClick=${()=>go(nx.id)}>Next: ${nx.label} ${Icon.chevR}</button></div>`})()}
     <div class="panel px-4 py-3 flex flex-wrap items-center gap-2 sticky bottom-0" style=${{zIndex:5}}>
       ${msg&&html`<span id="qa-msg" class="text-[12.5px] w-full" style=${{color:'var(--bad)'}}>${msg}</span>`}
-      <button id="qa-pdf" type="button" class="btn" disabled=${busy} onClick=${pdf}>${Icon.download} ${busy?'Making PDF…':'PDF'}</button>
+      ${/* phones: no PDF downloads here (they crowd the bar); computers keep them */''}
+      <span class="hidden sm:contents"><button id="qa-pdf" type="button" class="btn" disabled=${busy} onClick=${pdf}>${Icon.download} ${busy?'Making PDF…':'PDF'}</button>
       ${T&&html`<button id="qa-tb-pdf" type="button" class="btn" disabled=${busy} onClick=${async()=>{setBusy(true);try{await toolboxPdf(data,e,p,sigs)}catch(x){setMsg(errMsg(x))}finally{setBusy(false)}}}>${Icon.download} Toolbox meeting</button>`}
-      ${forms.costs&&html`<button id="qa-costs-pdf" type="button" class="btn" disabled=${busy} title="External costs summary: office use only, not sent to the customer" onClick=${async()=>{setBusy(true);try{await costsPdf(data,e,p,sigs)}catch(x){setMsg(errMsg(x))}finally{setBusy(false)}}}>${Icon.download} External costs</button>`}
+      ${forms.costs&&html`<button id="qa-costs-pdf" type="button" class="btn" disabled=${busy} title="External costs summary: office use only, not sent to the customer" onClick=${async()=>{setBusy(true);try{await costsPdf(data,e,p,sigs)}catch(x){setMsg(errMsg(x))}finally{setBusy(false)}}}>${Icon.download} External costs</button>`}</span>
       <span class="text-[12px] text-muted flex-1" id="qa-progress">${order.length-missAll.length} of ${order.length} form${order.length===1?'':'s'} complete</span>
       ${canEdit&&isDraft&&!del&&html`<button id="qa-delete" type="button" class="btn" style=${{color:'var(--bad)'}} onClick=${()=>setDel(true)}>${Icon.trash} Delete</button>`}
       ${canEdit&&isDraft&&del&&html`<span id="qa-del-confirm" class="w-full flex flex-wrap items-center gap-2"><span class="text-[12.5px] font-medium flex-1" style=${{color:'var(--bad)'}}>Delete this pack${jsaSigs.length?` and its ${sigs.filter(s=>s.pack_id===p.id).length} signature${sigs.filter(s=>s.pack_id===p.id).length===1?'':'s'}`:''}? This can’t be undone.</span>
