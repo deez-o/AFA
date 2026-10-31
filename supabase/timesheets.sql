@@ -30,8 +30,8 @@ create table if not exists public.timesheets (
 );
 -- the week starts on a Tuesday (older set-ups had Monday)
 alter table public.timesheets drop constraint if exists timesheets_week_start_check;
-delete from public.timesheets where extract(isodow from week_start) <> 2 and days = '{}'::jsonb;
-alter table public.timesheets add constraint timesheets_week_start_check check (extract(isodow from week_start) = 2) not valid;
+delete from public.timesheets where extract(isodow from week_start) <> 2;   -- trial timesheets from the Monday-start version (in development, no real data)
+alter table public.timesheets add constraint timesheets_week_start_check check (extract(isodow from week_start) = 2);
 create unique index if not exists timesheets_one_per_week on public.timesheets (staff_id, week_start);
 create index if not exists timesheets_week on public.timesheets (week_start);
 create index if not exists timesheets_user on public.timesheets (user_id);
