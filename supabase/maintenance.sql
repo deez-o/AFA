@@ -80,6 +80,18 @@ create table if not exists public.asset_profiles (
   updated_by  uuid default auth.uid()
 );
 
+-- registration details (from a Queensland rego check, or typed in): shown on the machine's card in Fleet
+alter table public.asset_profiles add column if not exists rego_status text;
+alter table public.asset_profiles add column if not exists rego_expiry date;
+alter table public.asset_profiles add column if not exists purpose text;
+alter table public.asset_profiles add column if not exists gvm int;
+alter table public.asset_profiles add column if not exists gcm int;
+alter table public.asset_profiles add column if not exists atm int;
+alter table public.asset_profiles add column if not exists tare int;
+alter table public.asset_profiles add column if not exists nhvc text;
+alter table public.asset_profiles add column if not exists coi_number text;
+alter table public.asset_profiles add column if not exists coi_due date;
+
 create or replace function public.maint_touch()
 returns trigger language plpgsql as $$
 begin

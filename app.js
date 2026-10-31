@@ -4165,6 +4165,18 @@ function applyMachineImport(d,list){
 const xNum=v=>{const n=parseFloat(String(v||'').replace(/[^\d.]/g,''));return isFinite(n)?n:null};
 const xDate=v=>{const m=/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/.exec(String(v||'').trim());if(m){const y=+m[3]<100?2000+ +m[3]:+m[3];return `${y}-${pad(+m[2])}-${pad(+m[1])}`}
   const m2=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v||''));return m2?m2[0]:null};
+/* a machine with an inspection (COI) date gets a yearly "COI inspection" service plan, warning 30 days ahead (so the work order
+   is raised a month before it's due). The plan counts from a starting record a year before the due date; once a COI is done
+   (its work order completed) the next one is due a year after that. Returns 'added', 'kept' or throws. */
+async function ensureCoiPlan(sb,id,due){
+  if(!due)return null;
+  const {data:pl,error:e1}=await sb.from('service_plans').select('id').eq('asset_id',id).ilike('name','COI%').limit(1);if(e1)throw e1;
+  let pid=pl&&pl[0]&&pl[0].id,made=false;
+  if(!pid){const {data,error}=await sb.from('service_plans').insert({asset_id:id,name:'COI inspection',every_days:365,warn_days:30}).select('id').single();if(error)throw error;pid=data.id;made=true}
+  const {data:rec,error:e2}=await sb.from('service_records').select('id').eq('asset_id',id).eq('plan_id',pid).limit(1);if(e2)throw e2;
+  if(!rec||!rec.length){const {error}=await sb.from('service_records').insert({asset_id:id,plan_id:pid,service_type:'COI inspection',done_on:iso(addDays(parse(due),-365)),baseline:true,notes:`Starting point: COI due ${due}`});if(error)throw error;made=true}
+  return made?'added':'kept'}
+window.ensureCoiPlan=ensureCoiPlan;
 async function importMachineExtras(sb,getData,list){
   for(let t=0;t<50&&!getData();t++)await new Promise(r=>setTimeout(r,100));
   if(!getData())throw new Error('the machine list wasn’t saved');
@@ -4173,7 +4185,7 @@ async function importMachineExtras(sb,getData,list){
   for(let t=0;t<20;t++){const {data:have}=await sb.from('items').select('id').eq('kind','resource').in('id',ids);if((have||[]).length>=ids.length)break;await new Promise(r=>setTimeout(r,1000))}
   const {data:profs}=await sb.from('asset_profiles').select('*').in('asset_id',ids);const P=new Map((profs||[]).map(p=>[p.asset_id,p]));
   const {data:reads}=await sb.from('meter_readings').select('asset_id,kind,value').in('asset_id',ids);
-  let nP=0,nR=0;const bad=[];
+  let nP=0,nR=0,nC=0,noCols=false;const bad=[];
   for(const x of list){const id=idOf(x);if(!id)continue;const X=x.xt;
     const kg=v=>xNum(v)?`${fmtN(xNum(v))} kg`:'';
     const rego=[X.regoStatus&&`Rego ${X.regoStatus.toLowerCase()}${X.regoExpiry?' until '+X.regoExpiry:''}`,!X.regoStatus&&X.regoExpiry&&`Rego expires ${X.regoExpiry}`,
@@ -4182,15 +4194,23 @@ async function importMachineExtras(sb,getData,list){
     const old=P.get(id);const keepNotes=old&&old.notes?String(old.notes).split('\n').filter(l=>!/^Rego |^COI |^Inspection due/.test(l)).join('\n').trim():'';
     const notes=[keepNotes,rego,X.notes].filter(Boolean).join('\n')||null;
     const mt=/both/i.test(X.meter||'')?'both':/^k/i.test(X.meter||'')?'km':/^h/i.test(X.meter||'')?'hours':null;
-    const row={...(X.make?{make:X.make}:{}),...(X.model?{model:X.model}:{}),...(xNum(X.year)?{year:Math.round(xNum(X.year))}:{}),...(X.serial?{serial:X.serial}:{}),...(mt?{meter_type:mt}:{}),notes,...(x.retired?{retired:true}:{})};
-    try{const {error}=old?await sb.from('asset_profiles').update(row).eq('asset_id',id):await sb.from('asset_profiles').insert({asset_id:id,...row});if(error)throw error;nP++}
+    const base={...(X.make?{make:X.make}:{}),...(X.model?{model:X.model}:{}),...(xNum(X.year)?{year:Math.round(xNum(X.year))}:{}),...(X.serial?{serial:X.serial}:{}),...(mt?{meter_type:mt}:{}),...(x.retired?{retired:true}:{})};
+    /* registration details go in their own fields on the machine's card; before supabase/maintenance.sql adds them, they're kept in the notes */
+    const n0=v=>xNum(v)==null?null:Math.round(xNum(v));
+    const reg=Object.fromEntries(Object.entries({rego_status:X.regoStatus||null,rego_expiry:xDate(X.regoExpiry),purpose:X.purpose||null,coi_number:X.coi||null,coi_due:xDate(X.coiDue),
+      gvm:n0(X.gvm),gcm:n0(X.gcm),atm:n0(X.atm),tare:n0(X.tare),nhvc:X.nhvc||null}).filter(([,v])=>v!=null));
+    const save=async row=>{const {error}=old?await sb.from('asset_profiles').update(row).eq('asset_id',id):await sb.from('asset_profiles').insert({asset_id:id,...row});return error};
+    try{let error=await save({...base,...reg,notes:[keepNotes,X.notes].filter(Boolean).join('\n')||null});
+      if(error&&/column/i.test(error.message||'')){noCols=true;error=await save({...base,notes})}
+      if(error)throw error;nP++}
     catch(e){bad.push(`${x.name}: ${e.message||e}`)}
+    if(xDate(X.coiDue))try{if(await ensureCoiPlan(sb,id,xDate(X.coiDue))==='added')nC++}catch(e){bad.push(`${x.name} COI plan: ${e.message||e}`)}
     for(const [kind,v,at] of [['hours',X.hours,X.hoursAt],['km',X.km,X.kmAt]]){const n=xNum(v),day=xDate(at);if(n==null||n<=0||!day)continue;
       if((reads||[]).some(r=>r.asset_id===id&&r.kind===kind&&+r.value===n))continue;
       try{const {error}=await sb.from('meter_readings').insert({asset_id:id,kind,value:n,read_at:day+'T12:00:00+10:00',source:'manual',note:'Imported from the machine list'});if(error)throw error;nR++}
       catch(e){bad.push(`${x.name} ${kind}: ${e.message||e}`)}}}
   if(bad.length)console.warn('Machine import:',bad);
-  return `Machine details: ${nP} updated, ${nR} reading${nR===1?'':'s'} added${bad.length?` · ${bad.length} couldn’t be saved (${bad[0]}${bad.length>1?'…':''})`:''}`;
+  return `Machine details: ${nP} updated, ${nR} reading${nR===1?'':'s'} added${nC?`, ${nC} COI plan${nC===1?'':'s'} set up`:''}${noCols?' · rego details went into the notes (run supabase/maintenance.sql to give them their own fields)':''}${bad.length?` · ${bad.length} couldn’t be saved (${bad[0]}${bad.length>1?'…':''})`:''}`;
 }
 function MachineImport({data,setData,onClose,notify,sb}){
   const [rows,setRows]=useState(null);const [off,setOff]=useState({});const [err,setErr]=useState('');const [busy,setBusy]=useState(false);

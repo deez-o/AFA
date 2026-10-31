@@ -599,6 +599,10 @@ function AssetPanel({ctx,a,onClose,open,behind}){
           <div class="flex items-center gap-2"><span class="label flex-1">Machine details</span>${(perms.work||ctx.canEdit)&&html`<button id="ap-profile" type="button" class="text-[12px] text-muted hover:text-ink inline-flex items-center gap-1" onClick=${()=>open({k:'machine',a})}>${Icon.pencil} Edit</button>`}</div>
           <${MachinePhoto} key=${a.m.id} ctx=${ctx} a=${a}/>
           ${[['Make / model',[p.make,p.model].filter(Boolean).join(' ')],['Year',p.year],['Serial',p.serial],['Meters',a.mt==='both'?'Hours and km':a.mt==='km'?'Kilometres':'Engine hours'],['Notes',p.notes]].map(([k,v])=>html`<div key=${k} class="flex gap-2 text-[12.5px]"><span class="text-muted w-[92px] shrink-0">${k}</span><span class=${v?'':'text-faint'}>${v||'–'}</span></div>`)}
+          ${(()=>{const d=v=>v?fmtShort(parse(String(v).slice(0,10)))+' '+parse(String(v).slice(0,10)).getFullYear():'';const kg=v=>v?fmtN(v)+' kg':'';
+            const rows=[['Rego',[a.m.rego,p.rego_status].filter(Boolean).join(' · ')],['Rego expiry',d(p.rego_expiry),dueTone(p.rego_expiry)],['Inspection',[p.coi_number,p.coi_due&&'due '+d(p.coi_due)].filter(Boolean).join(' · '),dueTone(p.coi_due)],
+              ['Purpose',p.purpose],['Weights',[p.gvm&&'GVM '+kg(p.gvm),p.gcm&&'GCM '+kg(p.gcm),p.atm&&'ATM '+kg(p.atm),p.tare&&'Tare '+kg(p.tare)].filter(Boolean).join(' · ')],['NHV code',p.nhvc]].filter(r=>r[1]);
+            return rows.length>0&&html`<div class="border-t border-line mt-1.5 pt-1.5 grid gap-1 ap-reg"><span class="label">Registration</span>${rows.map(([k,v,tone])=>html`<div key=${k} class="flex gap-2 text-[12.5px]"><span class="text-muted w-[92px] shrink-0">${k}</span><span style=${tone?{color:tone.c,fontWeight:600}:null}>${v}${tone?` (${tone.t})`:''}</span></div>`)}</div>`})()}
         </section>
         <section class="rounded-lg border border-line p-3 grid gap-1 content-start">
           <div class="flex items-center gap-2"><span class="label flex-1">Meters</span>${perms.work&&html`<button id="ap-reading" type="button" class="text-[12px] text-muted hover:text-ink inline-flex items-center gap-1" onClick=${()=>open({k:'reading',a})}>${Icon.plus} Reading</button>`}</div>
@@ -809,22 +813,33 @@ function MachinesTab({ctx,open}){
   </section>`;
 }
 
+/* registration details on a machine's fleet profile (supabase/maintenance.sql adds the columns) */
+const REG_FIELDS=[['rego_status','Rego status','text'],['rego_expiry','Rego expiry','date'],['purpose','Purpose of use','text'],['coi_number','Inspection (COI) no.','text'],['coi_due','Inspection due','date'],
+  ['gvm','GVM (kg)','int'],['gcm','GCM (kg)','int'],['atm','ATM (kg)','int'],['tare','Tare (kg)','int'],['nhvc','NHV charging code','text']];
+const regVal=(t,v)=>{v=String(v??'').trim();if(!v)return null;if(t==='int'){const n=parseInt(v.replace(/[^\d]/g,''),10);return isFinite(n)?n:null}return v};
+/* how soon a date is: past (red), within 30 days (amber), or fine */
+const dueTone=d=>{if(!d)return null;const n=diffDays(TODAY,parse(String(d).slice(0,10)));return n<0?{c:'var(--bad)',t:'overdue'}:n<=30?{c:'hsl(30 90% 38%)',t:`in ${n} day${n===1?'':'s'}`}:null};
 /* add or change a machine: its schedule details (planners and administrators) and its fleet details (maintenance staff) in one place */
 function MachineDialog({ctx,a,isNew,startDel,onClose}){
   const {sb,data,setData,perms,canEdit,notify,reload}=ctx;const m=a?a.m:{};const p=a&&a.p||{};
   const crews=data.resources.filter(r=>r.type==='crew');const cats=machineCatsOf(data);
   const [f,setF]=useState({name:m.name||'',sub:m.sub||'',category:m.category||'',rego:m.rego||'',crewId:m.crewId||'',
-    make:p.make||'',model:p.model||'',year:p.year?String(p.year):'',serial:p.serial||'',meter_type:a?a.mt:'hours',retired:!!p.retired,notes:p.notes||''});
+    make:p.make||'',model:p.model||'',year:p.year?String(p.year):'',serial:p.serial||'',meter_type:a?a.mt:'hours',retired:!!p.retired,notes:p.notes||'',
+    ...Object.fromEntries(REG_FIELDS.map(([k])=>[k,p[k]==null?'':String(p[k]).slice(0,k.endsWith('_expiry')||k.endsWith('_due')?10:99)]))});
   const [err,setErr]=useState('');const [busy,setBusy]=useState(false);const [del,setDel]=useState(!!startDel);
   const canR=canEdit;const canP=perms.work;
   const bookings=a?data.blocks.filter(b=>b.resourceId===m.id).length:0;
-  const profRow=id=>({asset_id:id,make:f.make.trim()||null,model:f.model.trim()||null,year:f.year?+f.year:null,serial:f.serial.trim()||null,meter_type:f.meter_type,retired:f.retired,notes:f.notes.trim()||null});
-  const profChanged=()=>{const r=profRow(m.id),o={make:p.make||null,model:p.model||null,year:p.year||null,serial:p.serial||null,meter_type:a?a.mt:'hours',retired:!!p.retired,notes:p.notes||null};
+  /* registration columns are only sent when filled in or already there (so this still saves before supabase/maintenance.sql has added them) */
+  const regRow=()=>Object.fromEntries(REG_FIELDS.filter(([k])=>k in p||String(f[k]).trim()).map(([k,,t])=>[k,regVal(t,f[k])]));
+  const profRow=id=>({asset_id:id,make:f.make.trim()||null,model:f.model.trim()||null,year:f.year?+f.year:null,serial:f.serial.trim()||null,meter_type:f.meter_type,retired:f.retired,notes:f.notes.trim()||null,...regRow()});
+  const profChanged=()=>{const r=profRow(m.id),o={make:p.make||null,model:p.model||null,year:p.year||null,serial:p.serial||null,meter_type:a?a.mt:'hours',retired:!!p.retired,notes:p.notes||null,
+      ...Object.fromEntries(REG_FIELDS.map(([k,,t])=>[k,regVal(t,p[k]==null?'':String(p[k]).slice(0,k.endsWith('_expiry')||k.endsWith('_due')?10:99))]))};
     return Object.keys(o).some(k=>(r[k]==null?null:r[k])!==(o[k]==null?null:o[k]))||(!a||!a.p)&&(r.make||r.model||r.year||r.serial||r.notes||r.retired||(isNew&&r.meter_type!=='hours'))};
   const saveProf=async id=>{const row=profRow(id);
     for(let i=0;i<10;i++){   /* a new machine reaches the database a moment after it's added */
       const {error}=a&&a.p?await sb.from('asset_profiles').update(row).eq('asset_id',id):await sb.from('asset_profiles').insert(row);
-      if(!error)return null;if(!isNew||!/roster|23503/.test(errMsg(error)+(error.code||'')))return errMsg(error);await new Promise(r=>setTimeout(r,700))}
+      if(!error)return null;if(/rego_|coi_|gvm|gcm|atm|tare|nhvc|purpose/.test(errMsg(error))&&/column/i.test(errMsg(error)))return 'Registration details need a database update: an administrator needs to run supabase/maintenance.sql (or reg_fields.sql) in Supabase.';
+      if(!isNew||!/roster|23503/.test(errMsg(error)+(error.code||'')))return errMsg(error);await new Promise(r=>setTimeout(r,700))}
     return 'The machine was added, but its fleet details couldn’t be saved yet. Open it again to add them.'};
   const save=async()=>{setErr('');const name=f.name.trim();
     if(canR){if(!name){setErr('Enter the machine’s fleet number.');return}
@@ -833,7 +848,10 @@ function MachineDialog({ctx,a,isNew,startDel,onClose}){
     if(canR){const ros={name,sub:f.sub.trim()||'Machine',category:f.category.trim(),rego:f.rego.trim().toUpperCase(),crewId:f.crewId||null};
       if(isNew)setData(d=>({...d,resources:[...d.resources,{id,type:'machine',...ros,hue:HUES[d.resources.length%HUES.length],visible:true}]}));
       else if(['name','sub','category','rego','crewId'].some(k=>(m[k]||'')!==(ros[k]||'')))setData(d=>({...d,resources:d.resources.map(r=>r.id===id?{...r,...ros}:r)}))}
-    if(canP&&profChanged()){setBusy(true);const e=await saveProf(id);setBusy(false);if(e){setErr(e);if(!isNew)return}else reload()}
+    if(canP&&profChanged()){setBusy(true);const e=await saveProf(id);
+      /* an inspection date: make sure the machine has its yearly COI plan (only administrators can add plans) */
+      if(!e&&f.coi_due&&perms.mgr&&window.ensureCoiPlan)try{if(await window.ensureCoiPlan(sb,id,f.coi_due)==='added')notify('Yearly COI inspection plan set up')}catch(x){}
+      setBusy(false);if(e){setErr(e);if(!isNew)return}else reload()}
     notify(isNew?`${name} added`:'Machine saved');onClose()};
   const remove=async()=>{if(!perms.admin)return;
     setData(d=>({...d,resources:d.resources.filter(r=>r.id!==m.id),blocks:d.blocks.filter(b=>b.resourceId!==m.id).map(b=>b.plantIds&&b.plantIds.includes(m.id)?{...b,...withShiftMach(b,(k,ids)=>ids.filter(x=>x!==m.id))}:b)}));
@@ -866,6 +884,10 @@ function MachineDialog({ctx,a,isNew,startDel,onClose}){
           <option value="hours">Engine hours</option><option value="km">Kilometres</option><option value="both">Hours and kilometres</option></select><//>
         ${T('mc-notes','Notes','notes','e.g. owner, hire, tyre size','',!canP)}
         ${!isNew&&html`<label class="inline-flex items-center gap-2 text-[13px] cursor-pointer sm:col-span-2"><input id="mc-retired" type="checkbox" class="w-4 h-4" checked=${f.retired} disabled=${!canP} onChange=${e=>setF({...f,retired:e.target.checked})}/>Retired (kept for history, left out of the fleet counts)</label>`}
+      </div>
+      <div class="grid sm:grid-cols-2 gap-3 border-t border-line pt-3" id="mc-reg">
+        <div class="sm:col-span-2 label">Registration and inspection</div>
+        ${REG_FIELDS.map(([k,l,t])=>html`<${Fld} key=${k} label=${l}><input id=${'mc-'+k} type=${t==='date'?'date':t==='int'?'number':'text'} class=${'field'+(t!=='text'||k==='coi_number'||k==='nhvc'?' mono':'')} style=${fs} value=${f[k]} disabled=${!canP} onInput=${e=>setF({...f,[k]:e.target.value})}/><//>`)}
       </div>
     </div><//>`;
 }
