@@ -322,7 +322,8 @@ function useFloatPlan(data,setData,canEdit){
 /* ---------- the screen ---------- */
 const STAT={done:['Done','hsl(145 55% 30%)','hsl(145 50% 92%)'],now:['On the go','hsl(212 75% 34%)','hsl(212 80% 92%)'],next:['Next','hsl(212 75% 34%)','hsl(212 80% 95%)'],
   late:['Late','hsl(0 72% 40%)','hsl(0 80% 95%)'],tight:['Tight','hsl(30 85% 34%)','hsl(38 95% 90%)'],overdue:['Not ticked off','hsl(30 85% 34%)','hsl(38 95% 90%)'],plan:['Planned','var(--muted)','var(--sunken)']};
-const onRoad=r=>(r.deadhead&&r.deadhead.min>0)?r.leave:r.depart;
+/* the headline time: the gear loaded and leaving the pick-up (the empty drive to get there is in the steps) */
+const onRoad=r=>r.depart;
 /* the steps of a trip, so a time like "loading 8:20" isn't read as the float moving */
 const stepsOf=r=>[...(r.deadhead&&r.deadhead.min>0?[['Drive empty',r.leave,r.pick,`from ${r.fromLoc&&r.fromLoc.key==='yard'?'the yard':'the last drop'}`]]:[]),
   ['Load',r.pick,r.depart,r.from.job],['Drive loaded',r.depart,r.arrive,''],['Unload',r.arrive,r.done,r.to.job]];
@@ -357,8 +358,9 @@ function FloatsScreen({data,setData,notify}){
   const Card=r=>{const st=statusOf(r,now,nextId);const [sl,sc,sb]=STAT[st];const ed=edit===r.id;
     return html`<li key=${r.id} class="panel p-3 sm:p-4 grid gap-2 fl-run" data-st=${st} style=${st==='now'?{boxShadow:'inset 3px 0 0 hsl(212 75% 45%)'}:st==='late'?{boxShadow:'inset 3px 0 0 hsl(0 72% 45%)'}:null}>
       <div class="flex items-start gap-3 flex-wrap">
-        <div class="grid leading-tight"><span class="text-[11px] font-semibold uppercase tracking-wide text-muted">On the road</span>
-          <span class="mono text-[20px] sm:text-[22px] font-semibold leading-none">${hm(onRoad(r))}<span class="text-faint text-[14px] font-normal"> → done ${hm(r.done)}</span></span></div>
+        <div class="grid leading-tight"><span class="text-[11px] font-semibold uppercase tracking-wide text-muted">Loaded &amp; leaving</span>
+          <span class="mono text-[20px] sm:text-[22px] font-semibold leading-none">${hm(onRoad(r))}<span class="text-faint text-[14px] font-normal"> → done ${hm(r.done)}</span></span>
+          ${r.deadhead.min>0&&html`<span class="text-[12px] text-muted">Float leaves for it ${hm(r.leave)}</span>`}</div>
         <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:sc,background:sb}}>${sl}</span>
         ${r.fixed&&!r.ticked&&html`<span class="text-[11px] text-muted">time set by hand</span>`}
         ${r.fatigue&&!r.ticked&&html`<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full fl-fatigue" style=${{color:'#fff',background:'hsl(0 72% 45%)'}} title="Breaks the driver’s 10-hour break or 12-hour shift (only a pick-up time set by hand can)">Driver’s hours rule broken</span>`}
@@ -443,7 +445,7 @@ function FloatsScreen({data,setData,notify}){
           ${late>0&&html`<span class="text-[11.5px] font-semibold px-2 py-0.5 rounded-full" style=${{color:STAT.late[1],background:STAT.late[2]}}>${late} late</span>`}
           <span class="ml-auto text-[12.5px] text-muted inline-flex items-center gap-1">Open day ${Icon.chevR}</span></button>
         ${rs.length>0&&html`<ol class="divide-y divide-line">${rs.map(r=>{const st=statusOf(r,now,nextId);const [sl,sc,sb]=STAT[st];return html`<li key=${r.id} class="grid grid-cols-[120px_minmax(260px,1.1fr)_minmax(0,2fr)] gap-6 px-5 py-4 fl-weekrow">
-          <div class="grid content-start gap-1"><span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted">On the road</span><span class="mono text-[20px] font-semibold leading-none">${hm(onRoad(r))}</span><span class="text-[12.5px] text-muted">load ${hm(r.pick)} · done ${hm(r.done)}</span>
+          <div class="grid content-start gap-1"><span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted">Loaded &amp; leaving</span><span class="mono text-[20px] font-semibold leading-none">${hm(onRoad(r))}</span><span class="text-[12.5px] text-muted">${r.deadhead.min>0?`leave for it ${hm(r.leave)} · `:''}done ${hm(r.done)}</span>
             <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full justify-self-start" style=${{color:sc,background:sb}}>${sl}</span></div>
           <div class="grid content-start gap-1.5">${r.moves.map(m=>html`<div key=${m.id} class="rounded-lg border border-line px-3 py-2 leading-tight">
               <div class="text-[14px] font-semibold">${m.name}${m.rego?html` <span class="mono text-[12px] text-muted font-normal">${m.rego}</span>`:''}</div>
@@ -589,7 +591,7 @@ function FloatLoads({data,cfg,set:set0}){
 /* ---------- the run sheet ---------- */
 function runSheetText(cfg,runs,k){
   const d=parse(k);const L=[`${cfg.floatName||'Float'} run sheet – ${WD[d.getDay()]} ${fmtShort(d)} ${d.getFullYear()}`];if(cfg.driver)L.push(`Driver: ${cfg.driver}`);L.push('');
-  runs.forEach((r,i)=>{L.push(`${i+1}. On the road ${hm(onRoad(r))}`);r.moves.forEach(m=>L.push(`   - ${m.name}${m.desc?' - '+m.desc:''}${m.cat?' ('+m.cat+')':''}${m.rego?' - rego '+m.rego:''}`));
+  runs.forEach((r,i)=>{L.push(`${i+1}. Loaded and leaving ${hm(onRoad(r))}${r.deadhead.min>0?` (leave for it ${hm(r.leave)})`:''}`);r.moves.forEach(m=>L.push(`   - ${m.name}${m.desc?' - '+m.desc:''}${m.cat?' ('+m.cat+')':''}${m.rego?' - rego '+m.rego:''}`));
     L.push(`   From: ${r.from.job}${r.from.crew?' – '+r.from.crew:''}${r.from.addr?', '+r.from.addr:''}`);
     L.push(`   To:   ${r.to.job}${r.to.crew?' – '+r.to.crew:''}${r.to.addr?', '+r.to.addr:''}`);
     L.push(`   Free from ${whenTxt(r.earliest,k)} · ${r.to.yard?'back at the yard by':'needed by'} ${whenTxt(r.latest,k)} · ${r.drive.km!=null?Math.round(r.drive.km)+' km, ':''}${durTxt(r.drive.min)} drive`);
@@ -639,7 +641,7 @@ async function runSheetPdf(data,cfg,runs,k){
     let yy=top+P+5;
     /* number and when the float is on the road; done time and distance on the right */
     font(14,true);doc.text(`${i+1}.`,x0+P,yy);font(14,true);doc.text(hm(onRoad(r)),x0+P+9,yy);
-    const ow=doc.getTextWidth(hm(onRoad(r)));font(9,false,MUTE);doc.text('on the road',x0+P+9+ow+2,yy);
+    const ow=doc.getTextWidth(hm(onRoad(r)));font(9,false,MUTE);doc.text(clean(`loaded & leaving${r.deadhead.min>0?'   (leave for it '+hm(r.leave)+')':''}`),x0+P+9+ow+2,yy);
     font(9,false,MUTE);doc.text(clean(`done ${hm(r.done)}${r.drive.km!=null?'   -   '+Math.round(r.drive.km)+' km':''}   -   ${durTxt(r.drive.min)} drive`),x0+CW-P,yy,{align:'right'});
     yy+=3;
     gear.forEach(g=>{const gh=Math.max(7,g.what.length*LH(9.5)+3);doc.setFillColor(243,243,241);doc.setDrawColor(225,225,222);doc.roundedRect(x0+P,yy,CW-2*P,gh,1.2,1.2,'FD');
