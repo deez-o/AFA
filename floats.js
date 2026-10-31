@@ -358,7 +358,7 @@ function FloatsScreen({data,setData,notify}){
   const Card=r=>{const st=statusOf(r,now,nextId);const [sl,sc,sb]=STAT[st];const ed=edit===r.id;
     return html`<li key=${r.id} class="panel p-3 sm:p-4 grid gap-2 fl-run" data-st=${st} style=${st==='now'?{boxShadow:'inset 3px 0 0 hsl(212 75% 45%)'}:st==='late'?{boxShadow:'inset 3px 0 0 hsl(0 72% 45%)'}:null}>
       <div class="flex items-start gap-3 flex-wrap">
-        <div class="grid leading-tight"><span class="text-[11px] font-semibold uppercase tracking-wide text-muted">Loaded &amp; leaving</span>
+        <div class="grid leading-tight"><span class="text-[11px] font-semibold uppercase tracking-wide text-muted">Loaded & leaving</span>
           <span class="mono text-[20px] sm:text-[22px] font-semibold leading-none">${hm(onRoad(r))}<span class="text-faint text-[14px] font-normal"> → done ${hm(r.done)}</span></span>
           ${r.deadhead.min>0&&html`<span class="text-[12px] text-muted">Float leaves for it ${hm(r.leave)}</span>`}</div>
         <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full" style=${{color:sc,background:sb}}>${sl}</span>
@@ -445,7 +445,7 @@ function FloatsScreen({data,setData,notify}){
           ${late>0&&html`<span class="text-[11.5px] font-semibold px-2 py-0.5 rounded-full" style=${{color:STAT.late[1],background:STAT.late[2]}}>${late} late</span>`}
           <span class="ml-auto text-[12.5px] text-muted inline-flex items-center gap-1">Open day ${Icon.chevR}</span></button>
         ${rs.length>0&&html`<ol class="divide-y divide-line">${rs.map(r=>{const st=statusOf(r,now,nextId);const [sl,sc,sb]=STAT[st];return html`<li key=${r.id} class="grid grid-cols-[120px_minmax(260px,1.1fr)_minmax(0,2fr)] gap-6 px-5 py-4 fl-weekrow">
-          <div class="grid content-start gap-1"><span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted">Loaded &amp; leaving</span><span class="mono text-[20px] font-semibold leading-none">${hm(onRoad(r))}</span><span class="text-[12.5px] text-muted">${r.deadhead.min>0?`leave for it ${hm(r.leave)} · `:''}done ${hm(r.done)}</span>
+          <div class="grid content-start gap-1"><span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted">Loaded & leaving</span><span class="mono text-[20px] font-semibold leading-none">${hm(onRoad(r))}</span><span class="text-[12.5px] text-muted">${r.deadhead.min>0?`leave for it ${hm(r.leave)} · `:''}done ${hm(r.done)}</span>
             <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full justify-self-start" style=${{color:sc,background:sb}}>${sl}</span></div>
           <div class="grid content-start gap-1.5">${r.moves.map(m=>html`<div key=${m.id} class="rounded-lg border border-line px-3 py-2 leading-tight">
               <div class="text-[14px] font-semibold">${m.name}${m.rego?html` <span class="mono text-[12px] text-muted font-normal">${m.rego}</span>`:''}</div>
