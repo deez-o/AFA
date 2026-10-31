@@ -137,13 +137,25 @@ function hitShape(g,s,P,W,H){const T=([x,y])=>[x*W,y*H];const tol=Math.max(12,s.
   if(s.t==='circle'){const cx=(a[0]+b[0])/2,cy=(a[1]+b[1])/2,rx=Math.max(1,Math.abs(b[0]-a[0])/2),ry=Math.max(1,Math.abs(b[1]-a[1])/2);const k=Math.hypot((P[0]-cx)/rx,(P[1]-cy)/ry);return Math.abs(k-1)*Math.min(rx,ry)<tol||k<1}
   return false}
 const moved=(s,dx,dy)=>{const m=([x,y])=>[x+dx,y+dy];return s.t==='pen'?{...s,pts:s.pts.map(m)}:s.t==='text'?{...s,p:m(s.p)}:{...s,a:m(s.a),b:m(s.b)}};
-function SketchDialog({initial,aspect:a0,onSave,onClose}){
+function SketchDialog({initial,aspect:a0,onSave,onClose,layers}){
   /* the page's shape: kept from the first drawing; a new one is portrait on an upright phone, landscape otherwise */
   const [AR]=useState(()=>a0||(window.innerHeight>window.innerWidth*1.15?3/4:4/3));
   const cv=useRef(null),box=useRef(null);const [hist,setHist]=useState(()=>[initial||[]]);const shapes=hist[hist.length-1];
   const [tool,setTool]=useState('pen');const [col,setCol]=useState(DG_COLOURS[0]);const [thick,setThick]=useState(false);
   const cur=useRef(null);const drag=useRef(null);const [,tick]=useState(0);const [txt,setTxt]=useState(null);const [sz,setSz]=useState({w:300,h:225});
-  const [sel,setSel]=useState(null);const [mine,setMine]=useState(quickMine);
+  const [sel,setSel]=useState(null);const [mine,setMine]=useState(quickMine);const [ai,setAi]=useState({busy:false,msg:''});
+  /* "Tidy with AI": the drawing is sent to api/sketch.js and comes back neat (straight lines, tidy labels, a key for the layers);
+     it goes on the undo list, so Undo brings the hand drawing back */
+  const tidy=async()=>{const live=window.__ffLive;if(!live||!live.sb){setAi({busy:false,msg:'Sign in again.'});return}
+    if(typeof navigator!=='undefined'&&navigator.onLine===false){setAi({busy:false,msg:'No reception: tidy it when you’re back in range.'});return}
+    setSel(null);setAi({busy:true,msg:''});
+    try{const W=AR>=1?1000:750,H=AR>=1?750:1000;const c=document.createElement('canvas');c.width=W;c.height=H;drawShapes(c.getContext('2d'),W,H,shapes,false,null);
+      const {data:{session}}=await live.sb.auth.getSession();const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),60000);
+      const r=await fetch('/api/sketch',{method:'POST',signal:ctl.signal,headers:{'Content-Type':'application/json',Authorization:'Bearer '+(session&&session.access_token||'')},
+        body:JSON.stringify({image:c.toDataURL('image/png').split(',')[1],mediaType:'image/png',shapes,aspect:AR,layers:(layers||[]).map(l=>({layer:l.layer,depth:l.depth,mix:l.mix,area:l.area}))})});clearTimeout(t);
+      const j=await r.json().catch(()=>({}));if(!r.ok||!Array.isArray(j.shapes)||!j.shapes.length)throw new Error(j.error||('The AI answered '+r.status));
+      push(j.shapes);setAi({busy:false,msg:'Tidied by AI. Check it, change anything with the tools, or press Undo to go back to your drawing.'+(j.note?' ('+j.note+')':'')})}
+    catch(e){setAi({busy:false,msg:'Couldn’t tidy it: '+(e.name==='AbortError'?'it took too long':(e.message||e))})}};
   const push=n=>setHist(h=>[...h,n]);
   /* the page fits the space inside the box (less its padding), so the whole drawing shows without zooming out;
      refitted when the space changes (turning the phone, the tools wrapping onto more rows) */
@@ -188,6 +200,7 @@ function SketchDialog({initial,aspect:a0,onSave,onClose}){
       <button type="button" id="dg-thick" class=${tb} style=${{borderColor:'var(--line)'}} onClick=${()=>setThick(!thick)} title="Line thickness and text size">${thick?'Thick':'Thin'}</button>
       <button type="button" id="dg-undo" class=${tb} style=${{borderColor:'var(--line)'}} disabled=${hist.length<2} onClick=${()=>{setSel(null);setHist(h=>h.length>1?h.slice(0,-1):h)}}>Undo</button>
       <button type="button" id="dg-clear" class=${tb} style=${{borderColor:'var(--line)'}} disabled=${!shapes.length} onClick=${()=>{setSel(null);push([])}}>Clear</button>
+      <button type="button" id="dg-ai" class=${tb} style=${{borderColor:'var(--accent)',color:'var(--accent)',background:'var(--accent-soft)'}} disabled=${!shapes.length||ai.busy} onClick=${tidy} title="Neaten the drawing and label the layers">${ai.busy?'Tidying…':'✦ Tidy with AI'}</button>
     </div>
     <div class="h-[46px] shrink-0 px-3 flex items-center gap-2 border-b border-line text-[12.5px] overflow-hidden" style=${{background:selS?'var(--accent-soft)':'transparent'}}>
       ${selS?html`<span class="flex-1 min-w-0 truncate" id="dg-selbar">${({pen:'Drawing',line:'Line',arrow:'Arrow',box:'Box',circle:'Circle',text:'Label'})[selS.t]} selected · drag to move it</span>
@@ -208,7 +221,7 @@ function SketchDialog({initial,aspect:a0,onSave,onClose}){
       </div>
     </div>
     <div class="flex items-center gap-2 px-3 py-2 border-t border-line" style=${{background:'var(--surface)',paddingBottom:'max(8px, env(safe-area-inset-bottom, 0px))'}}>
-      <span class="text-[12px] text-muted flex-1">${shapes.length} mark${shapes.length===1?'':'s'}</span>
+      <span class=${'text-[12px] flex-1 min-w-0 '+(ai.msg?'':'text-muted')} id="dg-ai-msg" style=${ai.msg&&/^Couldn/.test(ai.msg)?{color:'var(--bad)'}:null}>${ai.busy?'Tidying the drawing… (about 20–40 seconds)':ai.msg||`${shapes.length} mark${shapes.length===1?'':'s'}`}</span>
       <button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="qa-sketch-save" type="button" class="btn btn-primary" disabled=${!shapes.length} onClick=${save}>Save drawing</button>
     </div></div>`;
 }
@@ -236,7 +249,7 @@ const DIAGRAM={id:'diagram',label:'Field site diagram',short:'Site diagram',
       ${f.canEdit&&html`<div class="flex flex-wrap gap-2"><button id="qa-dg-draw" type="button" class="btn" onClick=${()=>setDraw(true)}>${Icon.pencil} ${d.sketch?'Redraw':'Draw the diagram'}</button>
         ${d.sketch&&html`<button type="button" class="btn" onClick=${()=>set({sketch:null,shapes:null})}>Remove drawing</button>`}
         ${(d.photos||[]).length<4&&html`<label class="btn cursor-pointer">${Icon.plus} ${busy?'Adding…':'Photo of a hand-drawn map'}<input id="qa-dg-photo" type="file" accept="image/*" capture="environment" multiple class="sr-only" onChange=${e=>{addPhotos(e.target.files);e.target.value=''}}/></label>`}</div>`}
-      ${draw&&html`<${SketchDialog} initial=${d.shapes||null} aspect=${d.shapes&&d.shapes.length?d.aspect||4/3:null} onClose=${()=>setDraw(false)} onSave=${r=>{set({sketch:r.png,shapes:r.shapes,aspect:r.aspect});setDraw(false)}}/>`}<//>`},
+      ${draw&&html`<${SketchDialog} layers=${layersOf(d)} initial=${d.shapes||null} aspect=${d.shapes&&d.shapes.length?d.aspect||4/3:null} onClose=${()=>setDraw(false)} onSave=${r=>{set({sketch:r.png,shapes:r.shapes,aspect:r.aspect});setDraw(false)}}/>`}<//>`},
   pdf:o=>{const d=o.p.forms.diagram;const doc=o.doc;o.newPage('p');o.page('FIELD SITE DIAGRAM');let y=24;
     y=kvGrid(o,y,[['Job location',o.lot.location],['Customer',o.lot.client],['Date',dateTxt(o.lot.date)],['Job number',o.lot.job_no],['Start chainage',o.lot.start_ch],['End chainage',o.lot.end_ch],['Map prepared by',d.prepared_by]]);
     y=table(o,y+2,[['Layer type',1.4],['Nominal depth',1],['Mix type',1.4],['Area m²',1]],layersOf(d).map((L,i)=>[L.layer||`Layer ${i+1}`,L.depth,L.mix,L.area?fmtN(n0(L.area)):'']));

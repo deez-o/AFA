@@ -75,6 +75,9 @@
     },
     "api/docket.js": {
       "maxDuration": 30
+    },
+    "api/sketch.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
