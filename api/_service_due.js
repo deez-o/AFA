@@ -78,7 +78,7 @@ async function raiseDueServices(D, { assignee = 'Bells Diesel', dryRun = false }
     const m = { id: it.id, ...(it.data || {}) };
     if (prof.get(m.id) && prof.get(m.id).retired) continue;
     const cat = catOf(m).toLowerCase();
-    for (const plan of plans.filter(p => p.asset_id === m.id || (cat && planCats(p).includes(cat)))) {
+    for (const plan of plans.filter(p => p.asset_id === m.id || (Array.isArray(p.asset_ids) && p.asset_ids.includes(m.id)) || (cat && planCats(p).includes(cat)))) {
       const last = lastRec.get(m.id + '|' + plan.id) || null;
       const due = planDue({ machine: m, profile: prof.get(m.id), plan, last, cur: cur.get(m.id) || {}, today });
       if (!due) continue;

@@ -56,6 +56,7 @@ const ivUnit=p=>p.every_hours?'hours':'km';
 /* a plan can cover several machine categories (categories), category is the first of them */
 const planCatList=p=>{const l=Array.isArray(p&&p.categories)&&p.categories.length?p.categories:(p&&p.category?[p.category]:[]);return [...new Set(l.map(c=>String(c).trim()).filter(Boolean))]};
 const planCats=p=>planCatList(p).map(c=>c.toLowerCase());
+const planIds=p=>Array.isArray(p&&p.asset_ids)?p.asset_ids:[];   /* a plan for several hand-picked machines */
 const ivsOf=p=>Array.isArray(p&&p.intervals)?p.intervals.filter(v=>+v.every>0).sort((a,b)=>a.every-b.every):[];
 const ivLabel=(p,v)=>(v.label||'').trim()||`${fmtN(+v.every)} ${ivUnit(p)==='km'?'km':'h'} service`;
 function stageOf(p,last){const ivs=ivsOf(p);if(ivs.length<2||!last)return null;const v0=last[ivUnit(p)];if(v0==null)return null;
@@ -77,7 +78,7 @@ function buildModel(data,db){
   const machines=data.resources.filter(r=>r.type==='machine');
   const lastPs=new Map();(db.prestarts||[]).forEach(p=>{if(!lastPs.has(p.asset_id))lastPs.set(p.asset_id,p)});   /* newest first */
   const meterType=m=>{const p=prof.get(m.id);if(p&&p.meter_type)return p.meter_type;return /truck/i.test([machCatOf(m),m.name,m.sub].join(' '))?'both':'hours'};
-  const plansFor=m=>db.service_plans.filter(p=>p.active&&(p.asset_id===m.id||planCats(p).includes(machCatOf(m).toLowerCase())));
+  const plansFor=m=>db.service_plans.filter(p=>p.active&&(p.asset_id===m.id||planIds(p).includes(m.id)||planCats(p).includes(machCatOf(m).toLowerCase())));
   const planStatus=(m,p)=>{const mt=meterType(m);const last=recs.find(r=>r.asset_id===m.id&&r.plan_id===p.id);
     if(!last)return {state:'nobase',parts:[],last:null};
     const cur=meters.get(m.id)||{};const parts=[];
@@ -484,16 +485,35 @@ function BreakdownDialog({ctx,a,onClose}){
     <p class="text-[12px] text-muted mt-3">This creates a breakdown work order for the maintenance team.${' '}If it isn’t safe, the machine shows as out of service and is blocked on the schedule for today until the work order is updated.</p><//>`;
 }
 
+/* pick several machines for a plan: a drop-down list with tick boxes and a search */
+function MachinePick({machines,ids,onChange}){
+  const [open,setOpen]=useState(false);const [q,setQ]=useState('');const ref=React.useRef(null);
+  useEffect(()=>{if(!open)return;const out=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};document.addEventListener('pointerdown',out);return()=>document.removeEventListener('pointerdown',out)},[open]);
+  const ql=q.trim().toLowerCase();const list=machines.filter(m=>!ql||[m.name,m.sub,m.rego,m.category].join(' ').toLowerCase().includes(ql));
+  const on=new Set(ids);const pickedNames=machines.filter(m=>on.has(m.id)).map(m=>m.name);
+  const toggle=id=>onChange(on.has(id)?ids.filter(x=>x!==id):[...ids,id]);
+  return html`<div class="grid gap-1 min-w-0 sm:col-span-2 relative" ref=${ref} id="sp-machines"><span class="label">Machines <span class="normal-case font-normal tracking-normal text-muted">· tick each one</span></span>
+    <button type="button" class="field text-left flex items-center gap-2" style=${fs} onClick=${()=>setOpen(o=>!o)} aria-expanded=${open}>
+      <span class=${'flex-1 truncate'+(ids.length?'':' text-faint')}>${ids.length?`${ids.length} machine${ids.length===1?'':'s'}: ${pickedNames.join(', ')}`:'Choose machines…'}</span><span class="text-muted">${Icon.chevD||'▾'}</span></button>
+    ${open&&html`<div class="absolute left-0 right-0 top-full mt-1 z-30 panel shadow-lg p-2 grid gap-1.5">
+      <input class="field" style=${fs} placeholder="Search machine #, description, rego, category" value=${q} onInput=${e=>setQ(e.target.value)} autoFocus=${true}/>
+      <div class="flex items-center gap-3 text-[12px] px-1"><button type="button" class="underline text-muted hover:text-ink" onClick=${()=>onChange([...new Set([...ids,...list.map(m=>m.id)])])}>Tick all shown</button><button type="button" class="underline text-muted hover:text-ink" onClick=${()=>onChange(ids.filter(id=>!list.some(m=>m.id===id)))}>Untick all shown</button><span class="ml-auto text-muted">${ids.length} ticked</span></div>
+      <div class="max-h-[260px] overflow-y-auto grid">${list.map(m=>html`<label key=${m.id} class="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-sunken cursor-pointer text-[13px] sp-mach">
+        <input type="checkbox" class="w-4 h-4 shrink-0" style=${{accentColor:'var(--accent)'}} checked=${on.has(m.id)} onChange=${()=>toggle(m.id)}/>
+        <span class="mono font-semibold">${m.name}</span><span class="text-muted truncate flex-1">${m.sub||''}</span><span class="text-[11.5px] text-faint shrink-0">${[m.category,m.rego].filter(Boolean).join(' · ')}</span></label>`)}
+        ${!list.length&&html`<div class="text-[12.5px] text-muted px-1.5 py-2">No machines match.</div>`}</div></div>`}
+  </div>`;
+}
 function PlanDialog({ctx,plan,onClose}){
   const {sb,notify,reload,data}=ctx;
-  const [f,setF]=useState(()=>plan?{...plan,scope:plan.asset_id?'asset':'category',every_hours:plan.every_hours??'',every_km:plan.every_km??'',every_days:plan.every_days??'',category:plan.category||'',cats:planCatList(plan),asset_id:plan.asset_id||'',
+  const [f,setF]=useState(()=>plan?{...plan,scope:planIds(plan).length?'machines':plan.asset_id?'asset':'category',ids:planIds(plan),every_hours:plan.every_hours??'',every_km:plan.every_km??'',every_days:plan.every_days??'',category:plan.category||'',cats:planCatList(plan),asset_id:plan.asset_id||'',
       multi:ivsOf(plan).length>1,unit:ivUnit(plan),ivs:ivsOf(plan).length>1?ivsOf(plan).map(v=>({every:String(v.every),label:v.label||'',notes:v.notes||''})):[]}
-    :{scope:'category',category:'',cats:[],asset_id:'',name:'',every_hours:'',every_km:'',every_days:'',warn_hours:50,warn_km:1000,warn_days:14,active:true,multi:false,unit:'hours',ivs:[]});
+    :{scope:'category',category:'',cats:[],ids:[],asset_id:'',name:'',every_hours:'',every_km:'',every_days:'',warn_hours:50,warn_km:1000,warn_days:14,active:true,multi:false,unit:'hours',ivs:[]});
   const setIv=(i,p)=>setF(x=>({...x,ivs:x.ivs.map((v,k)=>k===i?{...v,...p}:v)}));
   const startMulti=()=>setF(x=>({...x,multi:true,ivs:x.ivs.length?x.ivs:[250,500,750,1000].map(n=>({every:String(n),label:'',notes:''}))}));
   const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
   const save=async()=>{setErr('');if(!f.name.trim()){setErr('Name the service, e.g. 250 hr service.');return}
-    if(f.scope==='category'&&!f.cats.length){setErr('Pick at least one machine category.');return}if(f.scope==='asset'&&!f.asset_id){setErr('Pick the machine.');return}
+    if(f.scope==='category'&&!f.cats.length){setErr('Pick at least one machine category.');return}if(f.scope==='asset'&&!f.asset_id){setErr('Pick the machine.');return}if(f.scope==='machines'&&!f.ids.length){setErr('Tick at least one machine.');return}
     let ivs=null;
     if(f.multi){ivs=f.ivs.filter(v=>String(v.every).trim()!==''||v.label.trim()||v.notes.trim()).map(v=>({every:+v.every,label:v.label.trim(),notes:v.notes.trim()}));
       if(ivs.some(v=>!(v.every>0))){setErr('Each interval needs its '+(f.unit==='km'?'km':'hours')+'.');return}
@@ -503,18 +523,20 @@ function PlanDialog({ctx,plan,onClose}){
     setBusy(true);const row={category:f.scope==='category'?f.cats[0]:null,asset_id:f.scope==='asset'?f.asset_id:null,name:f.name.trim(),
       every_hours:ivs?(f.unit==='hours'?ivs[0].every:null):n0(f.every_hours),every_km:ivs?(f.unit==='km'?ivs[0].every:null):n0(f.every_km),every_days:f.every_days===''?null:Math.round(+f.every_days),warn_hours:+f.warn_hours||0,warn_km:+f.warn_km||0,warn_days:Math.round(+f.warn_days||0),active:!!f.active};
     if(ivs||(plan&&plan.intervals))row.intervals=ivs;
+    if(f.scope==='machines')row.asset_ids=f.ids;else if(plan&&planIds(plan).length)row.asset_ids=null;
     if(f.scope==='category'&&(f.cats.length>1||(plan&&Array.isArray(plan.categories))))row.categories=f.cats;else if(plan&&Array.isArray(plan.categories))row.categories=null;
     const {error}=plan?await sb.from('service_plans').update(row).eq('id',plan.id):await sb.from('service_plans').insert(row);
-    setBusy(false);if(error){setErr(/intervals|categories/.test(errMsg(error))?'This needs a database update: an administrator needs to run supabase/service_intervals.sql.':errMsg(error));return}notify('Service plan saved');reload();onClose()};
+    setBusy(false);if(error){setErr(/intervals|categories|asset_ids|service_plans_scope/.test(errMsg(error))?'This needs a database update: an administrator needs to run supabase/service_intervals.sql.':errMsg(error));return}notify('Service plan saved');reload();onClose()};
   const machines=data.resources.filter(r=>r.type==='machine').sort((a,b)=>a.name.localeCompare(b.name));
   return html`<${Modal} title=${plan?'Edit service plan':'New service plan'} sub="A service due by engine hours, kilometres or time: whichever comes first" onClose=${onClose}
     foot=${html`${err&&html`<span class="text-[12.5px] mr-auto" style=${{color:'var(--bad)'}}>${err}</span>`}<span class="flex-1"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button id="pl2-save" type="button" class="btn btn-primary" disabled=${busy} onClick=${save}>Save plan</button>`}>
     <div class="grid sm:grid-cols-2 gap-3">
-      <${Fld} label="Applies to"><div class="seg w-max"><button type="button" aria-pressed=${f.scope==='category'} onClick=${()=>setF({...f,scope:'category'})}>A machine category</button><button type="button" aria-pressed=${f.scope==='asset'} onClick=${()=>setF({...f,scope:'asset'})}>One machine</button></div><//>
+      <${Fld} label="Applies to"><div class="seg w-max"><button type="button" aria-pressed=${f.scope==='category'} onClick=${()=>setF({...f,scope:'category'})}>A machine category</button><button type="button" aria-pressed=${f.scope==='asset'} onClick=${()=>setF({...f,scope:'asset'})}>One machine</button><button id="sp-scope-many" type="button" aria-pressed=${f.scope==='machines'} onClick=${()=>setF({...f,scope:'machines'})}>Several machines</button></div><//>
       ${f.scope==='category'?html`<div class="grid gap-1 min-w-0 sm:col-span-2"><span class="label">Categories <span class="normal-case font-normal tracking-normal text-muted">· pick one or more</span></span>
         <div class="flex flex-wrap gap-1.5" id="sp-cats">${[...new Set([...machineCatsOf(data),...f.cats])].map(c=>{const on=f.cats.some(x=>x.toLowerCase()===c.toLowerCase());
           return html`<button key=${c} type="button" aria-pressed=${on} class=${'sp-cat text-[12.5px] rounded-full border px-2.5 py-1 inline-flex items-center gap-1 '+(on?'font-semibold':'text-muted hover:text-ink')} style=${on?{background:'var(--accent-soft)',borderColor:'var(--accent)',color:'var(--accent)'}:{borderColor:'var(--line)'}}
             onClick=${()=>setF(x=>({...x,cats:on?x.cats.filter(y=>y.toLowerCase()!==c.toLowerCase()):[...x.cats,c]}))}>${on?'✓ ':''}${c}</button>`})}</div></div>`
+        :f.scope==='machines'?html`<${MachinePick} machines=${machines} ids=${f.ids} onChange=${ids=>setF(x=>({...x,ids}))}/>`
         :html`<${Fld} label="Machine"><select id="sp-asset" class="field" style=${fs} value=${f.asset_id} onChange=${e=>setF({...f,asset_id:e.target.value})}><option value="">Choose…</option>${machines.map(m=>html`<option key=${m.id} value=${m.id}>${m.name} · ${m.sub||''}</option>`)}</select><//>`}
       <${Fld} label=${f.multi?'Plan name':'Service name'} span=${true}><input id="sp-name" class="field" style=${fs} placeholder=${f.multi?'e.g. Roller service plan':'e.g. 250 hr service, Annual inspection'} value=${f.name} onInput=${e=>setF({...f,name:e.target.value})}/><//>
       <${Fld} label="Intervals" span=${true}><div class="seg w-max" id="sp-mode"><button type="button" aria-pressed=${!f.multi} onClick=${()=>setF({...f,multi:false})}>One interval</button><button id="sp-multi" type="button" aria-pressed=${!!f.multi} onClick=${startMulti}>Several (e.g. 250 / 500 / 750 / 1000 h)</button></div><//>
@@ -917,7 +939,7 @@ function AutoServices({ctx}){
 function Plans({ctx,open}){
   const {perms,data}=ctx;const [del,setDel]=useState(null);
   const plans=ctx.db.service_plans.slice().sort((a,b)=>(a.category||'~').localeCompare(b.category||'~')||a.name.localeCompare(b.name));
-  const covers=p=>p.asset_id?1:ctx.M.assets.filter(a=>!a.retired&&planCats(p).includes(machCatOf(a.m).toLowerCase())).length;
+  const covers=p=>p.asset_id?1:planIds(p).length?planIds(p).length:ctx.M.assets.filter(a=>!a.retired&&planCats(p).includes(machCatOf(a.m).toLowerCase())).length;
   const remove=async p=>{const {error}=await ctx.sb.from('service_plans').delete().eq('id',p.id);setDel(null);if(error){ctx.notify(errMsg(error));return}ctx.notify('Service plan removed');ctx.reload()};
   return html`<section class="panel flex flex-col min-h-0">
     <div class="px-3 pt-3 pb-2 flex flex-wrap items-center gap-2 border-b border-line"><div class="text-[12.5px] text-muted">Each machine follows the plans for its category, plus any plans set for that machine alone. Default warnings: 50 h, 1,000 km, 14 days.</div>
@@ -926,7 +948,7 @@ function Plans({ctx,open}){
     <div class="overflow-x-auto"><table class="w-full text-[12.5px]" id="sp-table">
       <thead><tr class="text-left">${['Applies to','Service','Every','Warn before','Machines','',''].map((h,i)=>html`<th key=${i} class="label font-normal py-2 px-3 whitespace-nowrap">${h}</th>`)}</tr></thead>
       <tbody>${plans.map(p=>{const m=p.asset_id&&data.resources.find(r=>r.id===p.asset_id);return html`<tr key=${p.id} class="border-t border-line" style=${p.active?null:{opacity:.55}}>
-          <td class="py-2 px-3 whitespace-nowrap">${p.asset_id?html`<span class="font-medium">${m?m.name:p.asset_id}</span> <span class="text-muted">(one machine)</span>`:html`<span class="font-medium">${planCatList(p).join(', ')}</span>`}</td>
+          <td class="py-2 px-3 whitespace-nowrap">${planIds(p).length?html`<span class="font-medium" title=${planIds(p).map(id=>(data.resources.find(r=>r.id===id)||{}).name||id).join(', ')}>${planIds(p).length} machines</span> <span class="text-muted">(picked)</span>`:p.asset_id?html`<span class="font-medium">${m?m.name:p.asset_id}</span> <span class="text-muted">(one machine)</span>`:html`<span class="font-medium">${planCatList(p).join(', ')}</span>`}</td>
           <td class="py-2 px-3">${p.name}${!p.active?html` <span class="text-[11px] text-muted">(off)</span>`:''}</td>
           <td class="py-2 px-3 whitespace-nowrap">${ivTxt(p)?[ivTxt(p),p.every_days&&`${p.every_days} days`].filter(Boolean).join(' or '):[p.every_hours&&`${fmtN(+p.every_hours)} h`,p.every_km&&`${fmtN(+p.every_km)} km`,p.every_days&&`${p.every_days} days`].filter(Boolean).join(' / ')}</td>
           <td class="py-2 px-3 whitespace-nowrap text-muted">${[p.every_hours&&`${fmtN(+p.warn_hours)} h`,p.every_km&&`${fmtN(+p.warn_km)} km`,p.every_days&&`${p.warn_days} days`].filter(Boolean).join(' / ')}</td>

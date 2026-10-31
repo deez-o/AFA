@@ -4170,11 +4170,17 @@ const xDate=v=>{const m=/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/.exec(String(v||'').tr
    (its work order completed) the next one is due a year after that. Returns 'added', 'kept' or throws. */
 async function ensureCoiPlan(sb,id,due){
   if(!due)return null;
-  const {data:pl,error:e1}=await sb.from('service_plans').select('id').eq('asset_id',id).ilike('name','COI%').limit(1);if(e1)throw e1;
-  let pid=pl&&pl[0]&&pl[0].id,made=false;
-  if(!pid){const {data,error}=await sb.from('service_plans').insert({asset_id:id,name:'COI inspection',every_days:365,warn_days:30}).select('id').single();if(error)throw error;pid=data.id;made=true}
-  const {data:rec,error:e2}=await sb.from('service_records').select('id').eq('asset_id',id).eq('plan_id',pid).limit(1);if(e2)throw e2;
-  if(!rec||!rec.length){const {error}=await sb.from('service_records').insert({asset_id:id,plan_id:pid,service_type:'COI inspection',done_on:iso(addDays(parse(due),-365)),baseline:true,notes:`Starting point: COI due ${due}`});if(error)throw error;made=true}
+  const {data:pl,error:e1}=await sb.from('service_plans').select('*').ilike('name','COI%');if(e1)throw e1;
+  /* one "COI inspection" plan for all the machines that need one (supabase/service_intervals.sql); a machine is added to it */
+  let p=(pl||[]).find(x=>x.asset_id===id||(Array.isArray(x.asset_ids)&&x.asset_ids.includes(id)));let made=false;
+  if(!p){const bundle=(pl||[]).find(x=>Array.isArray(x.asset_ids));
+    if(bundle){const {error}=await sb.from('service_plans').update({asset_ids:[...bundle.asset_ids,id]}).eq('id',bundle.id);if(error)throw error;p=bundle}
+    else{let r=await sb.from('service_plans').insert({asset_ids:[id],name:'COI inspection',every_days:365,warn_days:30}).select('id').single();
+      if(r.error&&/asset_ids|scope/.test(r.error.message||''))r=await sb.from('service_plans').insert({asset_id:id,name:'COI inspection',every_days:365,warn_days:30}).select('id').single();   /* before the database update */
+      if(r.error)throw r.error;p=r.data}
+    made=true}
+  const {data:rec,error:e2}=await sb.from('service_records').select('id').eq('asset_id',id).eq('plan_id',p.id).limit(1);if(e2)throw e2;
+  if(!rec||!rec.length){const {error}=await sb.from('service_records').insert({asset_id:id,plan_id:p.id,service_type:'COI inspection',done_on:iso(addDays(parse(due),-365)),baseline:true,notes:`Starting point: COI due ${due}`});if(error)throw error;made=true}
   return made?'added':'kept'}
 window.ensureCoiPlan=ensureCoiPlan;
 async function importMachineExtras(sb,getData,list){
